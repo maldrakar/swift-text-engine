@@ -11,6 +11,7 @@ struct BenchmarkScenario {
 
 struct BenchmarkSummary {
     let scenarioName: String
+    let operationsPerSample: Int
     let p95Nanoseconds: Int64
     let p99Nanoseconds: Int64
     let checksum: Int
@@ -32,7 +33,11 @@ func percentile(_ sortedSamples: [Int64], numerator: Int, denominator: Int) -> I
 
 @inline(never)
 @available(macOS 13.0, *)
-func runScenario(_ scenario: BenchmarkScenario, iterations: Int) -> BenchmarkSummary {
+func runScenario(
+    _ scenario: BenchmarkScenario,
+    iterations: Int,
+    operationsPerSample: Int
+) -> BenchmarkSummary {
     let clock = ContinuousClock()
     var samples: [Int64] = []
     samples.reserveCapacity(iterations)
@@ -43,38 +48,41 @@ func runScenario(_ scenario: BenchmarkScenario, iterations: Int) -> BenchmarkSum
         : 0.0
 
     for iteration in 0..<iterations {
-        let fraction = Double((iteration * 37) % 1_000) / 1_000.0
-        let offset = maxOffset * fraction
-        let input = ViewportInput(
-            lineCount: scenario.lineCount,
-            lineHeight: scenario.lineHeight,
-            scrollOffsetY: offset,
-            viewportHeight: scenario.viewportHeight,
-            overscanLinesBefore: scenario.overscanBefore,
-            overscanLinesAfter: scenario.overscanAfter
-        )
-
         let start = clock.now
-        let result = ViewportVirtualizer.compute(input)
+        for operation in 0..<operationsPerSample {
+            let sample = iteration * operationsPerSample + operation
+            let fraction = Double((sample * 37) % 1_000) / 1_000.0
+            let offset = maxOffset * fraction
+            let input = ViewportInput(
+                lineCount: scenario.lineCount,
+                lineHeight: scenario.lineHeight,
+                scrollOffsetY: offset,
+                viewportHeight: scenario.viewportHeight,
+                overscanLinesBefore: scenario.overscanBefore,
+                overscanLinesAfter: scenario.overscanAfter
+            )
+            let result = ViewportVirtualizer.compute(input)
+
+            switch result {
+            case let .success(range):
+                checksum &+= range.visibleStart
+                checksum &+= range.visibleEndExclusive
+                checksum &+= range.bufferStart
+                checksum &+= range.bufferEndExclusive
+            case .failure:
+                checksum &-= 1
+            }
+        }
         let elapsed = start.duration(to: clock.now)
 
-        switch result {
-        case let .success(range):
-            checksum &+= range.visibleStart
-            checksum &+= range.visibleEndExclusive
-            checksum &+= range.bufferStart
-            checksum &+= range.bufferEndExclusive
-        case .failure:
-            checksum &-= 1
-        }
-
-        samples.append(nanoseconds(elapsed))
+        samples.append(nanoseconds(elapsed) / Int64(operationsPerSample))
     }
 
     samples.sort()
 
     return BenchmarkSummary(
         scenarioName: scenario.name,
+        operationsPerSample: operationsPerSample,
         p95Nanoseconds: percentile(samples, numerator: 95, denominator: 100),
         p99Nanoseconds: percentile(samples, numerator: 99, denominator: 100),
         checksum: checksum
@@ -111,11 +119,16 @@ func runBenchmarks() {
     ]
 
     let iterations = 10_000
+    let operationsPerSample = 256
 
     for scenario in scenarios {
-        let summary = runScenario(scenario, iterations: iterations)
+        let summary = runScenario(
+            scenario,
+            iterations: iterations,
+            operationsPerSample: operationsPerSample
+        )
         print(
-            "scenario=\(summary.scenarioName) iterations=\(iterations) p95_ns=\(summary.p95Nanoseconds) p99_ns=\(summary.p99Nanoseconds) checksum=\(summary.checksum)"
+            "scenario=\(summary.scenarioName) iterations=\(iterations) operations_per_sample=\(summary.operationsPerSample) p95_ns=\(summary.p95Nanoseconds) p99_ns=\(summary.p99Nanoseconds) checksum=\(summary.checksum)"
         )
     }
 }
