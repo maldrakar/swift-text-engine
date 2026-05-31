@@ -10,7 +10,7 @@ Date: 2026-05-31
 
 ## Benchmark Output
 
-This is the exact stdout from the verification run recorded for this commit; latency values are sample-specific.
+This is the exact benchmark executable output from the verification run used to update this record; latency values are sample-specific.
 
 ```text
 scenario=1k_lines_20_visible_overscan_0 iterations=10000 operations_per_sample=256 p95_ns=9 p99_ns=10 checksum=5114982400
