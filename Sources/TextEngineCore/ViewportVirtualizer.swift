@@ -26,11 +26,11 @@ public enum ViewportVirtualizer {
             viewportHeight: input.viewportHeight
         )
         let visibleStart = clampedIndex(
-            Int((effectiveOffsetY / input.lineHeight).rounded(.down)),
+            (effectiveOffsetY / input.lineHeight).rounded(.down),
             lineCount: input.lineCount
         )
         let visibleEndExclusive = clampedIndex(
-            Int(((effectiveOffsetY + input.viewportHeight) / input.lineHeight).rounded(.up)),
+            ((effectiveOffsetY + input.viewportHeight) / input.lineHeight).rounded(.up),
             lineCount: input.lineCount
         )
         let maxOffsetY = maximumScrollOffsetY(
@@ -95,13 +95,13 @@ public enum ViewportVirtualizer {
         return maxOffsetY
     }
 
-    private static func clampedIndex(_ index: Int, lineCount: Int) -> Int {
-        if index < 0 {
+    private static func clampedIndex(_ candidate: Double, lineCount: Int) -> Int {
+        if candidate <= 0.0 {
             return 0
         }
-        if index > lineCount {
+        if candidate >= Double(lineCount) {
             return lineCount
         }
-        return index
+        return Int(candidate)
     }
 }
