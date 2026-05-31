@@ -27,6 +27,83 @@ final class ViewportRangeTests: XCTestCase {
         )
     }
 
+    func testFractionalLineHeightEndBoundaryDoesNotIncludeNextLine() {
+        let lineHeight = 0.1
+        let input = ViewportInput(
+            lineCount: 10,
+            lineHeight: lineHeight,
+            scrollOffsetY: 0.0,
+            viewportHeight: lineHeight * 3,
+            overscanLinesBefore: 0,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input),
+            .success(
+                VirtualRange(
+                    visibleStart: 0,
+                    visibleEndExclusive: 3,
+                    bufferStart: 0,
+                    bufferEndExclusive: 3,
+                    isAtTop: true,
+                    isAtBottom: false
+                )
+            )
+        )
+    }
+
+    func testFractionalLineHeightStartBoundaryBeginsAtExactLine() {
+        let lineHeight = 0.1
+        let input = ViewportInput(
+            lineCount: 10,
+            lineHeight: lineHeight,
+            scrollOffsetY: lineHeight * 3,
+            viewportHeight: lineHeight * 2,
+            overscanLinesBefore: 0,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input),
+            .success(
+                VirtualRange(
+                    visibleStart: 3,
+                    visibleEndExclusive: 5,
+                    bufferStart: 3,
+                    bufferEndExclusive: 5,
+                    isAtTop: false,
+                    isAtBottom: false
+                )
+            )
+        )
+    }
+
+    func testFractionalLineHeightSublineOffsetIncludesPartialLines() {
+        let input = ViewportInput(
+            lineCount: 10,
+            lineHeight: 0.1,
+            scrollOffsetY: 0.05,
+            viewportHeight: 0.2,
+            overscanLinesBefore: 0,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input),
+            .success(
+                VirtualRange(
+                    visibleStart: 0,
+                    visibleEndExclusive: 3,
+                    bufferStart: 0,
+                    bufferEndExclusive: 3,
+                    isAtTop: false,
+                    isAtBottom: false
+                )
+            )
+        )
+    }
+
     func testNegativeScrollOffsetClampsToTop() {
         let input = ViewportInput(
             lineCount: 100,
