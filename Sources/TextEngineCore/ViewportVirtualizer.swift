@@ -122,7 +122,8 @@ public enum ViewportVirtualizer {
 
     private static func snappedIntegerQuotient(_ quotient: Double) -> Double {
         let nearest = quotient.rounded()
-        let tolerance = Double.ulpOfOne * max(1.0, abs(quotient)) * 8.0
+        let scaledTolerance = Double.ulpOfOne * max(1.0, abs(quotient)) * 8.0
+        let tolerance = min(scaledTolerance, 1e-9)
         if abs(quotient - nearest) <= tolerance {
             return nearest
         }
