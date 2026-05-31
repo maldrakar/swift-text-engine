@@ -13,27 +13,92 @@ public enum ViewportVirtualizer {
             return .failure(.negativeOverscan)
         }
         if input.lineCount == 0 {
-            return .success(
-                VirtualRange(
-                    visibleStart: 0,
-                    visibleEndExclusive: 0,
-                    bufferStart: 0,
-                    bufferEndExclusive: 0,
-                    isAtTop: true,
-                    isAtBottom: true
-                )
-            )
+            return .success(emptyRange())
         }
+
+        let effectiveOffsetY = clampedScrollOffsetY(
+            scrollOffsetY: input.scrollOffsetY,
+            lineCount: input.lineCount,
+            lineHeight: input.lineHeight,
+            viewportHeight: input.viewportHeight
+        )
+        let visibleStart = clampedIndex(
+            Int((effectiveOffsetY / input.lineHeight).rounded(.down)),
+            lineCount: input.lineCount
+        )
+        let visibleEndExclusive = clampedIndex(
+            Int(((effectiveOffsetY + input.viewportHeight) / input.lineHeight).rounded(.up)),
+            lineCount: input.lineCount
+        )
+        let maxOffsetY = maximumScrollOffsetY(
+            lineCount: input.lineCount,
+            lineHeight: input.lineHeight,
+            viewportHeight: input.viewportHeight
+        )
 
         return .success(
             VirtualRange(
-                visibleStart: 0,
-                visibleEndExclusive: 0,
-                bufferStart: 0,
-                bufferEndExclusive: 0,
-                isAtTop: true,
-                isAtBottom: false
+                visibleStart: visibleStart,
+                visibleEndExclusive: visibleEndExclusive,
+                bufferStart: visibleStart,
+                bufferEndExclusive: visibleEndExclusive,
+                isAtTop: effectiveOffsetY == 0.0,
+                isAtBottom: effectiveOffsetY == maxOffsetY
             )
         )
+    }
+
+    private static func emptyRange() -> VirtualRange {
+        VirtualRange(
+            visibleStart: 0,
+            visibleEndExclusive: 0,
+            bufferStart: 0,
+            bufferEndExclusive: 0,
+            isAtTop: true,
+            isAtBottom: true
+        )
+    }
+
+    private static func clampedScrollOffsetY(
+        scrollOffsetY: Double,
+        lineCount: Int,
+        lineHeight: Double,
+        viewportHeight: Double
+    ) -> Double {
+        let maxOffsetY = maximumScrollOffsetY(
+            lineCount: lineCount,
+            lineHeight: lineHeight,
+            viewportHeight: viewportHeight
+        )
+        if scrollOffsetY < 0.0 {
+            return 0.0
+        }
+        if scrollOffsetY > maxOffsetY {
+            return maxOffsetY
+        }
+        return scrollOffsetY
+    }
+
+    private static func maximumScrollOffsetY(
+        lineCount: Int,
+        lineHeight: Double,
+        viewportHeight: Double
+    ) -> Double {
+        let documentHeight = Double(lineCount) * lineHeight
+        let maxOffsetY = documentHeight - viewportHeight
+        if maxOffsetY < 0.0 {
+            return 0.0
+        }
+        return maxOffsetY
+    }
+
+    private static func clampedIndex(_ index: Int, lineCount: Int) -> Int {
+        if index < 0 {
+            return 0
+        }
+        if index > lineCount {
+            return lineCount
+        }
+        return index
     }
 }
