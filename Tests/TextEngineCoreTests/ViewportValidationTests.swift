@@ -16,7 +16,7 @@ final class ViewportValidationTests: XCTestCase {
     }
 
     func testNonPositiveLineHeightFails() {
-        let input = ViewportInput(
+        let zeroInput = ViewportInput(
             lineCount: 10,
             lineHeight: 0.0,
             scrollOffsetY: 0.0,
@@ -24,8 +24,17 @@ final class ViewportValidationTests: XCTestCase {
             overscanLinesBefore: 0,
             overscanLinesAfter: 0
         )
+        let negativeInput = ViewportInput(
+            lineCount: 10,
+            lineHeight: -1.0,
+            scrollOffsetY: 0.0,
+            viewportHeight: 50.0,
+            overscanLinesBefore: 0,
+            overscanLinesAfter: 0
+        )
 
-        XCTAssertEqual(ViewportVirtualizer.compute(input), .failure(.nonPositiveLineHeight))
+        XCTAssertEqual(ViewportVirtualizer.compute(zeroInput), .failure(.nonPositiveLineHeight))
+        XCTAssertEqual(ViewportVirtualizer.compute(negativeInput), .failure(.nonPositiveLineHeight))
     }
 
     func testNegativeViewportHeightFails() {
