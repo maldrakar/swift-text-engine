@@ -38,13 +38,21 @@ public enum ViewportVirtualizer {
             lineHeight: input.lineHeight,
             viewportHeight: input.viewportHeight
         )
+        let bufferStart = clampedIndex(
+            Double(visibleStart) - Double(input.overscanLinesBefore),
+            lineCount: input.lineCount
+        )
+        let bufferEndExclusive = clampedIndex(
+            Double(visibleEndExclusive) + Double(input.overscanLinesAfter),
+            lineCount: input.lineCount
+        )
 
         return .success(
             VirtualRange(
                 visibleStart: visibleStart,
                 visibleEndExclusive: visibleEndExclusive,
-                bufferStart: visibleStart,
-                bufferEndExclusive: visibleEndExclusive,
+                bufferStart: bufferStart,
+                bufferEndExclusive: bufferEndExclusive,
                 isAtTop: effectiveOffsetY == 0.0,
                 isAtBottom: effectiveOffsetY == maxOffsetY
             )
