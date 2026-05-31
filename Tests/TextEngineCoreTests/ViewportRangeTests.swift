@@ -104,6 +104,32 @@ final class ViewportRangeTests: XCTestCase {
         )
     }
 
+    func testLargeFractionalOffsetDoesNotSnapToBoundary() {
+        let baseLine = 1_000_000_000_000_000
+        let input = ViewportInput(
+            lineCount: baseLine + 10,
+            lineHeight: 1.0,
+            scrollOffsetY: Double(baseLine) + 0.75,
+            viewportHeight: 2.0,
+            overscanLinesBefore: 0,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input),
+            .success(
+                VirtualRange(
+                    visibleStart: baseLine,
+                    visibleEndExclusive: baseLine + 3,
+                    bufferStart: baseLine,
+                    bufferEndExclusive: baseLine + 3,
+                    isAtTop: false,
+                    isAtBottom: false
+                )
+            )
+        )
+    }
+
     func testNegativeScrollOffsetClampsToTop() {
         let input = ViewportInput(
             lineCount: 100,
