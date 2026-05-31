@@ -25,12 +25,16 @@ public enum ViewportVirtualizer {
             lineHeight: input.lineHeight,
             viewportHeight: input.viewportHeight
         )
+        let visibleStartQuotient = snappedIntegerQuotient(effectiveOffsetY / input.lineHeight)
+        let visibleEndExclusiveQuotient = snappedIntegerQuotient(
+            (effectiveOffsetY + input.viewportHeight) / input.lineHeight
+        )
         let visibleStart = clampedIndex(
-            (effectiveOffsetY / input.lineHeight).rounded(.down),
+            visibleStartQuotient.rounded(.down),
             lineCount: input.lineCount
         )
         let visibleEndExclusive = clampedIndex(
-            ((effectiveOffsetY + input.viewportHeight) / input.lineHeight).rounded(.up),
+            visibleEndExclusiveQuotient.rounded(.up),
             lineCount: input.lineCount
         )
         let maxOffsetY = maximumScrollOffsetY(
@@ -114,5 +118,14 @@ public enum ViewportVirtualizer {
             return lineCount
         }
         return Int(candidate)
+    }
+
+    private static func snappedIntegerQuotient(_ quotient: Double) -> Double {
+        let nearest = quotient.rounded()
+        let tolerance = Double.ulpOfOne * max(1.0, abs(quotient)) * 8.0
+        if abs(quotient - nearest) <= tolerance {
+            return nearest
+        }
+        return quotient
     }
 }
