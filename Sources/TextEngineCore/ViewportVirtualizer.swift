@@ -3,6 +3,9 @@ public enum ViewportVirtualizer {
         if input.lineCount < 0 {
             return .failure(.negativeLineCount)
         }
+        if !input.lineHeight.isFinite || !input.scrollOffsetY.isFinite || !input.viewportHeight.isFinite {
+            return .failure(.nonFiniteValue)
+        }
         if input.lineHeight <= 0.0 {
             return .failure(.nonPositiveLineHeight)
         }

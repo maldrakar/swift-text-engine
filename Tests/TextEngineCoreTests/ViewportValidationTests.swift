@@ -72,6 +72,45 @@ final class ViewportValidationTests: XCTestCase {
         XCTAssertEqual(ViewportVirtualizer.compute(afterInput), .failure(.negativeOverscan))
     }
 
+    func testNonFiniteLineHeightFails() {
+        let input = ViewportInput(
+            lineCount: 10,
+            lineHeight: Double.nan,
+            scrollOffsetY: 0.0,
+            viewportHeight: 50.0,
+            overscanLinesBefore: 0,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(ViewportVirtualizer.compute(input), .failure(.nonFiniteValue))
+    }
+
+    func testNonFiniteViewportHeightFails() {
+        let input = ViewportInput(
+            lineCount: 10,
+            lineHeight: 10.0,
+            scrollOffsetY: 0.0,
+            viewportHeight: Double.infinity,
+            overscanLinesBefore: 0,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(ViewportVirtualizer.compute(input), .failure(.nonFiniteValue))
+    }
+
+    func testNonFiniteScrollOffsetYFails() {
+        let input = ViewportInput(
+            lineCount: 10,
+            lineHeight: 10.0,
+            scrollOffsetY: -Double.infinity,
+            viewportHeight: 50.0,
+            overscanLinesBefore: 0,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(ViewportVirtualizer.compute(input), .failure(.nonFiniteValue))
+    }
+
     func testEmptyDocumentReturnsEmptyRange() {
         let input = ViewportInput(
             lineCount: 0,
