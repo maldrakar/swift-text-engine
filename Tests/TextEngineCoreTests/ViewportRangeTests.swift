@@ -104,6 +104,56 @@ final class ViewportRangeTests: XCTestCase {
         )
     }
 
+    func testLargeEndPartialLineDoesNotSnapDownToBoundary() {
+        let input = ViewportInput(
+            lineCount: 1_000_010,
+            lineHeight: 1.0,
+            scrollOffsetY: 1_000_000.0,
+            viewportHeight: 3.0000000005,
+            overscanLinesBefore: 0,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input),
+            .success(
+                VirtualRange(
+                    visibleStart: 1_000_000,
+                    visibleEndExclusive: 1_000_004,
+                    bufferStart: 1_000_000,
+                    bufferEndExclusive: 1_000_004,
+                    isAtTop: false,
+                    isAtBottom: false
+                )
+            )
+        )
+    }
+
+    func testLargeStartPartialLineDoesNotSnapUpToBoundary() {
+        let input = ViewportInput(
+            lineCount: 1_000_010,
+            lineHeight: 1.0,
+            scrollOffsetY: 1_000_000.9999999995,
+            viewportHeight: 2.0,
+            overscanLinesBefore: 0,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input),
+            .success(
+                VirtualRange(
+                    visibleStart: 1_000_000,
+                    visibleEndExclusive: 1_000_003,
+                    bufferStart: 1_000_000,
+                    bufferEndExclusive: 1_000_003,
+                    isAtTop: false,
+                    isAtBottom: false
+                )
+            )
+        )
+    }
+
     func testLargeFractionalOffsetDoesNotSnapToBoundary() {
         let baseLine = 1_000_000_000_000_000
         let input = ViewportInput(
