@@ -101,4 +101,29 @@ final class ViewportRangeTests: XCTestCase {
             )
         )
     }
+
+    func testFiniteExtremeOffsetClampsIndexBeforeIntConversion() {
+        let input = ViewportInput(
+            lineCount: Int.max,
+            lineHeight: 1.0,
+            scrollOffsetY: Double(Int.max),
+            viewportHeight: 0.0,
+            overscanLinesBefore: 0,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input),
+            .success(
+                VirtualRange(
+                    visibleStart: Int.max,
+                    visibleEndExclusive: Int.max,
+                    bufferStart: Int.max,
+                    bufferEndExclusive: Int.max,
+                    isAtTop: false,
+                    isAtBottom: true
+                )
+            )
+        )
+    }
 }
