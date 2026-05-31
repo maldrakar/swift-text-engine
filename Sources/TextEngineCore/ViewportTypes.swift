@@ -66,6 +66,7 @@ public struct LineGeometry: Equatable {
 
 public enum ViewportValidationError: Equatable {
     case negativeLineCount
+    case nonFiniteValue
     case nonPositiveLineHeight
     case negativeViewportHeight
     case negativeOverscan
