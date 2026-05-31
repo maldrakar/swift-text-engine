@@ -74,6 +74,56 @@ final class ViewportOverscanInvariantTests: XCTestCase {
         )
     }
 
+    func testOverscanPreservesPrecisionNearIntMax() {
+        let input = ViewportInput(
+            lineCount: Int.max,
+            lineHeight: 1.0,
+            scrollOffsetY: Double(Int.max),
+            viewportHeight: 0.0,
+            overscanLinesBefore: 1,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input),
+            .success(
+                VirtualRange(
+                    visibleStart: Int.max,
+                    visibleEndExclusive: Int.max,
+                    bufferStart: Int.max - 1,
+                    bufferEndExclusive: Int.max,
+                    isAtTop: false,
+                    isAtBottom: true
+                )
+            )
+        )
+    }
+
+    func testOverscanBeforeClampsToZeroWithIntegerMath() {
+        let input = ViewportInput(
+            lineCount: Int.max,
+            lineHeight: 1.0,
+            scrollOffsetY: 2.0,
+            viewportHeight: 0.0,
+            overscanLinesBefore: 3,
+            overscanLinesAfter: 0
+        )
+
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input),
+            .success(
+                VirtualRange(
+                    visibleStart: 2,
+                    visibleEndExclusive: 2,
+                    bufferStart: 0,
+                    bufferEndExclusive: 2,
+                    isAtTop: false,
+                    isAtBottom: false
+                )
+            )
+        )
+    }
+
     func testGeneratedInputsStayInBounds() {
         let lineCounts = [0, 1, 2, 10, 100_000, 1_000_000]
         let lineHeights = [1.0, 10.0, 17.5]
