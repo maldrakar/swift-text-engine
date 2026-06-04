@@ -4,6 +4,7 @@ import TextEngineCore
 enum BenchmarkMode {
     case pipeline
     case rangeOnly
+    case realisticProvider
 
     var outputName: String {
         switch self {
@@ -11,6 +12,8 @@ enum BenchmarkMode {
             return "pipeline"
         case .rangeOnly:
             return "range_only"
+        case .realisticProvider:
+            return "realistic_provider"
         }
     }
 }
@@ -26,12 +29,13 @@ struct BenchmarkOptions {
     let enforceGate: Bool
 
     static let usage = """
-    Usage: ViewportBenchmarks [--range-only] [--gate] [--help]
+    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--help]
 
     Options:
-      --range-only   Run only viewport range recompute benchmark.
-      --gate         Enforce pipeline p95/p99 budgets and exit non-zero on failure.
-      --help         Print this help.
+      --range-only          Run only viewport range recompute benchmark.
+      --gate                Enforce synthetic pipeline p95/p99 budgets and exit non-zero on failure.
+      --realistic-provider  Run large-text provider benchmark without gate enforcement.
+      --help                Print this help.
     """
 
     static func parse(_ arguments: [String]) -> BenchmarkOptionParse {
@@ -45,9 +49,17 @@ struct BenchmarkOptions {
             case "--help":
                 return .help
             case "--range-only":
+                if mode == .realisticProvider {
+                    return .failure("--range-only cannot be combined with --realistic-provider")
+                }
                 mode = .rangeOnly
             case "--gate":
                 enforceGate = true
+            case "--realistic-provider":
+                if mode == .rangeOnly {
+                    return .failure("--realistic-provider cannot be combined with --range-only")
+                }
+                mode = .realisticProvider
             default:
                 return .failure("unknown argument \(argument)")
             }
@@ -55,6 +67,9 @@ struct BenchmarkOptions {
 
         if mode == .rangeOnly && enforceGate {
             return .failure("--range-only cannot be combined with --gate")
+        }
+        if mode == .realisticProvider && enforceGate {
+            return .failure("--realistic-provider cannot be combined with --gate")
         }
 
         return .run(BenchmarkOptions(mode: mode, enforceGate: enforceGate))
@@ -72,20 +87,38 @@ struct BenchmarkScenario {
     let p99BudgetNanoseconds: Int64
 }
 
+struct RealisticProviderScenario {
+    let name: String
+    let lineCount: Int
+    let lineBytes: Int
+    let lineHeight: Double
+    let viewportHeight: Double
+    let overscanBefore: Int
+    let overscanAfter: Int
+}
+
 struct BenchmarkSummary {
     let mode: BenchmarkMode
+    let providerName: String?
     let scenarioName: String
     let iterations: Int
     let operationsPerSample: Int
+    let lineCount: Int?
+    let documentBytes: Int?
+    let lineBytes: Int?
     let p95Nanoseconds: Int64
     let p99Nanoseconds: Int64
     let checksum: Int
     let failureCount: Int
-    let p95BudgetNanoseconds: Int64
-    let p99BudgetNanoseconds: Int64
+    let p95BudgetNanoseconds: Int64?
+    let p99BudgetNanoseconds: Int64?
 
     var passesGate: Bool {
-        failureCount == 0
+        guard let p95BudgetNanoseconds, let p99BudgetNanoseconds else {
+            return false
+        }
+
+        return failureCount == 0
             && p95Nanoseconds <= p95BudgetNanoseconds
             && p99Nanoseconds <= p99BudgetNanoseconds
     }
@@ -110,6 +143,86 @@ struct SyntheticLineSource: DocumentLineSource {
     }
 }
 
+struct RealisticLinePayload {
+    let byteOffset: Int
+    let byteLength: Int
+    let firstByte: Int
+    let middleByte: Int
+    let lastByte: Int
+}
+
+final class RealisticDocumentStorage {
+    let lineCount: Int
+    let lineBytes: Int
+    private let bytes: [UInt8]
+
+    var documentBytes: Int {
+        bytes.count
+    }
+
+    init(lineCount: Int, lineBytes: Int) {
+        precondition(lineCount > 0)
+        precondition(lineBytes >= 8)
+
+        self.lineCount = lineCount
+        self.lineBytes = lineBytes
+        self.bytes = RealisticDocumentStorage.makeBytes(lineCount: lineCount, lineBytes: lineBytes)
+    }
+
+    func payload(at index: Int) -> RealisticLinePayload? {
+        if index < 0 || index >= lineCount {
+            return nil
+        }
+
+        let byteOffset = index * lineBytes
+        let middleOffset = byteOffset + lineBytes / 2
+        let lastOffset = byteOffset + lineBytes - 1
+
+        return RealisticLinePayload(
+            byteOffset: byteOffset,
+            byteLength: lineBytes,
+            firstByte: Int(bytes[byteOffset]),
+            middleByte: Int(bytes[middleOffset]),
+            lastByte: Int(bytes[lastOffset])
+        )
+    }
+
+    private static func makeBytes(lineCount: Int, lineBytes: Int) -> [UInt8] {
+        var result: [UInt8] = []
+        result.reserveCapacity(lineCount * lineBytes)
+
+        for lineIndex in 0..<lineCount {
+            for column in 0..<lineBytes {
+                if column == lineBytes - 1 {
+                    result.append(10)
+                } else {
+                    result.append(UInt8(65 + ((lineIndex &+ column) % 26)))
+                }
+            }
+        }
+
+        return result
+    }
+}
+
+struct RealisticLineSource: DocumentLineSource {
+    typealias Line = RealisticLinePayload
+
+    let storage: RealisticDocumentStorage
+
+    var lineCount: Int {
+        storage.lineCount
+    }
+
+    func line(at index: Int) -> DocumentLineFetch<RealisticLinePayload> {
+        guard let payload = storage.payload(at: index) else {
+            return .missing
+        }
+
+        return .found(payload)
+    }
+}
+
 @available(macOS 13.0, *)
 func nanoseconds(_ duration: Duration) -> Int64 {
     let components = duration.components
@@ -123,6 +236,11 @@ func percentile(_ sortedSamples: [Int64], numerator: Int, denominator: Int) -> I
 
     let index = (sortedSamples.count - 1) * numerator / denominator
     return sortedSamples[index]
+}
+
+func deterministicScrollOffset(sample: Int, maxOffset: Double) -> Double {
+    let fraction = Double((sample * 37) % 1_000) / 1_000.0
+    return maxOffset * fraction
 }
 
 func benchmarkScenarios() -> [BenchmarkScenario] {
@@ -160,6 +278,20 @@ func benchmarkScenarios() -> [BenchmarkScenario] {
     ]
 }
 
+func realisticProviderScenarios() -> [RealisticProviderScenario] {
+    [
+        RealisticProviderScenario(
+            name: "100k_lines_10mb_text",
+            lineCount: 100_000,
+            lineBytes: 112,
+            lineHeight: 16.0,
+            viewportHeight: 80.0 * 16.0,
+            overscanBefore: 5,
+            overscanAfter: 5
+        )
+    ]
+}
+
 @inline(never)
 func runRangeOnlyOperation(input: ViewportInput) -> BenchmarkOperationResult {
     switch ViewportVirtualizer.compute(input) {
@@ -176,9 +308,10 @@ func runRangeOnlyOperation(input: ViewportInput) -> BenchmarkOperationResult {
 }
 
 @inline(never)
-func runPipelineOperation(
+func runProviderOperation<Source: DocumentLineSource>(
     input: ViewportInput,
-    source: SyntheticLineSource
+    source: Source,
+    foldLineContent: (inout Int, Source.Line) -> Void
 ) -> BenchmarkOperationResult {
     switch ViewportVirtualizer.compute(input) {
     case let .success(range):
@@ -202,7 +335,7 @@ func runPipelineOperation(
             switch element {
             case let .line(line):
                 checksum &+= line.index
-                checksum &+= line.content
+                foldLineContent(&checksum, line.content)
             case let .missing(index):
                 checksum &-= index
                 failureCount &+= 1
@@ -212,6 +345,30 @@ func runPipelineOperation(
         return BenchmarkOperationResult(checksum: checksum, failureCount: failureCount)
     case .failure:
         return BenchmarkOperationResult(checksum: -1, failureCount: 1)
+    }
+}
+
+@inline(never)
+func runPipelineOperation(
+    input: ViewportInput,
+    source: SyntheticLineSource
+) -> BenchmarkOperationResult {
+    runProviderOperation(input: input, source: source) { checksum, content in
+        checksum &+= content
+    }
+}
+
+@inline(never)
+func runRealisticProviderOperation(
+    input: ViewportInput,
+    source: RealisticLineSource
+) -> BenchmarkOperationResult {
+    runProviderOperation(input: input, source: source) { checksum, content in
+        checksum &+= content.byteOffset
+        checksum &+= content.byteLength
+        checksum &+= content.firstByte
+        checksum &+= content.middleByte
+        checksum &+= content.lastByte
     }
 }
 
@@ -238,8 +395,7 @@ func runScenario(
         let start = clock.now
         for operation in 0..<operationsPerSample {
             let sample = iteration * operationsPerSample + operation
-            let fraction = Double((sample * 37) % 1_000) / 1_000.0
-            let offset = maxOffset * fraction
+            let offset = deterministicScrollOffset(sample: sample, maxOffset: maxOffset)
             let input = ViewportInput(
                 lineCount: scenario.lineCount,
                 lineHeight: scenario.lineHeight,
@@ -255,6 +411,8 @@ func runScenario(
                 operationResult = runPipelineOperation(input: input, source: source)
             case .rangeOnly:
                 operationResult = runRangeOnlyOperation(input: input)
+            case .realisticProvider:
+                preconditionFailure("realistic provider mode uses runRealisticProviderScenario")
             }
 
             checksum &+= operationResult.checksum
@@ -269,9 +427,13 @@ func runScenario(
 
     return BenchmarkSummary(
         mode: mode,
+        providerName: nil,
         scenarioName: scenario.name,
         iterations: iterations,
         operationsPerSample: operationsPerSample,
+        lineCount: nil,
+        documentBytes: nil,
+        lineBytes: nil,
         p95Nanoseconds: percentile(samples, numerator: 95, denominator: 100),
         p99Nanoseconds: percentile(samples, numerator: 99, denominator: 100),
         checksum: checksum,
@@ -281,18 +443,97 @@ func runScenario(
     )
 }
 
+@inline(never)
+@available(macOS 13.0, *)
+func runRealisticProviderScenario(
+    _ scenario: RealisticProviderScenario,
+    iterations: Int,
+    operationsPerSample: Int
+) -> BenchmarkSummary {
+    let storage = RealisticDocumentStorage(lineCount: scenario.lineCount, lineBytes: scenario.lineBytes)
+    let source = RealisticLineSource(storage: storage)
+    let clock = ContinuousClock()
+    var samples: [Int64] = []
+    samples.reserveCapacity(iterations)
+    var checksum = 0
+    var failureCount = 0
+    let documentHeight = Double(source.lineCount) * scenario.lineHeight
+    let maxOffset = documentHeight > scenario.viewportHeight
+        ? documentHeight - scenario.viewportHeight
+        : 0.0
+
+    for iteration in 0..<iterations {
+        let start = clock.now
+        for operation in 0..<operationsPerSample {
+            let sample = iteration * operationsPerSample + operation
+            let offset = deterministicScrollOffset(sample: sample, maxOffset: maxOffset)
+            let input = ViewportInput(
+                lineCount: source.lineCount,
+                lineHeight: scenario.lineHeight,
+                scrollOffsetY: offset,
+                viewportHeight: scenario.viewportHeight,
+                overscanLinesBefore: scenario.overscanBefore,
+                overscanLinesAfter: scenario.overscanAfter
+            )
+
+            let operationResult = runRealisticProviderOperation(input: input, source: source)
+            checksum &+= operationResult.checksum
+            failureCount &+= operationResult.failureCount
+        }
+        let elapsed = start.duration(to: clock.now)
+
+        samples.append(nanoseconds(elapsed) / Int64(operationsPerSample))
+    }
+
+    samples.sort()
+
+    return BenchmarkSummary(
+        mode: .realisticProvider,
+        providerName: "large_text",
+        scenarioName: scenario.name,
+        iterations: iterations,
+        operationsPerSample: operationsPerSample,
+        lineCount: source.lineCount,
+        documentBytes: storage.documentBytes,
+        lineBytes: scenario.lineBytes,
+        p95Nanoseconds: percentile(samples, numerator: 95, denominator: 100),
+        p99Nanoseconds: percentile(samples, numerator: 99, denominator: 100),
+        checksum: checksum,
+        failureCount: failureCount,
+        p95BudgetNanoseconds: nil,
+        p99BudgetNanoseconds: nil
+    )
+}
+
 func formatSummary(_ summary: BenchmarkSummary, includeGate: Bool) -> String {
     var output = "mode=\(summary.mode.outputName)"
+    if let providerName = summary.providerName {
+        output += " provider=\(providerName)"
+    }
     output += " scenario=\(summary.scenarioName)"
     output += " iterations=\(summary.iterations)"
     output += " operations_per_sample=\(summary.operationsPerSample)"
+    if let lineCount = summary.lineCount {
+        output += " line_count=\(lineCount)"
+    }
+    if let documentBytes = summary.documentBytes {
+        output += " document_bytes=\(documentBytes)"
+    }
+    if let lineBytes = summary.lineBytes {
+        output += " line_bytes=\(lineBytes)"
+    }
     output += " p95_ns=\(summary.p95Nanoseconds)"
     output += " p99_ns=\(summary.p99Nanoseconds)"
     output += " failures=\(summary.failureCount)"
 
     if includeGate {
-        output += " budget_p95_ns=\(summary.p95BudgetNanoseconds)"
-        output += " budget_p99_ns=\(summary.p99BudgetNanoseconds)"
+        guard let p95BudgetNanoseconds = summary.p95BudgetNanoseconds,
+              let p99BudgetNanoseconds = summary.p99BudgetNanoseconds else {
+            preconditionFailure("gate output requires budget values")
+        }
+
+        output += " budget_p95_ns=\(p95BudgetNanoseconds)"
+        output += " budget_p99_ns=\(p99BudgetNanoseconds)"
         output += " gate=\(summary.passesGate ? "pass" : "fail")"
     }
 
@@ -301,7 +542,7 @@ func formatSummary(_ summary: BenchmarkSummary, includeGate: Bool) -> String {
 }
 
 @available(macOS 13.0, *)
-func runBenchmarks(options: BenchmarkOptions) -> Bool {
+func runSyntheticBenchmarks(options: BenchmarkOptions) -> Bool {
     let iterations = 10_000
     let operationsPerSample = 256
     var passed = true
@@ -321,6 +562,38 @@ func runBenchmarks(options: BenchmarkOptions) -> Bool {
     }
 
     return passed
+}
+
+@available(macOS 13.0, *)
+func runRealisticProviderBenchmarks() -> Bool {
+    let iterations = 5_000
+    let operationsPerSample = 256
+    var passed = true
+
+    for scenario in realisticProviderScenarios() {
+        let summary = runRealisticProviderScenario(
+            scenario,
+            iterations: iterations,
+            operationsPerSample: operationsPerSample
+        )
+        print(formatSummary(summary, includeGate: false))
+
+        if summary.failureCount != 0 {
+            passed = false
+        }
+    }
+
+    return passed
+}
+
+@available(macOS 13.0, *)
+func runBenchmarks(options: BenchmarkOptions) -> Bool {
+    switch options.mode {
+    case .pipeline, .rangeOnly:
+        return runSyntheticBenchmarks(options: options)
+    case .realisticProvider:
+        return runRealisticProviderBenchmarks()
+    }
 }
 
 @available(macOS 13.0, *)
