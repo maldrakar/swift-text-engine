@@ -1,0 +1,36 @@
+name: Swift CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swift-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-tests-and-benchmark-gate:
+    name: Host tests and benchmark gate
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          uname -a
+
+      - name: Run host tests
+        run: swift test
+
+      - name: Run synthetic benchmark gate
+        run: swift run -c release ViewportBenchmarks -- --gate
