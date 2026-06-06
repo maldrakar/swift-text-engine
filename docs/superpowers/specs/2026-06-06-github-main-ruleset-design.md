@@ -4,7 +4,21 @@ Date: 2026-06-06
 
 ## Status
 
-Approved design, written for user review.
+Deferred.
+
+This design was approved as an operational hardening slice, but execution is
+postponed for now. The repository is currently private, and GitHub's repository
+rulesets API returned:
+
+```text
+Upgrade to GitHub Pro or make this repository public to enable this feature.
+```
+
+For the current solo-maintainer phase, the accepted repository state is the
+Slice 5 `Swift CI` workflow running on pull requests and pushes to `main`.
+Repository-enforced rulesets can be revisited later if the repository becomes
+public, GitHub Pro rulesets become available, or the enforcement strategy is
+redesigned around another GitHub mechanism.
 
 ## Source Context
 
@@ -24,8 +38,8 @@ observed pull request run and post-merge push run. It also identified the
 remaining operational gap: the workflow only blocks merges if GitHub repository
 settings require its check for `main`.
 
-This slice closes that operational gap by configuring and verifying a GitHub
-repository ruleset for `main`.
+This deferred slice documents the ruleset that would close that operational gap
+by configuring and verifying a GitHub repository ruleset for `main`.
 
 ## Scope
 
