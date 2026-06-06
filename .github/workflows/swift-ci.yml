@@ -34,3 +34,6 @@ jobs:
 
       - name: Run synthetic benchmark gate
         run: swift run -c release ViewportBenchmarks -- --gate
+
+      - name: Run memory shape diagnostic
+        run: swift run -c release ViewportBenchmarks -- --memory-shape
