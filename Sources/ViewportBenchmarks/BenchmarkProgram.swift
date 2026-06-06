@@ -1,0 +1,26 @@
+@available(macOS 13.0, *)
+func runBenchmarks(options: BenchmarkOptions) -> Bool {
+    switch options.mode {
+    case .pipeline, .rangeOnly:
+        return runSyntheticBenchmarks(options: options)
+    case .realisticProvider:
+        return runRealisticProviderBenchmarks()
+    case .memoryShape:
+        return runMemoryShapeDiagnostics()
+    }
+}
+
+@available(macOS 13.0, *)
+func runProgram(arguments: [String]) -> Int32 {
+    switch BenchmarkOptions.parse(arguments) {
+    case let .run(options):
+        return runBenchmarks(options: options) ? 0 : 1
+    case .help:
+        print(BenchmarkOptions.usage)
+        return 0
+    case let .failure(message):
+        print("error=\(message)")
+        print(BenchmarkOptions.usage)
+        return 1
+    }
+}
