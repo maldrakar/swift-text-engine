@@ -2,6 +2,18 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status:** Deferred. Do not execute this plan unless Slice 6 is explicitly
+> resumed. Execution was attempted on 2026-06-06 and blocked because GitHub
+> rulesets for the private repository returned:
+>
+> ```text
+> Upgrade to GitHub Pro or make this repository public to enable this feature.
+> ```
+>
+> For now, the accepted state is the existing `Swift CI` workflow running on
+> pull requests and pushes to `main`; repository-enforced rulesets are
+> postponed while the repository is maintained by a single owner.
+
 **Goal:** Configure and verify a GitHub repository ruleset that requires pull requests and the existing `Host tests and benchmark gate` check before `main` can be updated.
 
 **Architecture:** This is an operational configuration slice. The implementation changes GitHub repository settings through `gh api`, then commits a verification record proving the final ruleset state. Swift source, tests, benchmark code, and workflow YAML stay unchanged.
