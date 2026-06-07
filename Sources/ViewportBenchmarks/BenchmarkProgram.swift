@@ -4,7 +4,7 @@ func runBenchmarks(options: BenchmarkOptions) -> Bool {
     case .pipeline, .rangeOnly:
         return runSyntheticBenchmarks(options: options)
     case .realisticProvider:
-        return runRealisticProviderBenchmarks()
+        return runRealisticProviderBenchmarks(enforceGate: options.enforceGate)
     case .memoryShape:
         return runMemoryShapeDiagnostics()
     case .memoryObservation:

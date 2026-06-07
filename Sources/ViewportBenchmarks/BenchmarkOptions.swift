@@ -36,8 +36,8 @@ struct BenchmarkOptions {
 
     Options:
       --range-only          Run only viewport range recompute benchmark.
-      --gate                Enforce synthetic pipeline p95/p99 budgets and exit non-zero on failure.
-      --realistic-provider  Run large-text provider benchmark without gate enforcement.
+      --gate                Enforce p95/p99 budgets for gateable benchmark modes and exit non-zero on failure.
+      --realistic-provider  Run large-text provider benchmark. Combine with --gate to enforce calibrated budgets.
       --memory-shape        Run deterministic core-owned memory-shape diagnostics.
       --memory-observation  Run host RSS observation diagnostics.
       --help                Print this help.
@@ -106,9 +106,6 @@ struct BenchmarkOptions {
 
         if mode == .rangeOnly && enforceGate {
             return .failure("--range-only cannot be combined with --gate")
-        }
-        if mode == .realisticProvider && enforceGate {
-            return .failure("--realistic-provider cannot be combined with --gate")
         }
         if mode == .memoryShape && enforceGate {
             return .failure("--memory-shape cannot be combined with --gate")
