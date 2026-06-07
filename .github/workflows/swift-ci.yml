@@ -37,3 +37,6 @@ jobs:
 
       - name: Run memory shape diagnostic
         run: swift run -c release ViewportBenchmarks -- --memory-shape
+
+      - name: Run RSS memory observation diagnostic
+        run: swift run -c release ViewportBenchmarks -- --memory-observation
