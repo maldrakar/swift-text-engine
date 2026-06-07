@@ -7,6 +7,8 @@ func runBenchmarks(options: BenchmarkOptions) -> Bool {
         return runRealisticProviderBenchmarks()
     case .memoryShape:
         return runMemoryShapeDiagnostics()
+    case .memoryObservation:
+        return runMemoryObservationDiagnostics()
     }
 }
 
