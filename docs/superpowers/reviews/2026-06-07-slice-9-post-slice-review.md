@@ -300,6 +300,19 @@ The implementation matches the approved design:
 - CI runs the RSS diagnostic without parsing RSS or enforcing noisy thresholds.
 - Invalid CLI combinations are rejected with clear existing-style errors.
 
+The shipped `MemoryObservationDiagnostics.swift` is also slightly more defensive
+than the planned snippet, which is a positive deviation worth recording. RSS
+collection guards `getpagesize() > 0`, `KERN_SUCCESS`, `resident_size > 0`, and
+`resident_size <= Int.max` before converting to `Int`, avoiding a `UInt64`→`Int`
+overflow trap. The deterministic core operation is `@inline(never)` and takes
+the post-operation snapshot inside nested `withExtendedLifetime` boundaries over
+`source`, `range`, `geometry`, `provider`, and `checksum`, which is the right
+way to stop a release build from dropping measured state before the snapshot. A
+small `rssDelta(_:_:)` helper keeps signed delta computation consistent across
+success and failure summaries, and an invariant failure emits `checksum=-1` with
+`reason=invariant_failed` rather than the plan snippet's computed checksum,
+matching the design's failure-line convention.
+
 ## Risks And Gaps
 
 ### RSS Is Useful But Weak Evidence
