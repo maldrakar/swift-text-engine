@@ -375,15 +375,32 @@ yet automated in CI.
 
 ### The Calibration Attempt Was Inconclusive
 
-The verification document records `hosted-samples-unavailable` because the
-pushed feature branch did not produce branch-specific Swift CI runs. The
-workflow currently runs on pull requests and pushes to `main`, not on arbitrary
-feature branch pushes.
+The verification document records `hosted-samples-unavailable` and attributes it
+to the pushed feature branch not producing branch-specific Swift CI runs. The
+actual GitHub run history is more specific, and the recorded reason is slightly
+inaccurate. A `pull_request` Swift CI run for the
+`realistic-provider-gate-calibration` branch did exist:
 
-The next hosted-runner slice should not repeat a branch-only push as the
-sampling mechanism. It needs an actual pull request run, a deliberate
-`workflow_dispatch` calibration entrypoint, or a temporary calibration workflow
-with documented cleanup.
+```text
+databaseId=27102859838 event=pull_request headBranch=realistic-provider-gate-calibration headSha=9a3ea6e conclusion=success
+```
+
+That run evaluated `9a3ea6e` (`docs: record realistic provider gate
+verification`), which is after the defer commit `0e5ef82` already removed the
+realistic-provider gate step. So a hosted run did happen, but at a head that no
+longer contained the step.
+
+The real cause of zero hosted samples is therefore commit sequencing, not an
+absent workflow trigger. The realistic-provider gate step was added (`2cf4b62`)
+and removed (`0e5ef82`) within the same branch, so no hosted run ever evaluated
+the intermediate commit that contained the step.
+
+The next hosted-runner slice should make sure a hosted run actually evaluates a
+commit that still contains the realistic-provider gate step. It needs a pull
+request whose head retains the step, a deliberate `workflow_dispatch`
+calibration entrypoint, or a temporary calibration workflow with documented
+cleanup. Recording the run IDs alone is not enough; the recorded run must have
+included the step.
 
 ### Local Budgets Are Conservative But Local-Only
 
@@ -417,10 +434,15 @@ work.
 
 1. Do not repeat the Slice 10 hosted-sampling mechanism.
 
-A feature-branch push is not enough under the current workflow triggers. If
-hosted-runner evidence is the next goal, the slice should use a pull request
-run, `workflow_dispatch`, or a temporary calibration workflow with the run IDs
-recorded in verification.
+The Slice 10 problem was not a missing trigger. A `pull_request` Swift CI run
+for the branch did exist (`databaseId=27102859838`), but it evaluated the
+post-defer head `9a3ea6e`, where the realistic-provider gate step had already
+been removed. The step was added and removed in the same branch, so no hosted
+run ever exercised it. If hosted-runner evidence is the next goal, the slice
+must ensure a hosted run evaluates a commit that still contains the step: a pull
+request whose head retains the step, `workflow_dispatch`, or a temporary
+calibration workflow with documented cleanup. Record the run IDs and confirm
+each recorded run actually ran the realistic-provider gate step.
 
 2. Keep CI enforcement conditional on hosted evidence.
 
