@@ -89,7 +89,9 @@ func realisticProviderScenarios() -> [RealisticProviderScenario] {
             lineHeight: 16.0,
             viewportHeight: 80.0 * 16.0,
             overscanBefore: 5,
-            overscanAfter: 5
+            overscanAfter: 5,
+            p95BudgetNanoseconds: 20_000,
+            p99BudgetNanoseconds: 50_000
         )
     ]
 }
@@ -165,13 +167,13 @@ func runRealisticProviderScenario(
         p99Nanoseconds: percentile(samples, numerator: 99, denominator: 100),
         checksum: checksum,
         failureCount: failureCount,
-        p95BudgetNanoseconds: nil,
-        p99BudgetNanoseconds: nil
+        p95BudgetNanoseconds: scenario.p95BudgetNanoseconds,
+        p99BudgetNanoseconds: scenario.p99BudgetNanoseconds
     )
 }
 
 @available(macOS 13.0, *)
-func runRealisticProviderBenchmarks() -> Bool {
+func runRealisticProviderBenchmarks(enforceGate: Bool) -> Bool {
     let iterations = 5_000
     let operationsPerSample = 256
     var passed = true
@@ -182,9 +184,11 @@ func runRealisticProviderBenchmarks() -> Bool {
             iterations: iterations,
             operationsPerSample: operationsPerSample
         )
-        print(formatSummary(summary, includeGate: false))
+        print(formatSummary(summary, includeGate: enforceGate))
 
-        if summary.failureCount != 0 {
+        if enforceGate && !summary.passesGate {
+            passed = false
+        } else if !enforceGate && summary.failureCount != 0 {
             passed = false
         }
     }
