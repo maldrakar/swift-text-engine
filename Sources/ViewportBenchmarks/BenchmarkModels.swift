@@ -17,6 +17,8 @@ struct RealisticProviderScenario {
     let viewportHeight: Double
     let overscanBefore: Int
     let overscanAfter: Int
+    let p95BudgetNanoseconds: Int64
+    let p99BudgetNanoseconds: Int64
 }
 
 struct BenchmarkSummary {
