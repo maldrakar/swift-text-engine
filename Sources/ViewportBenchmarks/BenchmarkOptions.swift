@@ -3,6 +3,7 @@ enum BenchmarkMode {
     case rangeOnly
     case realisticProvider
     case memoryShape
+    case memoryObservation
 
     var outputName: String {
         switch self {
@@ -14,6 +15,8 @@ enum BenchmarkMode {
             return "realistic_provider"
         case .memoryShape:
             return "memory_shape"
+        case .memoryObservation:
+            return "memory_observation"
         }
     }
 }
@@ -29,13 +32,14 @@ struct BenchmarkOptions {
     let enforceGate: Bool
 
     static let usage = """
-    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--memory-shape] [--help]
+    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--memory-shape] [--memory-observation] [--help]
 
     Options:
       --range-only          Run only viewport range recompute benchmark.
       --gate                Enforce synthetic pipeline p95/p99 budgets and exit non-zero on failure.
       --realistic-provider  Run large-text provider benchmark without gate enforcement.
       --memory-shape        Run deterministic core-owned memory-shape diagnostics.
+      --memory-observation  Run host RSS observation diagnostics.
       --help                Print this help.
     """
 
@@ -56,6 +60,9 @@ struct BenchmarkOptions {
                 if mode == .memoryShape {
                     return .failure("--range-only cannot be combined with --memory-shape")
                 }
+                if mode == .memoryObservation {
+                    return .failure("--memory-observation cannot be combined with --range-only")
+                }
                 mode = .rangeOnly
             case "--gate":
                 enforceGate = true
@@ -66,6 +73,9 @@ struct BenchmarkOptions {
                 if mode == .memoryShape {
                     return .failure("--realistic-provider cannot be combined with --memory-shape")
                 }
+                if mode == .memoryObservation {
+                    return .failure("--memory-observation cannot be combined with --realistic-provider")
+                }
                 mode = .realisticProvider
             case "--memory-shape":
                 if mode == .rangeOnly {
@@ -74,7 +84,21 @@ struct BenchmarkOptions {
                 if mode == .realisticProvider {
                     return .failure("--realistic-provider cannot be combined with --memory-shape")
                 }
+                if mode == .memoryObservation {
+                    return .failure("--memory-observation cannot be combined with --memory-shape")
+                }
                 mode = .memoryShape
+            case "--memory-observation":
+                if mode == .rangeOnly {
+                    return .failure("--memory-observation cannot be combined with --range-only")
+                }
+                if mode == .realisticProvider {
+                    return .failure("--memory-observation cannot be combined with --realistic-provider")
+                }
+                if mode == .memoryShape {
+                    return .failure("--memory-observation cannot be combined with --memory-shape")
+                }
+                mode = .memoryObservation
             default:
                 return .failure("unknown argument \(argument)")
             }
@@ -88,6 +112,9 @@ struct BenchmarkOptions {
         }
         if mode == .memoryShape && enforceGate {
             return .failure("--memory-shape cannot be combined with --gate")
+        }
+        if mode == .memoryObservation && enforceGate {
+            return .failure("--memory-observation cannot be combined with --gate")
         }
 
         return .run(BenchmarkOptions(mode: mode, enforceGate: enforceGate))

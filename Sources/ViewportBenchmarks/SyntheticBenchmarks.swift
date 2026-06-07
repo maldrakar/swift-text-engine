@@ -117,6 +117,8 @@ func runScenario(
                 preconditionFailure("realistic provider mode uses runRealisticProviderScenario")
             case .memoryShape:
                 preconditionFailure("memory shape mode uses runMemoryShapeDiagnostics")
+            case .memoryObservation:
+                preconditionFailure("memory observation mode uses runMemoryObservationDiagnostics")
             }
 
             checksum &+= operationResult.checksum
