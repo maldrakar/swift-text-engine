@@ -4,7 +4,7 @@ Date: 2026-06-07
 
 ## Status
 
-Approved design, written for user review.
+Approved design, revised after user review.
 
 ## Source Context
 
@@ -24,11 +24,17 @@ Slices 1 through 9 built and verified the current fixed-height proof envelope:
 - host-only RSS memory observation diagnostic and CI wiring.
 
 The product brief requires stable scroll performance on 100,000+ lines and
-documents larger than 10 MB. The current synthetic gate is merge-blocking in
-the workflow, and the realistic-provider path measures a deterministic
-100,000-line, 11.2 MB fixture. That realistic-provider benchmark is still
-observational because `--realistic-provider --gate` is currently invalid and
-no p95/p99 budgets are attached to the large-text scenario.
+documents larger than 10 MB. The current synthetic gate fails the GitHub
+Actions workflow when its budgets are exceeded, and the realistic-provider path
+measures a deterministic 100,000-line, 11.2 MB fixture. A failing workflow only
+blocks merge if external repository policy marks the status check as required.
+Slices 6 and 9 recorded that ruleset enforcement is blocked for the current
+private repository state, so Slice 10 cannot by itself close the external
+merge-protection gap. That limitation applies to the synthetic gate too.
+
+The realistic-provider benchmark is still observational because
+`--realistic-provider --gate` is currently invalid and no p95/p99 budgets are
+attached to the large-text scenario.
 
 Slice 9's post-slice review recommends realistic-provider budget calibration as
 the next low-risk proof slice. Slice 10 follows that recommendation.
@@ -48,10 +54,11 @@ The command should become valid, print budget and gate fields, and exit
 non-zero when the realistic-provider benchmark exceeds its calibrated budgets
 or reports traversal failures.
 
-The workflow should run this gate as a separate merge-blocking step only if
-fresh calibration shows enough margin for reliable hosted-runner enforcement.
-If hosted-runner samples are unavailable or too noisy, Slice 10 should still
-ship the local gateable CLI and record why CI enforcement remains deferred.
+The workflow should run this gate as a separate step that fails the workflow
+only if hosted-runner calibration from the same GitHub Actions environment
+shows enough margin for reliable enforcement. If hosted-runner samples are
+unavailable or too noisy, Slice 10 should still ship the local gateable CLI and
+record why CI enforcement remains deferred.
 
 ## Goals
 
@@ -66,10 +73,10 @@ ship the local gateable CLI and record why CI enforcement remains deferred.
 - Exit non-zero when realistic-provider gate output fails its budgets or has
   provider traversal failures.
 - Run repeated local calibration samples before selecting final budgets.
-- Attempt hosted-runner calibration when the existing GitHub Actions setup can
-  expose enough data without committing noisy enforcement.
-- Add a GitHub Actions realistic-provider gate step only when calibration
-  supports it.
+- Attempt hosted-runner calibration before adding any GitHub Actions
+  realistic-provider gate step.
+- Add a GitHub Actions realistic-provider gate step only when hosted-runner
+  samples from the same workflow environment support it.
 - Preserve existing synthetic gate budgets and output.
 - Preserve existing memory-shape and RSS observation output.
 - Record verification evidence for calibration, CLI behavior, workflow wiring
@@ -90,6 +97,8 @@ Slice 10 does not:
 - change the existing synthetic benchmark budgets;
 - add checked-in baseline comparison;
 - require GitHub rulesets or legacy branch protection;
+- close the external repository-policy requirement that turns a failing
+  workflow into a merge blocker;
 - add iOS, WASM, or embedded WASM CI;
 - make `ViewportBenchmarks` portable outside the existing host-only benchmark
   target.
@@ -104,10 +113,11 @@ that combination valid keeps the CLI small and aligns with the existing
 synthetic path, where `--gate` means p95/p99 enforcement.
 
 The workflow should include a separate realistic-provider gate step only after
-calibration supports it. The design intentionally allows a safe fallback: if
-hosted-runner variance is too high or sample collection cannot be completed,
-Slice 10 still lands the local gateable CLI and records CI enforcement as
-deferred. That avoids turning an unstable benchmark into a noisy merge blocker.
+hosted-runner calibration from the same workflow environment supports it. The
+design intentionally allows a safe fallback: if hosted-runner variance is too
+high or sample collection cannot be completed, Slice 10 still lands the local
+gateable CLI and records CI enforcement as deferred. That avoids turning an
+unstable benchmark into a noisy workflow failure.
 
 ### Alternatives Considered
 
@@ -116,9 +126,9 @@ deferred. That avoids turning an unstable benchmark into a noisy merge blocker.
 Add `--realistic-provider --gate` and calibrated local budgets, but never wire
 the command into GitHub Actions in this slice.
 
-This is safer operationally, but it leaves the product brief's merge-blocking
-performance requirement weaker than necessary if hosted-runner variance is
-acceptable.
+This is safer operationally, but it leaves the product brief's automated
+performance-enforcement requirement weaker than necessary if hosted-runner
+variance is acceptable and repository policy later marks the workflow required.
 
 #### Separate Gate Mode
 
@@ -133,9 +143,28 @@ model can express the intended behavior without a new top-level mode.
 Pick budgets from old local verification documents and add the workflow step
 directly.
 
-This is rejected. Historical local values are useful context, but a
-merge-blocking gate needs fresh calibration and, ideally, hosted-runner
-evidence from the same workflow environment.
+This is rejected. Historical local values are useful context, but CI
+enforcement needs fresh calibration and hosted-runner evidence from the same
+workflow environment.
+
+## Expected Outcome
+
+The preferred Slice 10 outcome is:
+
+1. local `--realistic-provider --gate` support with calibrated budgets;
+2. hosted-runner samples from the same GitHub Actions workflow environment;
+3. a separate workflow step that fails the run when the realistic-provider gate
+   fails.
+
+The acceptable fallback outcome is:
+
+1. local `--realistic-provider --gate` support with calibrated budgets;
+2. documented hosted-runner variance or sample-collection limitations;
+3. no workflow step in this slice.
+
+That fallback should not be treated as an incomplete implementation. It means
+the source-controlled CLI contract advanced, while CI enforcement was deferred
+because the evidence did not support a useful absolute-budget gate.
 
 ## Architecture
 
@@ -152,7 +181,7 @@ Expected file-level responsibilities:
 - `RealisticProviderBenchmark.swift` owns realistic-provider budgets, summary
   construction, gate printing, and pass/fail aggregation.
 - `.github/workflows/swift-ci.yml` gains a separate realistic-provider gate
-  step only if calibration supports hosted-runner enforcement.
+  step only if same-environment hosted-runner calibration supports enforcement.
 - `docs/superpowers/verification/2026-06-07-realistic-provider-gate-calibration.md`
   records calibration and verification evidence.
 
@@ -240,8 +269,8 @@ The implementation plan should gather:
   samples;
 - repeated local `swift run -c release ViewportBenchmarks -- --realistic-provider --gate`
   samples after candidate budgets are added;
-- hosted-runner samples if the existing GitHub Actions workflow can expose
-  enough output safely.
+- hosted-runner samples from the same GitHub Actions workflow environment
+  before any CI enforcement step is committed.
 
 Historical local realistic-provider values provide context:
 
@@ -265,6 +294,8 @@ Budget selection rules:
    pipeline budgets when the comparison is meaningful.
 5. Do not add the CI step if the only defensible budgets would be so loose that
    they no longer prove the intended realistic-provider regression risk.
+6. Do not add the CI step based only on local samples or local-to-hosted scaling
+   assumptions.
 
 An initial candidate to evaluate is:
 
@@ -275,7 +306,8 @@ budget_p99_ns=50000
 
 These candidate values are intentionally conservative relative to historical
 local results. The implementation must confirm or adjust them using fresh
-Slice 10 samples before committing source changes.
+Slice 10 samples before committing source changes. They are not CI budgets
+unless hosted-runner samples support them in the same workflow environment.
 
 ## Data Flow
 
@@ -319,6 +351,18 @@ text. Unknown flags remain invalid.
 If hosted-runner calibration is unavailable, that is a slice verification
 limitation, not a runtime error in `ViewportBenchmarks`.
 
+## Deferred Decisions
+
+Slice 10 keeps checked-in baseline comparison out of scope. Absolute budgets
+are simple and match the current synthetic gate, but on noisy hosted runners
+they may catch only coarse regressions. A later slice may need baseline-relative
+or trend-based gating if absolute realistic-provider budgets are either too
+flaky or too loose to be meaningful.
+
+RSS, heap, allocation-count, and peak-memory budgets also remain separate
+decisions. Slice 10 should not mix latency calibration with memory-budget
+enforcement.
+
 ## CI Strategy
 
 The preferred workflow shape is:
@@ -335,9 +379,16 @@ The realistic-provider gate should be a separate step, not folded into the
 synthetic gate step. Separate steps make CI failures easier to interpret and
 keep the existing synthetic gate output unchanged.
 
-The workflow step should be added only if calibration supports it. If the step
-is deferred, the verification document must say why and must show that
-`--realistic-provider --gate` passes locally with the selected budgets.
+The step adds another pass over the 5,000-sample realistic-provider benchmark
+and constructs the 11.2 MB fixture for that command. That wall-clock cost is
+acceptable only if the step provides useful enforcement. If calibration defers
+CI enforcement, the workflow should not add an observational
+`--realistic-provider` run just to duplicate local evidence.
+
+The workflow step should be added only if same-environment hosted-runner
+calibration supports it. If the step is deferred, the verification document
+must say why and must show that `--realistic-provider --gate` passes locally
+with the selected budgets.
 
 ## Verification Plan
 
@@ -362,6 +413,10 @@ swift run -c release ViewportBenchmarks -- --realistic-provider
 Run this command repeatedly enough to record a local p95/p99 range before
 choosing final budgets. If hosted-runner calibration is attempted, record the
 run IDs or workflow evidence used.
+
+Hosted-runner calibration is mandatory before adding a CI enforcement step. If
+it cannot be completed, do not edit the workflow for realistic-provider
+enforcement in this slice.
 
 Required final local verification:
 
@@ -411,8 +466,11 @@ edited.
 - Existing synthetic gate output and budgets are unchanged.
 - Existing memory-shape and RSS observation output are unchanged.
 - The final budgets are backed by fresh Slice 10 calibration evidence.
-- CI includes the realistic-provider gate only if calibration supports
-  reliable enforcement.
+- CI includes the realistic-provider gate only if same-environment
+  hosted-runner calibration supports reliable enforcement.
 - The verification document records whether CI enforcement was added or
   deferred, with the reason.
+- The verification document does not describe a failing workflow step as a
+  merge blocker unless repository policy is also configured to require that
+  status check.
 - `TextEngineCore`, `Tests`, and `Package.swift` remain unchanged.
