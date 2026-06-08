@@ -36,7 +36,8 @@ smoke check, but it is only a weak backstop for hosted regressions.
 Slice 12 starts the hosted baseline-relative path. It compares realistic-provider
 base and head measurements in the same hosted job, but it merges as
 observational-only. Blocking enforcement is deliberately deferred to a later
-slice after enough real pull-request observations exist.
+slice after enough no-op-equivalent hosted observations and operational PR
+evidence exist.
 
 ## Scope
 
@@ -48,13 +49,14 @@ Slice 12 must:
 - collect at least five accepted independent paired no-op hosted samples before
   choosing the initial observation threshold;
 - add a PR-only observation step to `Swift CI`;
-- run the existing realistic-provider benchmark command on both base and head:
+- run the existing ungated realistic-provider benchmark command on both base and
+  head:
 
 ```text
-swift run -c release ViewportBenchmarks -- --realistic-provider --gate
+swift run -c release ViewportBenchmarks -- --realistic-provider
 ```
 
-- parse p95, p99, budget, and gate fields from both outputs;
+- parse p95 and p99 fields from both outputs;
 - print stable key-value comparison output with base/head SHAs, p95/p99 values,
   ratios, threshold, and observation state;
 - exit non-zero only for measurement, checkout, command, or parsing
@@ -72,6 +74,8 @@ Slice 12 does not:
 - change fixed-height viewport behavior;
 - change synthetic benchmark budgets;
 - change existing local realistic-provider absolute budgets;
+- use the local absolute realistic-provider budget as part of hosted relative
+  observation;
 - add repository rulesets, legacy branch protection, or required status checks;
 - add iOS, WASM, or embedded WASM CI;
 - add storage adapters such as memory-mapped files, ropes, piece tables, or
@@ -89,10 +93,10 @@ Use a two-phase hosted relative gate:
 2. A later slice may enable blocking only after the promotion rule is satisfied
    and verified in its own design, PR, commit, and verification record.
 
-This avoids merging a noisy failing gate while starting real PR data collection
-immediately. It also keeps the relative comparison aligned with the product
-brief's regression language: head is compared to base under shared runner
-conditions instead of against a fixed hosted absolute threshold.
+This avoids merging a noisy failing gate while starting PR observation
+collection immediately. It also keeps the relative comparison aligned with the
+product brief's regression language: head is compared to base under shared
+runner conditions instead of against a fixed hosted absolute threshold.
 
 ### Alternatives Considered
 
@@ -101,9 +105,9 @@ conditions instead of against a fixed hosted absolute threshold.
 Collect no-op samples and record a threshold decision without adding a permanent
 observational PR step.
 
-This has the least workflow risk, but it does not start collecting real PR
-traffic for promotion. It leaves the project dependent on future dedicated
-sampling.
+This has the least workflow risk, but it does not start collecting operational
+PR observations for promotion. It leaves the project dependent on future
+dedicated sampling.
 
 #### Immediate Blocking After Five No-Op Samples
 
@@ -130,8 +134,14 @@ The final `Swift CI` workflow keeps its existing stable steps:
 - `Run memory shape diagnostic`;
 - `Run RSS memory observation diagnostic`.
 
-For `pull_request` events, Slice 12 adds a separate observational step after the
-stable gates. The observation step uses:
+For `pull_request` events, Slice 12 adds a separate observational step or job
+after the stable gates. That step or job must be marked with
+`continue-on-error: true` in Slice 12 so observational infrastructure failures
+cannot make the overall `Swift CI` run fail or become latent blockers if the
+workflow is later made a required status check. A future blocking slice must
+remove that `continue-on-error` behavior deliberately.
+
+The observation step uses:
 
 ```text
 base_sha=${{ github.event.pull_request.base.sha }}
@@ -145,31 +155,51 @@ against the intended source tree without fragile checkout mutation.
 On `push` to `main`, the relative observation is skipped because there is no PR
 base/head pair. The existing stable CI gates still run.
 
+The step reports `observation=skipped_base_unsupported` and exits zero when the
+base tree predates the realistic-provider benchmark command or cannot produce
+the required p95/p99 fields. That state is separate from a true infrastructure
+failure. The head tree must support the observation command in Slice 12.
+
 ## Data Flow
 
 For each PR observation:
 
 1. Fetch or check out the base SHA and head SHA.
-2. Run `swift run -c release ViewportBenchmarks -- --realistic-provider --gate`
-   in the base source tree.
-3. Parse `p95_ns`, `p99_ns`, `budget_p95_ns`, `budget_p99_ns`, and `gate`.
-4. Run the same command in the head source tree.
-5. Parse the same fields from head output.
-6. Compute:
+2. Use `comparison_repetitions_per_side=4` unless implementation verification
+   shows the CI runtime budget cannot support it.
+3. Run full benchmark commands in an interleaved, predeclared order:
 
 ```text
-p95_ratio = head_p95_ns / base_p95_ns
-p99_ratio = head_p99_ns / base_p99_ns
+base, head, head, base, base, head, head, base
+```
+
+4. Each run executes this command in the selected source tree:
+
+```text
+swift run -c release ViewportBenchmarks -- --realistic-provider
+```
+
+5. Parse `p95_ns` and `p99_ns` from every run output. `failures` and `checksum`
+   should be recorded for diagnostics, but budget and gate fields are not
+   required and are not used.
+6. Compute the median p95 and median p99 for base and head. With the default
+   even repetition count, median is the arithmetic mean of the two middle sorted
+   values.
+7. Compute:
+
+```text
+p95_ratio = head_median_p95_ns / base_median_p95_ns
+p99_ratio = head_median_p99_ns / base_median_p99_ns
 max_ratio = max(p95_ratio, p99_ratio)
 ```
 
-7. Compare `max_ratio` to the observation threshold.
-8. Print one stable key-value summary line.
+8. Compare `max_ratio` to the observation threshold.
+9. Print one stable key-value summary line.
 
 The output shape should be easy to scan and parse:
 
 ```text
-mode=realistic_relative_observation base_sha=... head_sha=... base_p95_ns=... head_p95_ns=... base_p99_ns=... head_p99_ns=... p95_ratio=... p99_ratio=... max_ratio=... observation_threshold=... observation=clean|above_threshold blocking_ready=false
+mode=realistic_relative_observation base_sha=... head_sha=... comparison_repetitions_per_side=4 run_order=base,head,head,base,base,head,head,base base_p95_ns_values=... head_p95_ns_values=... base_p99_ns_values=... head_p99_ns_values=... base_median_p95_ns=... head_median_p95_ns=... base_median_p99_ns=... head_median_p99_ns=... p95_ratio=... p99_ratio=... max_ratio=... observation_threshold=... observation=clean|above_threshold|skipped_base_unsupported blocking_ready=false
 ```
 
 The implementation may keep parsing logic in workflow shell code or a small
@@ -179,23 +209,34 @@ realistic-provider benchmark output already uses stable key-value fields, so no
 new benchmark output format is required unless implementation shows the shell
 parser is too brittle.
 
+No hosted relative observation command uses `--gate`. That avoids turning the
+local absolute realistic-provider budget into a hosted CI failure mode.
+
 ## Error Handling
 
 The observational step exits non-zero for infrastructure failures:
 
 - PR base or head SHA is unavailable on a pull-request event;
 - a checkout or worktree cannot be created;
-- the benchmark command exits non-zero;
-- output is missing required fields;
+- the head benchmark command is unsupported or exits non-zero;
+- the base benchmark command exits non-zero for a reason other than unsupported
+  historical benchmark output;
+- head output is missing required fields;
+- base output is missing required fields after the command is otherwise
+  recognized as compatible;
 - parsed p95 or p99 values are zero, negative, or non-numeric;
 - ratio computation fails.
 
 The observational step exits zero for measurement outcomes:
 
 - `observation=clean`;
-- `observation=above_threshold`.
+- `observation=above_threshold`;
+- `observation=skipped_base_unsupported`.
 
 Above-threshold observations are signal, not enforcement, in Slice 12.
+Because the workflow step or job is `continue-on-error: true`, even
+infrastructure failures from this observation must not make the overall CI run
+fail in Slice 12. The failure is still printed and recorded for verification.
 
 ## Threshold Policy
 
@@ -212,15 +253,18 @@ independent paired no-op hosted samples. A no-op sample is accepted only when:
   change the `ViewportBenchmarks` target, its dependencies, or compilation
   settings;
 - base and head are measured in the same hosted job;
+- base and head use the same repetition count and run order as the final
+  observational workflow;
 - the sample is from a fresh hosted workflow run or rerun, not merely another
   loop iteration inside the same job;
 - both base and head benchmark commands exit successfully;
-- both outputs expose required p95/p99 and gate fields.
+- all repeated outputs expose required p95/p99 fields.
 
-For each accepted no-op sample, compute `max_ratio`. The initial threshold is:
+For each accepted no-op sample, compute medians and `max_ratio` with the same
+method used by the final observational workflow. The initial threshold is:
 
 ```text
-candidate_threshold = max_noop_ratio + 0.05
+candidate_threshold = max_noop_ratio * 1.05
 observation_threshold = min(candidate_threshold, 1.50)
 ```
 
@@ -242,12 +286,38 @@ The future promotion rule is frozen here:
 - no workflow counter or automatic transition may enable blocking;
 - a later slice must enable blocking through its own design, PR, commit, and
   verification record;
-- the later slice may enable blocking only after at least 10 consecutive clean
-  observational runs on real pull requests;
-- those 10 runs must come from actual PR traffic, not solely dedicated reruns;
-- any no-op flake or unexplained above-threshold observation resets the
-  clean-run argument and may require threshold recalibration;
+- the later slice may enable blocking only after at least 10 clean
+  no-op-equivalent observational samples accumulated across different days or
+  runner allocations;
+- no-op-equivalent samples are the false-positive evidence. Real PR traffic with
+  benchmark-relevant source changes is useful operational evidence, but it is
+  not the primary false-positive counter;
+- dedicated reruns alone are insufficient for promotion unless they are
+  supplemented by opportunistic no-op-equivalent observations from PR traffic,
+  such as documentation/helper-only PRs;
+- an explained above-threshold observation caused by a benchmark-relevant code
+  change means the gate is detecting a performance change. It is not a flake
+  and does not reset the false-positive evidence;
+- an unexplained above-threshold observation in a no-op-equivalent sample resets
+  the clean no-op argument and may require threshold recalibration;
+- the promotion slice must classify each above-threshold observation as
+  explained or unexplained by inspecting the PR diff, benchmark-executed source
+  equivalence, runner metadata, and raw benchmark outputs, and must record that
+  classification in its verification document;
 - the blocking threshold must remain less than or equal to `1.50`.
+
+## CI Runtime Budget
+
+The default hosted observation performs two release builds, one per source tree,
+and eight full realistic-provider benchmark runs (`2 * k`, with `k=4`). This is
+intentionally capped so the existing `timeout-minutes: 20` job remains
+plausible.
+
+Slice 12 verification must record hosted job duration for the no-op samples and
+the final observational PR run. If the final shape exceeds 15 minutes or
+approaches the 20-minute timeout, do not merge it without revising the design to
+lower `comparison_repetitions_per_side`, split the observation from stable
+gates, or adjust the workflow timeout explicitly.
 
 ## Testing And Verification
 
@@ -276,14 +346,19 @@ Hosted verification must record:
 - accepted no-op sample count;
 - each accepted run ID, attempt, run URL, event type, head branch, base SHA, and
   head SHA;
-- base and head realistic-provider output lines for each sample;
-- parsed p95/p99 values and ratios for each sample;
+- runner image, CPU model from `sysctl -n machdep.cpu.brand_string`, first line
+  of `swift --version`, `xcodebuild -version`, `uname -a`, and timestamps for
+  each accepted sample;
+- raw base and head realistic-provider output lines for every repeated run in
+  each sample;
+- parsed p95/p99 values, medians, run order, and ratios for each sample;
 - `max_noop_ratio`;
 - `candidate_threshold`;
 - `observation_threshold`;
 - whether the threshold is eligible for future blocking;
 - final workflow state;
 - final observational PR run metadata and output;
+- final hosted job duration and timeout headroom;
 - source-boundary checks proving `TextEngineCore` behavior was not changed.
 
 ## Acceptance Criteria
@@ -293,8 +368,16 @@ Slice 12 is complete when:
 - at least five accepted independent paired no-op hosted samples are recorded;
 - an initial observation threshold is selected by the pre-data rule;
 - `Swift CI` includes a PR-only realistic relative observation step;
+- the observation step or job is `continue-on-error: true`;
+- the hosted relative observation uses ungated `--realistic-provider` runs, not
+  `--realistic-provider --gate`;
+- each side is measured with median-of-4 full runs unless CI runtime evidence
+  forces an explicit design revision;
 - the step exits zero for `clean` and `above_threshold` measurements;
-- the step exits non-zero for infrastructure failures;
+- the step reports `skipped_base_unsupported` without failing the overall CI
+  when the base tree cannot provide compatible benchmark output;
+- infrastructure failures are visible but do not fail the overall CI run in
+  Slice 12;
 - existing stable CI gates remain present and unchanged;
 - local verification commands pass;
 - hosted verification records the sample evidence and final observational run;
