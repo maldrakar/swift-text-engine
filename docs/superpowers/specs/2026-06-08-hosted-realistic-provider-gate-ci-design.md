@@ -4,7 +4,7 @@ Date: 2026-06-08
 
 ## Status
 
-Approved design.
+Approved design, revised after user review.
 
 ## Source Context
 
@@ -40,6 +40,16 @@ pull-request run evaluated the post-defer head where the step no longer
 existed. Slice 11 closes that sequencing weakness by collecting hosted-runner
 samples from a commit that still contains the realistic-provider gate step.
 
+GitHub Actions documentation states that `workflow_dispatch` triggers only
+receive events when the workflow file is on the default branch:
+
+```text
+https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onworkflow_dispatch
+```
+
+The current `main` workflow does not include `workflow_dispatch`, so Slice 11
+must not rely on adding that trigger only on a calibration branch.
+
 A failing workflow only blocks merges if repository policy requires that
 status check. This slice may make the workflow fail when the realistic-provider
 gate fails, but it does not claim repository-level merge blocking.
@@ -50,14 +60,17 @@ Collect same-environment hosted-runner evidence for the existing
 realistic-provider gate and add the GitHub Actions workflow step only if the
 evidence supports reliable enforcement.
 
-The selected hosted sampling mechanism is a controlled `workflow_dispatch`
-calibration path on the existing `Swift CI` workflow. A calibration branch will
-contain:
+The selected hosted sampling mechanism is pull-request-head sampling on the
+existing `Swift CI` workflow. A calibration branch will contain:
 
-- a `workflow_dispatch` trigger;
 - a separate `Run realistic provider benchmark gate` step;
 - the existing host tests, synthetic benchmark gate, memory-shape diagnostic,
   and RSS memory observation diagnostic unchanged.
+
+The calibration branch must keep the realistic-provider gate step in its head
+until accepted hosted samples are collected and recorded. `workflow_dispatch`
+may be used only if preflight proves the trigger already exists on `main`, or
+if a separate preliminary change first lands the trigger on `main`.
 
 The final workflow keeps the realistic-provider gate step only if accepted
 hosted samples satisfy the decision policy below. If samples cannot be
@@ -67,7 +80,7 @@ keeps enforcement deferred and records the reason.
 ## Goals
 
 - Add a deliberate hosted sampling path that avoids Slice 10's commit
-  sequencing failure.
+  sequencing failure and does not depend on branch-only `workflow_dispatch`.
 - Collect at least three accepted macOS hosted-runner samples of
   `swift run -c release ViewportBenchmarks -- --realistic-provider --gate`.
 - Prove each accepted sample evaluated a head commit that still contained the
@@ -106,13 +119,14 @@ Slice 11 does not:
 
 ## Selected Approach
 
-Use `workflow_dispatch` on the existing `Swift CI` workflow as the hosted
-calibration path.
+Use pull-request-head sampling on the existing `Swift CI` workflow as the
+primary hosted calibration path.
 
-This keeps the sampling environment close to the final workflow while giving
-the implementer control over which head SHA is evaluated. The accepted samples
-must come from runs whose logs prove that the realistic-provider gate step
-actually executed. Recording only run IDs is insufficient.
+This path works with the current workflow triggers because `Swift CI` already
+runs on pull requests. The calibration branch must keep the realistic-provider
+gate step present while samples are collected. The accepted samples must come
+from runs whose metadata and logs prove that the realistic-provider gate step
+actually executed on that head SHA. Recording only run IDs is insufficient.
 
 The workflow step should be separate:
 
@@ -131,14 +145,15 @@ observation failures easy to distinguish.
 
 ### Alternatives Considered
 
-#### Pull-Request Head Retains The Step
+#### Workflow Dispatch After Default-Branch Trigger
 
-Collect samples from pull-request runs while ensuring the PR head still
-contains the realistic-provider gate step.
+First land `workflow_dispatch` on `main`, then dispatch calibration runs
+against the calibration branch.
 
-This mirrors the normal PR path, but it is easier to repeat Slice 10's mistake:
-if the step is removed before the run happens or before samples are collected,
-the run no longer proves the intended gate.
+This gives direct manual control over repeated runs, but it requires a
+preliminary `main` workflow change before dispatch is available. A branch-only
+addition of `workflow_dispatch` is not a valid calibration mechanism for the
+current repository state.
 
 #### Temporary Calibration Workflow
 
@@ -163,11 +178,14 @@ Slice 11 is an infrastructure and verification slice.
 
 Expected file-level responsibilities:
 
-- `.github/workflows/swift-ci.yml` adds `workflow_dispatch`.
 - `.github/workflows/swift-ci.yml` contains `Run realistic provider benchmark
   gate` while hosted evidence is collected.
 - `.github/workflows/swift-ci.yml` keeps that step in the final tree only if
   accepted hosted samples satisfy the decision policy.
+- `.github/workflows/swift-ci.yml` does not add `workflow_dispatch` as a
+  side effect of this slice. If `workflow_dispatch` is introduced, it must be
+  explicit in the plan and verification, and its final retained-or-removed
+  state must be recorded.
 - `docs/superpowers/verification/2026-06-08-hosted-realistic-provider-gate-ci.md`
   records local preflight, hosted sample evidence, final workflow state, and
   source-boundary checks.
@@ -183,18 +201,20 @@ The implementation should follow this flow:
 
 1. Start from `main` with clean local status.
 2. Run local preflight.
-3. Add `workflow_dispatch` and the realistic-provider gate step on a
-   calibration branch.
-4. Push the branch.
-5. Trigger `Swift CI` at least three times against the same calibration head
-   SHA through `workflow_dispatch`, or use equivalent pull-request runs if they
-   evaluate that exact head.
-6. For each candidate run, inspect logs and metadata.
-7. Accept a run as a sample only if it ran the realistic-provider gate step and
+3. Add the realistic-provider gate step on a calibration branch.
+4. Push the branch and open or update a pull request targeting `main`.
+5. Keep the gate step present in the calibration branch head while samples are
+   collected.
+6. Collect at least three `Swift CI` pull-request runs or reruns against the
+   same calibration head SHA. Equivalent `workflow_dispatch` runs are valid
+   only if preflight proves the trigger exists on `main` or a separate
+   preliminary change has already landed it there.
+7. For each candidate run, inspect logs and metadata.
+8. Accept a run as a sample only if it ran the realistic-provider gate step and
    exposes the expected output line.
-8. Decide whether to keep the final workflow step.
-9. Record the decision in the verification document.
-10. Run final local/source-boundary checks.
+9. Decide whether to keep the final workflow step.
+10. Record the decision in the verification document.
+11. Run final local/source-boundary checks.
 
 Accepted sample records must include:
 
@@ -239,7 +259,9 @@ max_hosted_p99_ns <= 35000
 
 Those thresholds do not change the benchmark budgets. They decide only whether
 the existing budgets have enough hosted-runner margin to be useful as a CI
-failure step.
+failure step. The 70% cutoff leaves 30% headroom for normal hosted-runner
+variance while rejecting a step that technically passes but already consumes
+most of the budget and would likely be noisy.
 
 If the samples fail, are too noisy, cannot be collected, or cannot prove that
 the step executed, Slice 11 records:
@@ -263,8 +285,13 @@ and the final workflow includes the realistic-provider gate step.
 If local `--realistic-provider --gate` fails before hosted sampling, stop before
 workflow enforcement and record benchmark instability as the blocker.
 
-If GitHub access, workflow dispatch, or log access is unavailable, do not infer
-or fabricate hosted samples. Record the blocker and keep enforcement deferred.
+If GitHub access, pull-request CI, reruns, or log access is unavailable, do not
+infer or fabricate hosted samples. Record the blocker and keep enforcement
+deferred.
+
+If `workflow_dispatch` is attempted and returns unavailable because the trigger
+is absent from `main`, fall back to pull-request-head sampling. Do not treat a
+branch-only `workflow_dispatch` addition as a valid sample path.
 
 If a hosted run succeeds but logs cannot prove the realistic-provider gate step
 ran, reject that run as an accepted sample.
@@ -303,7 +330,8 @@ the intended head and included the realistic-provider gate step.
 Required final local/source-boundary checks:
 
 ```text
-rg -n "workflow_dispatch|Run realistic provider benchmark gate|--realistic-provider --gate" .github/workflows/swift-ci.yml
+rg -n "Run realistic provider benchmark gate|--realistic-provider --gate" .github/workflows/swift-ci.yml
+rg -n "workflow_dispatch" .github/workflows/swift-ci.yml
 git diff -- Sources/TextEngineCore Sources/ViewportBenchmarks Tests Package.swift
 swift test
 swift build -c release
@@ -316,14 +344,19 @@ swift run -c release ViewportBenchmarks -- --memory-observation
 If enforcement is added, a final hosted `Swift CI` run should be recorded after
 the workflow reaches its final state. If enforcement is deferred, the
 verification document should record the final workflow scan proving the step is
-absent.
+absent. In both outcomes, the verification document must record whether
+`workflow_dispatch` is present or absent in the final workflow and why. No
+matches from the `workflow_dispatch` scan are valid when the trigger was not
+introduced.
 
 ## Acceptance Criteria
 
 - The final design does not claim repository-level merge blocking.
-- `workflow_dispatch` is available on `Swift CI` for controlled hosted
-  calibration, unless GitHub access prevents the workflow change from being
-  tested and the limitation is recorded.
+- The primary sampling path uses pull-request runs or reruns while the
+  calibration branch head still contains the realistic-provider gate step.
+- `workflow_dispatch` is not required for Slice 11 and is not introduced as a
+  side effect. If it is used, the verification record proves the trigger was
+  already present on `main` or was landed through a separate preliminary change.
 - At least three accepted hosted samples are recorded before CI enforcement is
   added.
 - Each accepted hosted sample proves the realistic-provider gate step ran on a
