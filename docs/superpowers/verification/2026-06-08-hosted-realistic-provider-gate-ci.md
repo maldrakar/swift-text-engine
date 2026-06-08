@@ -211,3 +211,34 @@ result=no output
 command=git diff -- Sources/TextEngineCore Sources/ViewportBenchmarks Tests Package.swift
 result=no output
 ```
+
+## Final Hosted PR Verification
+
+```text
+command=gh run list --workflow "Swift CI" --branch slice-11-hosted-realistic-provider-gate-ci --event pull_request --limit 10 --json databaseId,url,event,headBranch,headSha,status,conclusion,createdAt,updatedAt
+matched_run_id=27158848316
+matched_run_url=https://github.com/arthurbanshchikov/swift-text-engine/actions/runs/27158848316
+event=pull_request
+head_branch=slice-11-hosted-realistic-provider-gate-ci
+head_sha=0bee2eae6d424a9ecec765fd35d9578a2c8dfbdf
+status=completed
+conclusion=success
+created_at=2026-06-08T18:35:13Z
+updated_at=2026-06-08T18:37:38Z
+```
+
+```text
+command=gh run watch 27158848316 --exit-status
+exit_code=0
+job=Host tests and benchmark gate
+job_id=80168641200
+job_duration=2m20s
+steps=Set up job; Check out repository; Show toolchain; Run host tests; Run synthetic benchmark gate; Run memory shape diagnostic; Run RSS memory observation diagnostic; Post Check out repository; Complete job
+realistic_provider_step_absent=true
+```
+
+```text
+command=gh run view 27158848316 --log | rg -n "Run realistic provider benchmark gate|--realistic-provider --gate|mode=realistic_provider"
+exit_code=1
+result=no output
+```
