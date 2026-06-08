@@ -4,7 +4,7 @@
 
 **Goal:** Add a PR-only, nonblocking hosted base-vs-head realistic-provider observation that avoids absolute hosted budget failures and records enough no-op evidence to choose an initial threshold.
 
-**Architecture:** The final workflow keeps the existing stable gates unchanged and adds a `continue-on-error: true` pull-request observation step. A head-owned shell helper creates no dependency on new code in the base SHA: the workflow checks out base and head into separate git worktrees, then the helper runs the existing ungated realistic-provider benchmark in each tree, using median-of-4 full runs per side and a predeclared interleaved order. Hosted calibration samples choose the initial threshold by `candidate_threshold = max_noop_ratio * 1.05`, capped at `1.50`.
+**Architecture:** The final workflow keeps the existing stable gates unchanged and adds a `continue-on-error: true` pull-request observation step. A head-owned shell helper creates no dependency on new code in the base SHA: the workflow checks out base and head into separate git worktrees, then the helper runs the existing ungated realistic-provider benchmark in each tree, using median-of-4 full runs per side and a predeclared interleaved order. Hosted calibration uses five accepted no-op samples collected with explicit time separation, records runner/CPU correlation as a limitation, then chooses the initial threshold by `candidate_threshold = max_noop_ratio * 1.05`, capped at `1.50`.
 
 **Tech Stack:** Swift Package Manager, Swift 6.2.1, GitHub Actions, Bash 3-compatible shell, `gh`, `rg`, `awk`, git worktrees.
 
@@ -179,6 +179,34 @@ assert_equal() {
   fi
 }
 
+assert_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local label="$3"
+  if [[ "$haystack" != *"$needle"* ]]; then
+    echo "self_test=fail label=$label missing=$needle"
+    exit 1
+  fi
+}
+
+assert_command_success() {
+  local label="$1"
+  shift
+  if ! "$@"; then
+    echo "self_test=fail label=$label expected=success actual=failure"
+    exit 1
+  fi
+}
+
+assert_command_failure() {
+  local label="$1"
+  shift
+  if "$@"; then
+    echo "self_test=fail label=$label expected=failure actual=success"
+    exit 1
+  fi
+}
+
 extract_field() {
   local line="$1"
   local key="$2"
@@ -264,18 +292,36 @@ validate_output_line() {
 
 run_self_test() {
   local line="mode=realistic_provider provider=large_text scenario=100k_lines_10mb_text iterations=5000 operations_per_sample=256 line_count=100000 document_bytes=11200000 line_bytes=112 p95_ns=100 p99_ns=200 failures=0 checksum=42"
+  local missing_p95_line="mode=realistic_provider provider=large_text p99_ns=200"
+  local invalid_p99_line="mode=realistic_provider provider=large_text p95_ns=100 p99_ns=abc"
+  local skip_line
+  local infra_line="mode=realistic_relative_observation observation=infrastructure_failure reason=head_command_failed blocking_ready=false"
   assert_equal "100" "$(extract_field "$line" "p95_ns")" "extract_p95"
   assert_equal "200" "$(extract_field "$line" "p99_ns")" "extract_p99"
   validate_output_line "$line" || {
     echo "self_test=fail label=validate_output_line"
     exit 1
   }
+  assert_command_success "positive_integer_one" is_positive_integer 1
+  assert_command_failure "positive_integer_zero" is_positive_integer 0
+  assert_command_failure "positive_integer_negative" is_positive_integer -1
+  assert_command_failure "positive_integer_alpha" is_positive_integer abc
+  assert_command_failure "validate_missing_p95" validate_output_line "$missing_p95_line"
+  assert_command_failure "validate_invalid_p99" validate_output_line "$invalid_p99_line"
   assert_equal "115.000000" "$(median_values 100 130 110 120)" "median_even"
   assert_equal "110" "$(median_values 100 130 110)" "median_odd"
   assert_equal "1.250000" "$(ratio_values 125 100)" "ratio"
   assert_equal "1.300000" "$(max_values 1.200000 1.300000)" "max_ratio"
   assert_equal "clean" "$(classify_observation 1.250000 1.500000)" "classify_clean"
   assert_equal "above_threshold" "$(classify_observation 1.510000 1.500000)" "classify_above"
+  BASE_SHA="base"
+  HEAD_SHA="head"
+  THRESHOLD="1.500000"
+  skip_line="$(print_skip_base_unsupported "base_command_unknown_argument")"
+  assert_contains "$skip_line" "observation=skipped_base_unsupported" "skip_summary_observation"
+  assert_contains "$skip_line" "reason=base_command_unknown_argument" "skip_summary_reason"
+  assert_contains "$infra_line" "observation=infrastructure_failure" "infra_summary_observation"
+  assert_contains "$infra_line" "blocking_ready=false" "infra_summary_nonblocking"
   echo "self_test=pass"
 }
 
@@ -306,6 +352,9 @@ run_benchmark_once() {
 
   if [[ "$side" == "base" ]]; then
     if [[ "$status" -ne 0 ]]; then
+      # This diagnostic is tied to SwiftPM's current unknown-argument text. In this repository,
+      # current main should already support --realistic-provider, so this branch is expected only
+      # when comparing against an older unsupported base.
       if grep -q 'unknown argument --realistic-provider' "$output_file"; then
         print_skip_base_unsupported "base_command_unknown_argument"
         exit 0
@@ -511,7 +560,7 @@ Add this step after `Run RSS memory observation diagnostic`:
           echo "observation_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "runner_image=${ImageOS:-unknown}"
           echo "cpu_model=$(sysctl -n machdep.cpu.brand_string)"
-          swift --version | head -n 1
+          swift --version 2>&1 | sed -n '1p' || true
           xcodebuild -version
           uname -a
 
@@ -640,16 +689,24 @@ Expected:
 - Summary has `comparison_repetitions_per_side=4`, p95/p99 value lists, medians, ratios, `observation_threshold=1.50`, and `blocking_ready=false`.
 - Summary is not `observation=skipped_base_unsupported` for this repository because current `main` already supports the realistic-provider command.
 
-- [ ] **Step 4: Collect four additional fresh hosted samples**
+- [ ] **Step 4: Collect four additional time-separated hosted samples**
 
-Rerun the completed workflow four times, waiting after each rerun:
+Rerun the completed workflow four times with at least 30 minutes between accepted samples. Do not run the reruns back-to-back; the time separation is part of the calibration evidence.
+This step intentionally takes about two hours of wall-clock time. If the executor cannot keep a foreground `sleep` open, run each loop iteration manually after the required time gap instead of treating the wait as a hung command.
 
 ```bash
+last_sample_finished_at="$(date -u +%s)"
 for attempt in 2 3 4 5; do
+  now="$(date -u +%s)"
+  wait_seconds=$((1800 - (now - last_sample_finished_at)))
+  if [[ "$wait_seconds" -gt 0 ]]; then
+    sleep "$wait_seconds"
+  fi
   gh run rerun "$run_id"
   gh run watch "$run_id" --exit-status
   gh run view "$run_id" --attempt "$attempt" --log > "/tmp/slice12-realistic-relative-samples/sample-${attempt}.log"
   rg -n "mode=realistic_relative_observation|observation_started_at|runner_image=|cpu_model=|Swift version|Xcode|Darwin" "/tmp/slice12-realistic-relative-samples/sample-${attempt}.log"
+  last_sample_finished_at="$(date -u +%s)"
 done
 ```
 
@@ -660,8 +717,9 @@ Expected for each attempt:
 - Each summary has `comparison_repetitions_per_side=4`.
 - Each summary uses run order `base,head,head,base,base,head,head,base`.
 - Each summary exits zero or is tolerated by `continue-on-error`.
+- The accepted samples are not collected back-to-back; record the approximate time gap between accepted samples in the verification document.
 
-- [ ] **Step 5: Compute threshold from accepted samples**
+- [ ] **Step 5: Filter and validate accepted samples before threshold calculation**
 
 Run:
 
@@ -669,21 +727,115 @@ Run:
 rg "mode=realistic_relative_observation" /tmp/slice12-realistic-relative-samples/sample-*.log > /tmp/slice12-realistic-relative-samples/summaries.txt
 awk '
   {
+    observation = ""
+    for (i = 1; i <= NF; i++) {
+      split($i, kv, "=")
+      if (kv[1] == "observation") observation = kv[2]
+    }
+    if (observation == "clean" || observation == "above_threshold") {
+      print
+    }
+  }
+' /tmp/slice12-realistic-relative-samples/summaries.txt > /tmp/slice12-realistic-relative-samples/accepted_summaries.txt
+
+accepted_count="$(awk 'END { print NR + 0 }' /tmp/slice12-realistic-relative-samples/accepted_summaries.txt)"
+printf "accepted_noop_samples=%s\n" "$accepted_count" | tee /tmp/slice12-realistic-relative-samples/accepted-count.txt
+if [[ "$accepted_count" -ne 5 ]]; then
+  echo "expected_accepted_samples=5 actual=${accepted_count}"
+  exit 1
+fi
+
+awk '
+  BEGIN { ok = 1 }
+  {
+    observation = ""
+    repetitions = ""
+    run_order = ""
+    max_ratio = ""
+    for (i = 1; i <= NF; i++) {
+      split($i, kv, "=")
+      if (kv[1] == "observation") observation = kv[2]
+      if (kv[1] == "comparison_repetitions_per_side") repetitions = kv[2]
+      if (kv[1] == "run_order") run_order = kv[2]
+      if (kv[1] == "max_ratio") max_ratio = kv[2]
+    }
+    if (observation != "clean" && observation != "above_threshold") {
+      printf "bad_observation line=%d value=%s\n", NR, observation
+      ok = 0
+    }
+    if (repetitions != "4") {
+      printf "bad_repetitions line=%d value=%s\n", NR, repetitions
+      ok = 0
+    }
+    if (run_order != "base,head,head,base,base,head,head,base") {
+      printf "bad_run_order line=%d value=%s\n", NR, run_order
+      ok = 0
+    }
+    if (max_ratio == "") {
+      printf "missing_max_ratio line=%d\n", NR
+      ok = 0
+    }
+  }
+  END {
+    exit ok ? 0 : 1
+  }
+' /tmp/slice12-realistic-relative-samples/accepted_summaries.txt
+
+if rg -n "observation=skipped_base_unsupported|observation=infrastructure_failure" /tmp/slice12-realistic-relative-samples/accepted_summaries.txt; then
+  echo "unexpected_unaccepted_sample_in_accepted_summaries"
+  exit 1
+fi
+```
+
+Expected:
+
+- `accepted_noop_samples=5`.
+- No accepted sample has `observation=skipped_base_unsupported`.
+- No accepted sample has `observation=infrastructure_failure`.
+- Every accepted sample has `comparison_repetitions_per_side=4`.
+- Every accepted sample has the expected run order.
+- Every accepted sample has `max_ratio`.
+- The final skip/infra check has no output.
+
+If fewer than five samples are accepted or any accepted sample fails validation, collect another time-separated sample before calculating the threshold.
+
+- [ ] **Step 6: Compute threshold from accepted samples**
+
+Run:
+
+```bash
+awk '
+  BEGIN {
+    sample_count = 0
+    max_ratio = 0
+  }
+  {
+    line_has_ratio = 0
     for (i = 1; i <= NF; i++) {
       split($i, kv, "=")
       if (kv[1] == "max_ratio") {
         ratio = kv[2] + 0
         if (ratio > max_ratio) max_ratio = ratio
+        line_has_ratio = 1
       }
     }
+    if (!line_has_ratio) {
+      printf "missing_max_ratio line=%d\n", NR > "/dev/stderr"
+      exit 1
+    }
+    sample_count += 1
   }
   END {
+    if (sample_count != 5) {
+      printf "expected_accepted_samples=5 actual=%d\n", sample_count > "/dev/stderr"
+      exit 1
+    }
     candidate = max_ratio * 1.05
     threshold = candidate
     if (threshold > 1.50) threshold = 1.50
     printf "max_noop_ratio=%.6f\ncandidate_threshold=%.6f\nobservation_threshold=%.6f\nthreshold_eligible_for_future_blocking=%s\n", max_ratio, candidate, threshold, (candidate <= 1.50 ? "true" : "false")
   }
-' /tmp/slice12-realistic-relative-samples/summaries.txt | tee /tmp/slice12-realistic-relative-samples/threshold.txt
+' /tmp/slice12-realistic-relative-samples/accepted_summaries.txt | tee /tmp/slice12-realistic-relative-samples/threshold.txt
 ```
 
 Expected:
@@ -692,23 +844,6 @@ Expected:
 - `candidate_threshold` is present.
 - `observation_threshold` is present.
 - `threshold_eligible_for_future_blocking` is present.
-
-- [ ] **Step 6: Reject unusable samples before proceeding**
-
-Run:
-
-```bash
-rg -n "observation=skipped_base_unsupported|observation=infrastructure_failure|comparison_repetitions_per_side=4|run_order=base,head,head,base,base,head,head,base" /tmp/slice12-realistic-relative-samples/summaries.txt
-```
-
-Expected:
-
-- No accepted sample has `observation=skipped_base_unsupported`.
-- No accepted sample has `observation=infrastructure_failure`.
-- Every accepted sample has `comparison_repetitions_per_side=4`.
-- Every accepted sample has the expected run order.
-
-If any accepted sample fails those checks, collect another fresh sample before calculating the final threshold.
 
 ## Task 5: Finalize Threshold And Verification Record
 
@@ -778,11 +913,14 @@ For each accepted sample, record:
 - `uname -a`
 - started timestamp
 - finished timestamp
+- time gap from the previous accepted sample, if any
 - full `mode=realistic_relative_observation` summary line
+
+After listing the samples, record whether the runner image and CPU model were identical across accepted samples. If any accepted samples share the same run ID through rerun attempts, explicitly record that correlation as an initial-calibration limitation.
 
 ## Threshold Decision
 
-Record the exact four lines printed by `/tmp/slice12-realistic-relative-samples/threshold.txt`, preceded by `accepted_noop_samples=5`.
+Record the exact one line printed by `/tmp/slice12-realistic-relative-samples/accepted-count.txt`, followed by the exact four lines printed by `/tmp/slice12-realistic-relative-samples/threshold.txt`.
 
 ## Final Workflow State
 
@@ -821,7 +959,7 @@ Record:
 git diff main -- Sources/TextEngineCore Sources/ViewportBenchmarks Tests Package.swift
 ```
 
-Expected: no `TextEngineCore` changes, no benchmark budget changes, no `Package.swift` changes unless the implementation needed a documented script-test target.
+Expected: no `TextEngineCore` changes, no benchmark budget changes, and no `Package.swift` changes.
 
 ## Conclusion
 
@@ -863,10 +1001,11 @@ Run:
 ```bash
 git add .github/workflows/swift-ci.yml docs/superpowers/verification/2026-06-08-hosted-baseline-relative-realistic-observation.md
 git commit -m "docs: record hosted relative observation verification"
+git push
 git status --short
 ```
 
-Expected: commit succeeds and `git status --short` has no output.
+Expected: commit and push succeed, and `git status --short` has no output. This push is required before Task 6 so the final hosted PR run is created for the calculated threshold commit.
 
 ## Task 6: Final Slice Verification
 
@@ -930,14 +1069,40 @@ Expected:
 Run:
 
 ```bash
-final_run_id="$(gh run list --workflow "Swift CI" --branch slice-12-hosted-baseline-relative-realistic-observation --event pull_request --limit 1 --json databaseId --jq '.[0].databaseId')"
+final_head_sha="$(git rev-parse HEAD)"
+calculated_threshold="$(awk -F= '$1 == "observation_threshold" { print $2 }' /tmp/slice12-realistic-relative-samples/threshold.txt)"
+
+final_run_id=""
+for poll in $(seq 1 60); do
+  final_run_id="$(gh run list \
+    --workflow "Swift CI" \
+    --branch slice-12-hosted-baseline-relative-realistic-observation \
+    --event pull_request \
+    --limit 20 \
+    --json databaseId,headSha,status,createdAt \
+    --jq ".[] | select(.headSha == \"${final_head_sha}\") | .databaseId" | head -n 1)"
+  if [[ -n "$final_run_id" ]]; then
+    break
+  fi
+  sleep 20
+done
+
+if [[ -z "$final_run_id" ]]; then
+  echo "missing_final_run_for_head=${final_head_sha}"
+  exit 1
+fi
+
 gh run watch "$final_run_id" --exit-status
+gh run view "$final_run_id" --json databaseId,headSha,status,conclusion,url --jq '.'
+test "$(gh run view "$final_run_id" --json headSha --jq '.headSha')" = "$final_head_sha"
 gh run view "$final_run_id" --log > /tmp/slice12-final-hosted-run.log
 rg -n "Run host tests|Run synthetic benchmark gate|Run memory shape diagnostic|Run RSS memory observation diagnostic|Observe realistic provider relative performance|mode=realistic_relative_observation|continue-on-error" /tmp/slice12-final-hosted-run.log
+rg -n "mode=realistic_relative_observation.*observation_threshold=${calculated_threshold}" /tmp/slice12-final-hosted-run.log
 ```
 
 Expected:
 
+- `final_run_id` belongs to the current local `HEAD`, not an older sampling run.
 - Overall hosted run succeeds.
 - Stable gates ran.
 - Observation step ran.
@@ -951,9 +1116,10 @@ If Step 4 produced a final run not already recorded, append the run ID, run URL,
 ```bash
 git add docs/superpowers/verification/2026-06-08-hosted-baseline-relative-realistic-observation.md
 git commit -m "docs: update hosted relative observation final run"
+git push
 ```
 
-Expected: commit succeeds. If the final hosted run was already recorded in Task 5, no commit is needed.
+Expected: commit and push succeed. If the final hosted run was already recorded in Task 5, no commit or push is needed.
 
 - [ ] **Step 6: Final status check**
 
