@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Show toolchain
         run: |
@@ -40,3 +42,38 @@ jobs:
 
       - name: Run RSS memory observation diagnostic
         run: swift run -c release ViewportBenchmarks -- --memory-observation
+
+      - name: Observe realistic provider relative performance
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          REALISTIC_RELATIVE_OBSERVATION_THRESHOLD: "1.50"
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          echo "observation_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "runner_image=${ImageOS:-unknown}"
+          echo "cpu_model=$(sysctl -n machdep.cpu.brand_string)"
+          swift --version 2>&1 | sed -n '1p' || true
+          xcodebuild -version
+          uname -a
+
+          git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+
+          work_root="${RUNNER_TEMP}/realistic-relative"
+          rm -rf "${work_root}"
+          mkdir -p "${work_root}"
+          git worktree add --detach "${work_root}/base" "${BASE_SHA}"
+          git worktree add --detach "${work_root}/head" "${HEAD_SHA}"
+
+          ./.github/scripts/realistic-relative-observation.sh \
+            --base-dir "${work_root}/base" \
+            --head-dir "${work_root}/head" \
+            --base-sha "${BASE_SHA}" \
+            --head-sha "${HEAD_SHA}" \
+            --threshold "${REALISTIC_RELATIVE_OBSERVATION_THRESHOLD}"
+
+          echo "observation_finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
