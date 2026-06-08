@@ -154,6 +154,14 @@ conclusion=success
 steps=Run host tests; Run synthetic benchmark gate; Run memory shape diagnostic; Run RSS memory observation diagnostic
 ```
 
+Note: the merged verification document's `Final Hosted PR Verification` section
+records run `27158848316` at head `0bee2ea`, which is one commit before this
+final head. That recorded run preceded the verification-doc commit `b095220`,
+whereas the actual final pre-merge head `b095220` ran as `27159042924` above.
+The two records describe different heads and should be read together. This
+one-commit lag is inherent to recording a final run inside the same commit that
+adds the verification document.
+
 ## Verification Evidence Reviewed
 
 The Slice 11 verification document records passing local preflight and final
@@ -329,6 +337,17 @@ threshold. The final workflow correctly excludes the realistic-provider gate,
 but the data says the current absolute hosted signal is too close to its budget
 for low-noise CI enforcement.
 
+### Hosted Samples Are Correlated Reruns, Not Independent Draws
+
+The three accepted samples are attempts 1, 2, and 3 of a single run
+(`27156757711`) taken at nearly the same time, so they likely landed on the
+same or similar runner hardware. They are not independent draws across separate
+runner allocations or days, which is where real CI variance comes from.
+Three correlated reruns therefore under-estimate the true p95/p99 spread. This
+strengthens the conclusion that an absolute gate is fragile, but it weakens any
+claim that the sample is large enough to fix a precise threshold. A wider
+independent sample (Option B) is the way to characterize real variance.
+
 ### Realistic-Provider CI Enforcement Is Still Deferred
 
 The local `--realistic-provider --gate` command remains useful and stable on
@@ -365,12 +384,16 @@ slice.
 
 ## Lessons For Slice 12
 
-1. Do not repeat the same absolute hosted gate.
+1. Do not repeat the identical three-rerun absolute hosted gate.
 
-Slice 11 already collected valid hosted evidence. The evidence says the
-absolute p95 budget is too close on `macos-latest` for direct CI enforcement
-under the approved margin policy. Re-running the same three-sample procedure is
-unlikely to change the engineering answer.
+Slice 11 already collected useful hosted evidence. It indicates the absolute
+p95 budget is too close on `macos-latest` for direct CI enforcement under the
+approved margin policy. Because the three samples are correlated reruns of one
+run, they under-estimate true cross-run variance, so they argue more strongly
+that the gate is fragile than that no further measurement is needed. Repeating
+the identical three-rerun procedure is unlikely to change the answer, but a
+wider independent sample (Option B) would help if a precise threshold is ever
+required.
 
 2. Separate local budgets from hosted regression semantics.
 
@@ -509,6 +532,33 @@ Suggested scope:
 This continues the memory-proof thread, but it is less urgent than fixing the
 hosted regression signal for realistic-provider latency.
 
+### Option G: Re-Calibrated Hosted-Derived Absolute Budget
+
+Keep the existing absolute-budget gate shape but re-derive the
+realistic-provider budget from hosted evidence instead of local hardware, then
+run it in CI.
+
+Suggested scope:
+
+- Collect a wider independent hosted sample of the realistic-provider output
+  (see Option B) and take a hosted p95/p99 with explicit headroom, for example
+  a budget at roughly twice the observed hosted p99.
+- Update only the realistic-provider scenario budget in
+  `Sources/ViewportBenchmarks/RealisticProviderBenchmark.swift`; leave the
+  synthetic budgets unchanged.
+- Add the `Run realistic provider benchmark gate` step to `Swift CI` once the
+  re-calibrated budget passes the margin policy on hosted runners.
+- Record run IDs, head SHAs, the old and new budgets, and the hosted maxima.
+- Keep branch protection, cross-target CI, baseline-relative comparison, storage
+  adapters, and variable-height layout out of scope.
+
+This is the cheapest way to get the realistic-provider gate running in CI: it
+reuses the existing absolute-gate mechanics and changes only the budget
+constants. It is weaker than Option A at distinguishing a real regression from a
+globally slow runner, because a fixed absolute budget still drifts with runner
+hardware. It also requires touching benchmark source, which Slice 11
+deliberately avoided.
+
 ## Recommended Slice 12 Selection
 
 Recommended: Option A, hosted baseline-relative realistic regression gate.
@@ -516,7 +566,8 @@ Recommended: Option A, hosted baseline-relative realistic regression gate.
 Reasoning:
 
 - Slice 11 did not fail to collect evidence; it collected the right evidence
-  and proved that direct absolute hosted p95 enforcement is too fragile.
+  and indicated that direct absolute hosted p95 enforcement is likely too
+  fragile (the evidence is three correlated reruns of a single run; see Risks).
 - The product brief asks for regression benchmarks that block performance
   degradation. A same-runner base-vs-head comparison maps to regression better
   than a fixed absolute threshold on a variable hosted runner.
@@ -532,7 +583,11 @@ Choose Option B instead only if the team wants one more measurement-only slice
 before building comparison mechanics. Choose Option C instead only if the
 project is ready to accept functional/API risk and leave the hosted
 realistic-provider regression gap open. Choose Option E only if repository
-policy is the immediate operational priority.
+policy is the immediate operational priority. Choose Option G if the priority is
+simply getting a realistic-provider gate running in CI at the lowest cost,
+accepting that an absolute hosted budget stays sensitive to runner hardware;
+Option G pairs naturally with Option B, which supplies the hosted distribution
+the re-calibrated budget should be derived from.
 
 ## Slice 11 Review Conclusion
 
