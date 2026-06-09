@@ -150,6 +150,17 @@ cpu_model=Apple M1 (Virtual)
 runner_image_env=macos15
 ```
 
+Head SHA note:
+
+The recorded run covers `5b157e9`, the commit that captured this verification.
+Every commit after it on this branch is documentation-only, so the CI-affecting
+helper and workflow at the PR HEAD are byte-identical to the verified run
+(`git diff 5b157e9..HEAD -- .github/` is empty). The latest hosted PR run at the
+time of writing, `27228413355` on `485bab4`, is green on both jobs and
+corroborates this. Proof of the exact merged code is the post-merge push run
+recorded under Post-Merge Push Run (Task 7), since any pre-merge run necessarily
+runs on a pre-merge SHA.
+
 Toolchain:
 
 ```text
@@ -263,4 +274,4 @@ no output
 
 PR #7 has local and hosted evidence for the cross-target CI path. Local verification passed host tests, release build, benchmark gate, memory shape, memory observation, helper self-test, iOS device build, and iOS simulator build. The hosted pull request run passed with iOS device and iOS simulator builds marked blocking, no blocking failures, and successful host tests and benchmark diagnostics.
 
-WASM and WASM embedded were skipped in hosted CI because the GitHub runner used Swift 6.1.2 and no matching WASM SDK was available. The skip was nonblocking by design, and local Swift 6.2.1 WASM package graph builds passed but were not used as runner-matched hosted evidence.
+WASM and WASM embedded were skipped in hosted CI because the GitHub runner used Swift 6.1.2 and no matching WASM SDK was available. The skip was nonblocking by design, and local Swift 6.2.1 WASM package graph builds passed but were not used as runner-matched hosted evidence. WASM and embedded WASM remain observational in Slice 13; promotion to blocking is left to a later slice, once hosted SDK provisioning and compile are proven reliable across runs.
