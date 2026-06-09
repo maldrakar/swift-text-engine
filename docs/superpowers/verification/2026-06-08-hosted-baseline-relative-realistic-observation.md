@@ -431,7 +431,33 @@ Existing stable gates in `.github/workflows/swift-ci.yml` remain:
 
 ## Final Hosted PR Verification
 
-Final hosted verification is pending after this threshold/verification commit. Task 6 may update this section after the final hosted run if needed.
+- Run ID: `27177155119`
+- Attempt: `1`
+- Run URL: `https://github.com/arthurbanshchikov/swift-text-engine/actions/runs/27177155119`
+- Event: `pull_request`
+- Head SHA: `45fa749d866d26891e829a7047d3bb821f30a0a9`
+- Conclusion: `success`
+- Job duration: `4m54s` (`2026-06-09T01:04:55Z` to `2026-06-09T01:09:49Z`)
+- Final observation summary line:
+
+```text
+mode=realistic_relative_observation base_sha=cd907a8d7ddcf1d7defd25f1eee60adec60379e4 head_sha=45fa749d866d26891e829a7047d3bb821f30a0a9 comparison_repetitions_per_side=4 run_order=base,head,head,base,base,head,head,base base_p95_ns_values=19355,20866,18791,21034 head_p95_ns_values=15070,20880,20034,21321 base_p99_ns_values=25048,30238,25093,26673 head_p99_ns_values=21803,36698,26718,35101 base_median_p95_ns=20110.500000 head_median_p95_ns=20457.000000 base_median_p99_ns=25883.000000 head_median_p99_ns=30909.500000 p95_ratio=1.017230 p99_ratio=1.194201 max_ratio=1.194201 observation_threshold=1.221556 observation=clean blocking_ready=false
+```
+
+Stable gates passed in the final hosted run:
+
+```text
+Run host tests
+Run synthetic benchmark gate
+Run memory shape diagnostic
+Run RSS memory observation diagnostic
+```
+
+The observation step was nonblocking by workflow configuration:
+
+```text
+continue-on-error: true
+```
 
 ## Non-Goal Checks
 
