@@ -209,22 +209,28 @@ the empty-`platforms:` warning may behave differently. The exact runner command
 is therefore treated as **requiring verified discovery on the CI runner**, per
 the brief's experimental-API rule, not as an assumed-good architecture.
 
-Verified command discovery is a first-class deliverable, captured in Acceptance,
-not an implementation aside:
+The package-graph mechanism is mandatory. There is no fallback to a non-graph
+compile: this slice keeps a single coherent iOS mechanism so the scope and
+acceptance "through the Swift package graph" requirement is unambiguous.
+Verified command discovery operates only within that mechanism and is a
+first-class deliverable, captured in Acceptance, not an implementation aside:
 
 - Implementation must resolve the real scheme via `xcodebuild -list` rather than
   assuming the name.
-- If `xcodebuild -scheme ... -destination 'generic/platform=iOS[ Simulator]'`
-  fails on the runner's Xcode, the documented fallback is the historically
-  proven `xcrun swiftc -target arm64-apple-ios... -sdk "$(xcrun --sdk iphoneos
-  --show-sdk-path)" -parse-as-library -emit-module` over `Sources/TextEngineCore/*.swift`
-  (globbed so new files are covered). The earlier `swift build` with
-  `-Xswiftc -target`/`-Xswiftc -sdk` injection is explicitly **rejected** as a
-  fallback: design verification showed it leaks the macOS sysroot
+- Robustness against runner-Xcode differences stays inside the package graph: if
+  the runner's default-selected Xcode mis-resolves the package scheme or the
+  destination, implementation may select a different installed Xcode (via
+  `DEVELOPER_DIR` or `xcode-select`) and record which one worked. It must not
+  switch to a non-graph compile.
+- If no installed runner Xcode can build the package-graph iOS destinations,
+  that is surfaced as a blocking finding for an explicit decision (the same way
+  a required `platforms:` declaration would be), not silently degraded.
+- The `swift build` with `-Xswiftc -target`/`-Xswiftc -sdk` injection is
+  explicitly **rejected**: design verification showed it leaks the macOS sysroot
   (`using sysroot for 'MacOSX' but targeting 'iPhone'`), so it does not truly
   compile against the iOS SDK.
-- The verification document must record the exact working command, the runner
-  Xcode version, and the resolved SDK.
+- The verification document must record the exact working `xcodebuild` command,
+  the selected runner Xcode version, and the resolved SDK.
 
 Other notes:
 
@@ -315,7 +321,8 @@ Hosted verification must record:
 - the run ID, attempt, run URL, event, and head SHA;
 - runner image, CPU model, `swift --version`, `xcodebuild -version`, and
   `uname -a`;
-- the resolved iOS SDK and the exact `xcodebuild` commands and results;
+- the resolved iOS SDK, the selected Xcode, and the exact selected iOS compile
+  commands and results;
 - whether the runner-matched WASM and embedded-WASM SDKs were provisioned, their
   resolved ids if any, and each compile result or skip reason;
 - the full per-target lines and the summary line;
@@ -334,10 +341,10 @@ Slice 13 is complete when:
 - iOS device and iOS simulator compile checks run through the Swift package graph
   and are blocking;
 - the exact working iOS compile command is discovered and verified on the CI
-  runner (resolving the scheme via `xcodebuild -list`, or falling back to the
-  proven `xcrun swiftc -emit-module` glob if `xcodebuild` scheme resolution
-  fails on the runner Xcode) and the working command, runner Xcode version, and
-  resolved SDK are recorded in the verification document;
+  runner within the package-graph mechanism (resolving the scheme via
+  `xcodebuild -list`, and if needed selecting a compatible installed Xcode), and
+  the working `xcodebuild` command, selected runner Xcode version, and resolved
+  SDK are recorded in the verification document;
 - WASM and embedded-WASM checks use a Swift SDK matched to the runner's own
   toolchain, are observational, and report `pass`, `fail`, or `skipped` without
   failing the job;
