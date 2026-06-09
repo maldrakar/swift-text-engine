@@ -444,6 +444,8 @@ Existing stable gates in `.github/workflows/swift-ci.yml` remain:
 mode=realistic_relative_observation base_sha=cd907a8d7ddcf1d7defd25f1eee60adec60379e4 head_sha=45fa749d866d26891e829a7047d3bb821f30a0a9 comparison_repetitions_per_side=4 run_order=base,head,head,base,base,head,head,base base_p95_ns_values=19355,20866,18791,21034 head_p95_ns_values=15070,20880,20034,21321 base_p99_ns_values=25048,30238,25093,26673 head_p99_ns_values=21803,36698,26718,35101 base_median_p95_ns=20110.500000 head_median_p95_ns=20457.000000 base_median_p99_ns=25883.000000 head_median_p99_ns=30909.500000 p95_ratio=1.017230 p99_ratio=1.194201 max_ratio=1.194201 observation_threshold=1.221556 observation=clean blocking_ready=false
 ```
 
+This final run is itself a no-op-equivalent sample: head `45fa749` changed only the workflow threshold value and verification docs, so the benchmark-executed source under `Sources/TextEngineCore` and `Sources/ViewportBenchmarks` is identical to base `cd907a8`. Its `max_ratio=1.194201` exceeds the `max_noop_ratio=1.163387` derived from the five calibration samples, leaving only about `2.3%` headroom below `observation_threshold=1.221556`. The observation is still `clean` and the step is nonblocking, so this does not affect Slice 12. It is recorded as evidence that the five-sample threshold has thin headroom and must not be treated as safe for blocking; the promotion slice must gather its own clean no-op-equivalent samples across different days and runner allocations before enforcing.
+
 Stable gates passed in the final hosted run:
 
 ```text
