@@ -96,11 +96,15 @@ Expected: output lists a `TextEngineCore` scheme (alongside `SwiftTextEngine-Pac
 Run:
 
 ```bash
-xcodebuild build -scheme TextEngineCore -destination 'generic/platform=iOS' -derivedDataPath /tmp/ct-preflight-device 2>&1 | tail -2
-xcodebuild build -scheme TextEngineCore -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/ct-preflight-sim 2>&1 | tail -2
+xcodebuild build -scheme TextEngineCore -destination 'generic/platform=iOS' -derivedDataPath /tmp/ct-preflight-device > /tmp/ct-preflight-device.log 2>&1
+echo "device_exit=$?"
+tail -2 /tmp/ct-preflight-device.log
+xcodebuild build -scheme TextEngineCore -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/ct-preflight-sim > /tmp/ct-preflight-sim.log 2>&1
+echo "simulator_exit=$?"
+tail -2 /tmp/ct-preflight-sim.log
 ```
 
-Expected: each ends with `** BUILD SUCCEEDED **`.
+Expected: `device_exit=0` and `simulator_exit=0`, and each log tail ends with `** BUILD SUCCEEDED **`. (The exit code is captured directly rather than through a pipe, so a build failure is not masked by `tail`.)
 
 - [ ] **Step 4: Confirm branch and clean tree**
 
@@ -135,6 +139,7 @@ set -uo pipefail
 
 SCHEME="TextEngineCore"
 PACKAGE_TARGET="TextEngineCore"
+TAIL_LINES="${CROSS_TARGET_LOG_TAIL:-40}"
 
 usage() {
   cat <<'EOF'
@@ -178,27 +183,31 @@ build_summary() {
   echo "mode=cross_target_compile_summary ios_device=$1 ios_simulator=$2 wasm=$3 wasm_embedded=$4 blocking_failures=$5 exit=$6"
 }
 
-# Resolve an installed Swift SDK id matching the version and target kind.
-# kind is "wasm" or "wasm_embedded".
-resolve_wasm_sdk_id() {
-  local version="$1" kind="$2" line
+# Resolve a Swift SDK id from `swift sdk list` text on stdin, matching the
+# version and target kind ("wasm" or "wasm_embedded"). Pure: covered by
+# --self-test. SDK ids contain no spaces, so lines containing spaces (headers or
+# other noise) are skipped.
+resolve_wasm_sdk_id_from_list() {
+  local version="$1" kind="$2" line trimmed
   while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
+    trimmed="$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    [[ -z "$trimmed" ]] && continue
+    case "$trimmed" in *" "*) continue ;; esac
     case "$kind" in
       wasm_embedded)
-        if [[ "$line" == *"$version"* && "$line" == *wasm* && "$line" == *embedded* ]]; then
-          printf '%s' "$line"
+        if [[ "$trimmed" == *"$version"* && "$trimmed" == *wasm* && "$trimmed" == *embedded* ]]; then
+          printf '%s' "$trimmed"
           return 0
         fi
         ;;
       wasm)
-        if [[ "$line" == *"$version"* && "$line" == *wasm* && "$line" != *embedded* ]]; then
-          printf '%s' "$line"
+        if [[ "$trimmed" == *"$version"* && "$trimmed" == *wasm* && "$trimmed" != *embedded* ]]; then
+          printf '%s' "$trimmed"
           return 0
         fi
         ;;
     esac
-  done < <(swift sdk list 2>/dev/null)
+  done
   return 1
 }
 
@@ -214,7 +223,22 @@ assert_equal() {
   fi
 }
 
+assert_resolver_missing() {
+  local list="$1" version="$2" kind="$3" label="$4"
+  if printf '%s\n' "$list" | resolve_wasm_sdk_id_from_list "$version" "$kind" >/dev/null; then
+    echo "self_test=fail label=$label expected=missing actual=found"
+    exit 1
+  fi
+}
+
 run_self_test() {
+  local clean_list="swift-6.1.2-RELEASE_wasm
+swift-6.1.2-RELEASE_wasm-embedded"
+  local noisy_list="Installed Swift SDKs:
+  swift-6.1.2-RELEASE_wasm
+  swift-6.1.2-RELEASE_wasm-embedded
+  6.0.3-RELEASE-ubuntu24.04_aarch64
+some descriptive header with spaces"
   assert_equal "6.1.2" \
     "$(swift_version_key 'Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)')" \
     "swift_version_key_apple"
@@ -232,6 +256,16 @@ run_self_test() {
     "$(build_summary pass pass skipped skipped 0 0)" "summary_clean"
   assert_equal "mode=cross_target_compile_summary ios_device=fail ios_simulator=pass wasm=fail wasm_embedded=skipped blocking_failures=1 exit=1" \
     "$(build_summary fail pass fail skipped 1 1)" "summary_ios_fail"
+  assert_equal "swift-6.1.2-RELEASE_wasm" \
+    "$(printf '%s\n' "$clean_list" | resolve_wasm_sdk_id_from_list 6.1.2 wasm)" "resolve_clean_wasm"
+  assert_equal "swift-6.1.2-RELEASE_wasm-embedded" \
+    "$(printf '%s\n' "$clean_list" | resolve_wasm_sdk_id_from_list 6.1.2 wasm_embedded)" "resolve_clean_embedded"
+  assert_equal "swift-6.1.2-RELEASE_wasm" \
+    "$(printf '%s\n' "$noisy_list" | resolve_wasm_sdk_id_from_list 6.1.2 wasm)" "resolve_noisy_wasm"
+  assert_equal "swift-6.1.2-RELEASE_wasm-embedded" \
+    "$(printf '%s\n' "$noisy_list" | resolve_wasm_sdk_id_from_list 6.1.2 wasm_embedded)" "resolve_noisy_embedded"
+  assert_resolver_missing "$clean_list" 9.9.9 wasm "resolve_missing_version"
+  assert_resolver_missing "$clean_list" 6.1.2 wasm_embedded_typo "resolve_missing_kind"
   echo "self_test=pass"
 }
 
@@ -241,31 +275,77 @@ run_self_test() {
 
 LAST_RESULT=""
 LAST_REASON=""
+IOS_SCHEME_STATUS=""
 
-ios_scheme_available() {
-  xcodebuild -list 2>/dev/null \
-    | awk 'f && NF { gsub(/^[[:space:]]+/, ""); print } /Schemes:/ { f = 1 }' \
-    | grep -qx "$SCHEME"
+# Print the tail of a log file with clear delimiters, so failures are visible in
+# the hosted CI log and usable for the verification record.
+print_log_tail() {
+  local label="$1" file="$2"
+  echo "----- ${label} log tail (last ${TAIL_LINES} lines) -----"
+  tail -n "$TAIL_LINES" "$file" 2>/dev/null || true
+  echo "----- end ${label} log tail -----"
+}
+
+# Print iOS toolchain metadata so the hosted log carries the verification facts
+# (selected Xcode, resolved SDKs). Reflects DEVELOPER_DIR if the job set it.
+print_ios_toolchain_metadata() {
+  echo "cross_target_developer_dir=${DEVELOPER_DIR:-unset}"
+  echo "cross_target_xcode_select_path=$(xcode-select -p 2>/dev/null || echo unknown)"
+  echo "cross_target_xcodebuild_version=$(xcodebuild -version 2>/dev/null | tr '\n' ';' | sed 's/;$//')"
+  echo "cross_target_iphoneos_sdk_path=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo unknown)"
+  echo "cross_target_iphoneos_sdk_version=$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || echo unknown)"
+  echo "cross_target_iphonesimulator_sdk_path=$(xcrun --sdk iphonesimulator --show-sdk-path 2>/dev/null || echo unknown)"
+}
+
+# Resolve the package scheme once, distinguishing an xcodebuild-list infra
+# failure from a genuinely missing scheme.
+resolve_ios_scheme() {
+  local listlog="$1"
+  if ! xcodebuild -list >"$listlog" 2>&1; then
+    IOS_SCHEME_STATUS="xcodebuild_list_failed"
+    print_log_tail "xcodebuild-list" "$listlog"
+    return
+  fi
+  if ! awk 'f && NF { gsub(/^[[:space:]]+/, ""); print } /Schemes:/ { f = 1 }' "$listlog" | grep -qx "$SCHEME"; then
+    IOS_SCHEME_STATUS="scheme_unresolved"
+    print_log_tail "xcodebuild-list" "$listlog"
+    return
+  fi
+  IOS_SCHEME_STATUS=""
 }
 
 compile_ios_target() {
-  local destination="$1" logfile="$2"
-  if ! ios_scheme_available; then
+  local target_name="$1" destination="$2" logfile="$3"
+  echo "cross_target_command target=${target_name} cmd=\"xcodebuild build -scheme ${SCHEME} -destination '${destination}'\""
+  if [[ -n "$IOS_SCHEME_STATUS" ]]; then
     LAST_RESULT="fail"
-    LAST_REASON="scheme_unresolved"
+    LAST_REASON="$IOS_SCHEME_STATUS"
     return
   fi
   if xcodebuild build -scheme "$SCHEME" -destination "$destination" -derivedDataPath "$DDP" >"$logfile" 2>&1; then
     LAST_RESULT="pass"
     LAST_REASON="none"
   else
+    if grep -q "Unable to find a destination matching" "$logfile"; then
+      LAST_REASON="destination_unavailable"
+    else
+      LAST_REASON="compile_failed"
+    fi
     LAST_RESULT="fail"
-    LAST_REASON="compile_failed"
+    print_log_tail "${target_name}-build" "$logfile"
   fi
 }
 
+# Runtime wrapper: resolve an installed SDK id from live `swift sdk list` output,
+# delegating the parsing to the self-tested pure function.
+resolve_wasm_sdk_id() {
+  local version="$1" kind="$2" list
+  list="$(swift sdk list 2>/dev/null || true)"
+  printf '%s\n' "$list" | resolve_wasm_sdk_id_from_list "$version" "$kind"
+}
+
 compile_wasm_target() {
-  local kind="$1" logfile="$2" sdk_id url_var url
+  local kind="$1" target_name="$2" logfile="$3" sdk_id url_var url
   if ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
     if [[ "$kind" == "wasm_embedded" ]]; then
       url_var="CROSS_TARGET_WASM_EMBEDDED_SDK_URL"
@@ -278,9 +358,11 @@ compile_wasm_target() {
       LAST_REASON="sdk_unavailable"
       return
     fi
+    echo "cross_target_command target=${target_name} cmd=\"swift sdk install ${url}\""
     if ! swift sdk install "$url" >"${logfile}.install" 2>&1; then
       LAST_RESULT="skipped"
       LAST_REASON="sdk_install_failed"
+      print_log_tail "${target_name}-sdk-install" "${logfile}.install"
       return
     fi
     if ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
@@ -289,12 +371,15 @@ compile_wasm_target() {
       return
     fi
   fi
+  echo "cross_target_wasm_sdk_id target=${target_name} id=${sdk_id}"
+  echo "cross_target_command target=${target_name} cmd=\"swift build --swift-sdk ${sdk_id} --target ${PACKAGE_TARGET}\""
   if swift build --swift-sdk "$sdk_id" --target "$PACKAGE_TARGET" >"$logfile" 2>&1; then
     LAST_RESULT="pass"
     LAST_REASON="none"
   else
     LAST_RESULT="fail"
     LAST_REASON="compile_failed"
+    print_log_tail "${target_name}-build" "$logfile"
   fi
 }
 
@@ -304,19 +389,22 @@ main() {
   SWIFT_VERSION="$(swift_version_key "$(swift --version 2>&1 | head -n 1)")"
   echo "cross_target_swift_version=${SWIFT_VERSION:-unknown}"
 
-  compile_ios_target 'generic/platform=iOS' "$WORK/ios_device.log"
+  print_ios_toolchain_metadata
+  resolve_ios_scheme "$WORK/xcodebuild-list.log"
+
+  compile_ios_target ios_device 'generic/platform=iOS' "$WORK/ios_device.log"
   ios_device_result="$LAST_RESULT"
   emit_target_line ios_device "$LAST_RESULT" "$LAST_REASON" true
 
-  compile_ios_target 'generic/platform=iOS Simulator' "$WORK/ios_simulator.log"
+  compile_ios_target ios_simulator 'generic/platform=iOS Simulator' "$WORK/ios_simulator.log"
   ios_simulator_result="$LAST_RESULT"
   emit_target_line ios_simulator "$LAST_RESULT" "$LAST_REASON" true
 
-  compile_wasm_target wasm "$WORK/wasm.log"
+  compile_wasm_target wasm wasm "$WORK/wasm.log"
   wasm_result="$LAST_RESULT"
   emit_target_line wasm "$LAST_RESULT" "$LAST_REASON" false
 
-  compile_wasm_target wasm_embedded "$WORK/wasm_embedded.log"
+  compile_wasm_target wasm_embedded wasm_embedded "$WORK/wasm_embedded.log"
   wasm_embedded_result="$LAST_RESULT"
   emit_target_line wasm_embedded "$LAST_RESULT" "$LAST_REASON" false
 
@@ -417,6 +505,9 @@ Append this job to `.github/workflows/swift-ci.yml` under `jobs:`, after the exi
 
       - name: Show toolchain
         run: |
+          echo "developer_dir=${DEVELOPER_DIR:-unset}"
+          xcode-select -p
+          ls -d /Applications/Xcode*.app || true
           swift --version
           xcodebuild -version
           uname -a
@@ -425,12 +516,26 @@ Append this job to `.github/workflows/swift-ci.yml` under `jobs:`, after the exi
         run: ./.github/scripts/cross-target-compile.sh
 ```
 
+If a later run shows the default-selected Xcode mis-resolves the package scheme or destinations (see Task 4 Step 3), add a job-level `env:` block so both `Show toolchain` and the helper see the same toolchain, and do not use `sudo xcode-select` (it mutates global runner state):
+
+```yaml
+  cross-target-compile:
+    name: Cross-target compile
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+```
+
+Use the exact Xcode path discovered from the `ls -d /Applications/Xcode*.app` output; the value above is illustrative.
+
 - [ ] **Step 2: Verify the workflow shape**
 
 Run:
 
 ```bash
-rg -n "host-tests-and-benchmark-gate|cross-target-compile|Cross-target compile|Compile TextEngineCore for non-host targets|continue-on-error" .github/workflows/swift-ci.yml
+rg -n "host-tests-and-benchmark-gate|cross-target-compile|Cross-target compile|Compile TextEngineCore for non-host targets" .github/workflows/swift-ci.yml
+git diff -- .github/workflows/swift-ci.yml | rg -n "^\+.*continue-on-error"; echo "added_continue_on_error_exit=$?"
 ```
 
 Expected:
@@ -438,7 +543,7 @@ Expected:
 - both job ids `host-tests-and-benchmark-gate` and `cross-target-compile` are present;
 - the new job name `Cross-target compile` is present;
 - the helper-invoking step is present;
-- no `continue-on-error` is introduced in the existing job.
+- `added_continue_on_error_exit=1` — the diff adds no `continue-on-error` line. (A plain `rg` for `continue-on-error` would also match the pre-existing line on the realistic-observation step, so the diff check is used to confirm none was *added*.)
 
 - [ ] **Step 3: Validate the YAML parses and exposes both jobs**
 
@@ -530,12 +635,16 @@ Expected: a PR targeting `main` exists for this branch.
 Run:
 
 ```bash
-run_id="$(gh run list --workflow "Swift CI" --branch slice-12-post-slice-review --event pull_request --limit 1 --json databaseId --jq '.[0].databaseId')"
+head_sha="$(git rev-parse HEAD)"
+run_id="$(gh run list --workflow "Swift CI" --branch slice-12-post-slice-review --event pull_request --limit 20 --json databaseId,headSha --jq ".[] | select(.headSha == \"${head_sha}\") | .databaseId" | head -n 1)"
+test -n "$run_id" || { echo "no_run_for_head=${head_sha} (wait for CI to start, then retry)"; }
 gh run watch "$run_id"
 mkdir -p /tmp/slice13-cross-target
 gh run view "$run_id" --log > /tmp/slice13-cross-target/run-1.log
-rg -n "Cross-target compile|cross_target_swift_version|mode=cross_target_compile|xcodebuild -version|Swift version|Darwin" /tmp/slice13-cross-target/run-1.log
+rg -n "Cross-target compile|cross_target_swift_version|cross_target_xcode|cross_target_iphoneos|cross_target_command|cross_target_wasm_sdk_id|mode=cross_target_compile|xcodebuild -version|Swift version|Darwin" /tmp/slice13-cross-target/run-1.log
 ```
+
+Selecting by `headSha` rather than the latest run avoids capturing a stale run after a push or rerun.
 
 Expected:
 
@@ -547,25 +656,31 @@ Expected:
 
 Inspect the iOS lines in `/tmp/slice13-cross-target/run-1.log`.
 
-- If `target=ios_device` and `target=ios_simulator` both show `result=pass`, the blocking iOS contract holds. Record the runner `xcodebuild -version` and resolved SDK from the log.
-- If either iOS target shows `result=fail reason=scheme_unresolved` or a destination error, the runner's default Xcode mis-resolves the package scheme. Stay inside the package graph: add a step before the helper that selects a known-good installed Xcode and record which one worked, for example:
+Use the helper's metadata lines (`cross_target_developer_dir`, `cross_target_xcode_select_path`, `cross_target_xcodebuild_version`, `cross_target_iphoneos_sdk_*`) and the `cross_target_command` lines, which now appear directly in the hosted log.
+
+- If `target=ios_device` and `target=ios_simulator` both show `result=pass`, the blocking iOS contract holds. Record the `cross_target_xcodebuild_version` and `cross_target_iphoneos_sdk_path` from the log.
+- If either iOS target shows `result=fail` with `reason=xcodebuild_list_failed`, `reason=scheme_unresolved`, or `reason=destination_unavailable`, the runner's default Xcode mis-resolves the package scheme or destination (the helper prints the `xcodebuild-list`/build log tail to disambiguate). Stay inside the package graph: select a known-good installed Xcode via a job-level `DEVELOPER_DIR` env (preferred over `sudo xcode-select`, which mutates global runner state). Read the available Xcodes from the `ls -d /Applications/Xcode*.app` line in `Show toolchain`, then set, for example:
 
 ```yaml
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+  cross-target-compile:
+    name: Cross-target compile
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
 ```
 
-Discover the available Xcodes on the runner first with `ls -d /Applications/Xcode*.app` (printed by adding it to the `Show toolchain` step), choose one whose `xcodebuild` builds the package-graph iOS destinations, and record the selection. Do not switch to a non-graph compile.
+Because `DEVELOPER_DIR` is job-level, both `Show toolchain` and the helper metadata then report the same selected toolchain. Use the exact discovered path. Do not switch to a non-graph compile.
 
 - If repaired, commit:
 
 ```bash
 git add .github/workflows/swift-ci.yml
-git commit -m "ci: select runner Xcode for cross-target iOS build"
+git commit -m "ci: pin runner Xcode via DEVELOPER_DIR for cross-target iOS build"
 git push
 ```
 
-Then re-run Step 2 with the new run id until both iOS targets pass.
+Then re-run Step 2 (re-resolving the run id by `headSha`) until both iOS targets pass.
 
 - [ ] **Step 4: Record the WASM provisioning outcome and attempt a real WASM compile**
 
@@ -704,7 +819,9 @@ git status --short
 
 Expected: commit and push succeed; `git status --short` has no output.
 
-## Task 6: Final Slice Verification
+## Task 6: Final Pre-Merge Slice Verification
+
+This task is the pre-merge completion gate. Slice 13 is "pre-merge ready" when Tasks 1-6 pass. The post-merge push run is intentionally **not** part of this gate — it lives in Task 7 and runs only after the PR is merged, so an executor never blocks here on a step that cannot complete before merge.
 
 **Files:**
 - Read: `docs/superpowers/specs/2026-06-09-cross-target-textenginecore-ci-design.md`
@@ -778,14 +895,37 @@ Expected:
 - `git status --short` has no output;
 - recent commits include the helper, workflow job, and verification commits for Slice 13.
 
-- [ ] **Step 6: Record the post-merge push run**
+- [ ] **Step 6: Confirm pre-merge readiness**
 
-After the PR is merged to `main`, capture the `push` run and append it to the verification document if not already recorded:
+Confirm Tasks 1-6 are complete: helper self-test passes, the workflow job is wired, the hosted PR run shows both iOS targets `result=pass` and a `blocking_failures=0 exit=0` summary, the WASM outcome (compiled or skipped-with-reason) is recorded, the existing job is unchanged, and the verification document is committed and pushed (except its Post-Merge section). At this point Slice 13 is ready to merge.
+
+## Task 7: Post-Merge Follow-Up
+
+> **Not part of pre-merge completion.** Run this only after the PR is merged to `main`. Do not block Slice 13 completion or hang waiting on it before merge.
+
+**Files:**
+- Modify: `docs/superpowers/verification/2026-06-09-cross-target-textenginecore-ci.md`
+
+- [ ] **Step 1: Capture and record the post-merge push run**
+
+After the PR is merged to `main`, capture the `push` run for the merge commit and fill the verification document's "Post-Merge Push Run" section:
 
 ```bash
-push_run_id="$(gh run list --workflow "Swift CI" --branch main --event push --limit 1 --json databaseId --jq '.[0].databaseId')"
+merge_sha="$(git rev-parse origin/main)"
+push_run_id="$(gh run list --workflow "Swift CI" --branch main --event push --limit 20 --json databaseId,headSha --jq ".[] | select(.headSha == \"${merge_sha}\") | .databaseId" | head -n 1)"
+gh run watch "$push_run_id"
 gh run view "$push_run_id" --json headSha,conclusion,url --jq '.'
 gh run view "$push_run_id" --log | rg -n "mode=cross_target_compile_summary"
 ```
 
-Expected: the push run on the merge commit concludes `success` and prints the cross-target summary line. If newly recorded, commit with `docs: record cross-target ci post-merge run` and push.
+Expected: the push run on the merge commit concludes `success` and prints the cross-target summary line. (On `push`, the cross-target job runs; the realistic-observation step in the other job is skipped, as it is PR-only.)
+
+- [ ] **Step 2: Commit the post-merge record**
+
+```bash
+git add docs/superpowers/verification/2026-06-09-cross-target-textenginecore-ci.md
+git commit -m "docs: record cross-target ci post-merge run"
+git push
+```
+
+Expected: commit and push succeed. (If `main` is protected against direct pushes, record this on a short follow-up branch/PR instead.)
