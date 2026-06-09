@@ -45,6 +45,13 @@ next public core API change. Variable-height layout is that change, so Slice 13
 moves the portability checks into GitHub Actions first, as the infrastructure
 precursor to variable-height layout.
 
+Slice 13 deliberately delivers a partial cross-target CI guarantee, not the full
+brief criterion in one step: a blocking, continuously enforced iOS compile proof
+plus a best-effort WASM probe. The WASM probe converts the WASM portability
+signal from local-only toward CI, but because it may be skipped when a matching
+SDK cannot be provisioned, Slice 13 does not yet claim continuous CI proof for
+WASM. Promoting the WASM probe to enforced proof is left to a later slice.
+
 This slice also responds to a measured toolchain asymmetry. Slice 12 hosted
 samples ran `Apple Swift version 6.1.2` under `Xcode 16.4` on the `macos15`
 runner image, while the local checks use Swift 6.2.1 / Xcode 26.3 and a
@@ -192,18 +199,41 @@ xcodebuild build -scheme TextEngineCore -destination 'generic/platform=iOS'
 xcodebuild build -scheme TextEngineCore -destination 'generic/platform=iOS Simulator'
 ```
 
-Notes:
+This command pair was design-verified locally on Xcode 26.3 during
+brainstorming: `xcodebuild -list` reported a `TextEngineCore` scheme, and both
+destinations returned `** BUILD SUCCEEDED **`, compiling `TextEngineCore` for
+`arm64-apple-ios` (defaulting to a baseline deployment target because no
+`platforms:` is declared). That local proof is on Xcode 26.3 only; the CI runner
+ran `Xcode 16.4` in Slice 12, where `xcodebuild` package-scheme resolution and
+the empty-`platforms:` warning may behave differently. The exact runner command
+is therefore treated as **requiring verified discovery on the CI runner**, per
+the brief's experimental-API rule, not as an assumed-good architecture.
+
+Verified command discovery is a first-class deliverable, captured in Acceptance,
+not an implementation aside:
+
+- Implementation must resolve the real scheme via `xcodebuild -list` rather than
+  assuming the name.
+- If `xcodebuild -scheme ... -destination 'generic/platform=iOS[ Simulator]'`
+  fails on the runner's Xcode, the documented fallback is the historically
+  proven `xcrun swiftc -target arm64-apple-ios... -sdk "$(xcrun --sdk iphoneos
+  --show-sdk-path)" -parse-as-library -emit-module` over `Sources/TextEngineCore/*.swift`
+  (globbed so new files are covered). The earlier `swift build` with
+  `-Xswiftc -target`/`-Xswiftc -sdk` injection is explicitly **rejected** as a
+  fallback: design verification showed it leaks the macOS sysroot
+  (`using sysroot for 'MacOSX' but targeting 'iPhone'`), so it does not truly
+  compile against the iOS SDK.
+- The verification document must record the exact working command, the runner
+  Xcode version, and the resolved SDK.
+
+Other notes:
 
 - The `generic/platform=...` destinations avoid pinning a concrete simulator
   runtime and match the local device + simulator coverage.
 - SDKs come from the runner's selected Xcode; do not hardcode local SDK paths.
-- The exact `xcodebuild` invocation, scheme name resolution, and any
-  no-`platforms:`-manifest behavior are **doubtful and must be confirmed by
-  compile verification** during implementation, per the brief's experimental-API
-  rule. Implementation must resolve the real scheme name (for example through
-  `xcodebuild -list`) rather than assuming it.
-- A nonzero `xcodebuild` exit for either iOS destination makes the target
-  `result=fail blocking=true` and the helper exits nonzero, failing the job.
+- A nonzero exit for either iOS destination (after discovery selects the working
+  command) makes the target `result=fail blocking=true` and the helper exits
+  nonzero, failing the job.
 
 ### WASM Compilation (Observational)
 
@@ -259,8 +289,14 @@ Local verification for Slice 13 should include:
 swift test
 swift build -c release
 swift run -c release ViewportBenchmarks -- --gate
+swift run -c release ViewportBenchmarks -- --memory-shape
+swift run -c release ViewportBenchmarks -- --memory-observation
 .github/scripts/cross-target-compile.sh --self-test
 ```
+
+These mirror every check the existing `Host tests and benchmark gate` job runs
+on `push`, so the stable gates are confirmed green before and after the
+cross-target work.
 
 The existing stable gates must remain green. If the local machine has the iOS
 and WASM toolchains, the maintainer may also run the helper end-to-end locally,
@@ -285,8 +321,8 @@ Hosted verification must record:
 - the full per-target lines and the summary line;
 - job duration and timeout headroom;
 - the post-merge `push` run on `main`;
-- a non-goal diff check proving `Sources/`, `Tests`, and `Package.swift` are
-  unchanged.
+- a non-goal diff check proving `Sources/TextEngineCore`,
+  `Sources/ViewportBenchmarks`, `Tests`, and `Package.swift` are unchanged.
 
 ## Acceptance Criteria
 
@@ -297,14 +333,20 @@ Slice 13 is complete when:
 - the existing `Host tests and benchmark gate` job is unchanged;
 - iOS device and iOS simulator compile checks run through the Swift package graph
   and are blocking;
+- the exact working iOS compile command is discovered and verified on the CI
+  runner (resolving the scheme via `xcodebuild -list`, or falling back to the
+  proven `xcrun swiftc -emit-module` glob if `xcodebuild` scheme resolution
+  fails on the runner Xcode) and the working command, runner Xcode version, and
+  resolved SDK are recorded in the verification document;
 - WASM and embedded-WASM checks use a Swift SDK matched to the runner's own
   toolchain, are observational, and report `pass`, `fail`, or `skipped` without
   failing the job;
 - the helper prints stable per-target lines and a summary line, and its exit
   code reflects only the blocking iOS results;
 - `.github/scripts/cross-target-compile.sh --self-test` passes;
-- local stable gates pass and `TextEngineCore`, `Tests`, and `Package.swift` are
-  unchanged;
+- local stable gates pass (including `--gate`, `--memory-shape`, and
+  `--memory-observation`) and `Sources/TextEngineCore`,
+  `Sources/ViewportBenchmarks`, `Tests`, and `Package.swift` are unchanged;
 - hosted verification records the iOS pass evidence, the WASM provisioning
   outcome (compiled or skipped with reason), job duration, and the post-merge
   push run;
