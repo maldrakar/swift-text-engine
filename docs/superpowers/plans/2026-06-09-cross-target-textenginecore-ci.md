@@ -189,6 +189,7 @@ build_summary() {
 # other noise) are skipped.
 resolve_wasm_sdk_id_from_list() {
   local version="$1" kind="$2" line trimmed
+  [[ -z "$version" ]] && return 1
   while IFS= read -r line; do
     trimmed="$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     [[ -z "$trimmed" ]] && continue
@@ -266,6 +267,7 @@ some descriptive header with spaces"
     "$(printf '%s\n' "$noisy_list" | resolve_wasm_sdk_id_from_list 6.1.2 wasm_embedded)" "resolve_noisy_embedded"
   assert_resolver_missing "$clean_list" 9.9.9 wasm "resolve_missing_version"
   assert_resolver_missing "$clean_list" 6.1.2 wasm_embedded_typo "resolve_missing_kind"
+  assert_resolver_missing "$clean_list" "" wasm "resolve_empty_version"
   echo "self_test=pass"
 }
 
@@ -295,6 +297,7 @@ print_ios_toolchain_metadata() {
   echo "cross_target_iphoneos_sdk_path=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo unknown)"
   echo "cross_target_iphoneos_sdk_version=$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || echo unknown)"
   echo "cross_target_iphonesimulator_sdk_path=$(xcrun --sdk iphonesimulator --show-sdk-path 2>/dev/null || echo unknown)"
+  echo "cross_target_iphonesimulator_sdk_version=$(xcrun --sdk iphonesimulator --show-sdk-version 2>/dev/null || echo unknown)"
 }
 
 # Resolve the package scheme once, distinguishing an xcodebuild-list infra
@@ -346,6 +349,11 @@ resolve_wasm_sdk_id() {
 
 compile_wasm_target() {
   local kind="$1" target_name="$2" logfile="$3" sdk_id url_var url
+  if [[ -z "$SWIFT_VERSION" ]]; then
+    LAST_RESULT="skipped"
+    LAST_REASON="swift_version_unresolved"
+    return
+  fi
   if ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
     if [[ "$kind" == "wasm_embedded" ]]; then
       url_var="CROSS_TARGET_WASM_EMBEDDED_SDK_URL"
@@ -637,7 +645,7 @@ Run:
 ```bash
 head_sha="$(git rev-parse HEAD)"
 run_id="$(gh run list --workflow "Swift CI" --branch slice-12-post-slice-review --event pull_request --limit 20 --json databaseId,headSha --jq ".[] | select(.headSha == \"${head_sha}\") | .databaseId" | head -n 1)"
-test -n "$run_id" || { echo "no_run_for_head=${head_sha} (wait for CI to start, then retry)"; }
+test -n "$run_id" || { echo "no_run_for_head=${head_sha} (wait for CI to start, then retry)"; exit 1; }
 gh run watch "$run_id"
 mkdir -p /tmp/slice13-cross-target
 gh run view "$run_id" --log > /tmp/slice13-cross-target/run-1.log
@@ -772,8 +780,10 @@ Record:
 
 ## Post-Merge Push Run
 
-Record the `push` run on `main` after merge: run ID, URL, head SHA, conclusion,
-and the cross-target summary line.
+Pending until Task 7 (recorded after the PR is merged to `main`). This section is
+intentionally left as `Pending` for pre-merge completion; Task 7 replaces it with
+the merge-commit push run: run ID, URL, head SHA, conclusion, and the
+cross-target summary line.
 
 ## Non-Goal Checks
 
@@ -794,7 +804,7 @@ WASM to blocking is left to a later slice.
 
 - [ ] **Step 2: Fill the document with real values**
 
-Populate every section from `/tmp/slice13-cross-target/*.log`, the local command outputs, and the Task 4 run metadata. Replace every instruction line with actual captured text.
+Populate every section **except Post-Merge Push Run** from `/tmp/slice13-cross-target/*.log`, the local command outputs, and the Task 4 run metadata. Replace every instruction line with actual captured text. Leave the Post-Merge Push Run section as its `Pending until Task 7` marker — that run does not exist until the PR is merged, and Task 7 fills it.
 
 - [ ] **Step 3: Verify the document has no placeholder text**
 
@@ -804,7 +814,7 @@ Run:
 rg -n "TODO|TBD|<discovered|<run|exact outputs for|Record:" docs/superpowers/verification/2026-06-09-cross-target-textenginecore-ci.md; echo "exit=$?"
 ```
 
-Expected: no output and `exit=1`.
+Expected: no output and `exit=1`. The `Pending until Task 7` text in the Post-Merge Push Run section is intentional and is not matched by this scan, so it is not a placeholder violation.
 
 - [ ] **Step 4: Commit the verification record**
 
@@ -859,13 +869,29 @@ Run:
 
 ```bash
 rg -n "xcrun swiftc|emit-module|-Xswiftc" .github/scripts/cross-target-compile.sh; echo "helper_nongraph_exit=$?"
-git diff main -- .github/workflows/swift-ci.yml | rg -n "^\+" | rg -n "Run host tests|Run synthetic benchmark gate|Run memory shape diagnostic|Run RSS memory observation diagnostic|Observe realistic provider relative performance"; echo "existing_steps_touched_exit=$?"
+
+# Structurally confirm the existing host job block is byte-identical to main, so
+# only a sibling cross-target-compile job was added. This catches command, env,
+# timeout, or continue-on-error changes inside the host job, not just added step
+# names. Trailing blank lines are trimmed so the inter-job blank does not differ.
+extract_host_job() {
+  awk '
+    /^  [A-Za-z0-9_-]+:/ {
+      if ($0 ~ /^  host-tests-and-benchmark-gate:/) { inblock = 1 }
+      else if (inblock) { exit }
+    }
+    inblock { print }
+  ' | awk 'NF { last = NR } { line[NR] = $0 } END { for (i = 1; i <= last; i++) print line[i] }'
+}
+git show main:.github/workflows/swift-ci.yml | extract_host_job > /tmp/host-job-main.txt
+extract_host_job < .github/workflows/swift-ci.yml > /tmp/host-job-head.txt
+diff -u /tmp/host-job-main.txt /tmp/host-job-head.txt; echo "host_job_diff_exit=$?"
 ```
 
 Expected:
 
 - `helper_nongraph_exit=1` (no non-graph iOS compile in the helper);
-- `existing_steps_touched_exit=1` (the diff adds no lines to the existing job's steps).
+- `host_job_diff_exit=0` (the `host-tests-and-benchmark-gate` job block is identical to `main`; only the sibling `cross-target-compile` job was added).
 
 - [ ] **Step 4: Confirm the final hosted run for the current head**
 
@@ -874,6 +900,7 @@ Run:
 ```bash
 final_head_sha="$(git rev-parse HEAD)"
 final_run_id="$(gh run list --workflow "Swift CI" --branch slice-12-post-slice-review --event pull_request --limit 20 --json databaseId,headSha --jq ".[] | select(.headSha == \"${final_head_sha}\") | .databaseId" | head -n 1)"
+test -n "$final_run_id" || { echo "no_run_for_head=${final_head_sha} (wait for CI to start, then retry)"; exit 1; }
 gh run watch "$final_run_id"
 gh run view "$final_run_id" --log > /tmp/slice13-final.log
 rg -n "mode=cross_target_compile target=ios_device|mode=cross_target_compile target=ios_simulator|mode=cross_target_compile_summary" /tmp/slice13-final.log
@@ -913,6 +940,7 @@ After the PR is merged to `main`, capture the `push` run for the merge commit an
 ```bash
 merge_sha="$(git rev-parse origin/main)"
 push_run_id="$(gh run list --workflow "Swift CI" --branch main --event push --limit 20 --json databaseId,headSha --jq ".[] | select(.headSha == \"${merge_sha}\") | .databaseId" | head -n 1)"
+test -n "$push_run_id" || { echo "no_push_run_for_merge=${merge_sha} (wait for CI to start, then retry)"; exit 1; }
 gh run watch "$push_run_id"
 gh run view "$push_run_id" --json headSha,conclusion,url --jq '.'
 gh run view "$push_run_id" --log | rg -n "mode=cross_target_compile_summary"
