@@ -130,16 +130,16 @@ runner_match=false
 
 ## Hosted Run
 
-Captured log: `/tmp/slice13-cross-target/run-1.log`.
+Captured log: `/tmp/slice13-final.log`.
 
 Run metadata:
 
 ```text
-run_id=27227116876
+run_id=27227780370
 run_attempt=1
-run_url=https://github.com/arthurbanshchikov/swift-text-engine/actions/runs/27227116876
+run_url=https://github.com/arthurbanshchikov/swift-text-engine/actions/runs/27227780370
 event=pull_request
-head_sha=9af776d428e43538400e5f6e608d60ff3e9cc437
+head_sha=5b157e9c62fdd2ecb75edd50ebc8f46dcee34126
 conclusion=success
 runner_image=macos-15-arm64
 runner_image_version=20260527.0100.1
@@ -189,20 +189,20 @@ mode=cross_target_compile_summary ios_device=pass ios_simulator=pass wasm=skippe
 Job timings:
 
 ```text
-job=Cross-target compile started_at=2026-06-09T18:27:25Z completed_at=2026-06-09T18:28:26Z duration=1m01s timeout=20m conclusion=success
-job=Host tests and benchmark gate started_at=2026-06-09T18:27:25Z completed_at=2026-06-09T18:31:14Z conclusion=success
+job=Cross-target compile started_at=2026-06-09T18:39:31Z completed_at=2026-06-09T18:40:07Z duration=0m36s timeout=20m conclusion=success
+job=Host tests and benchmark gate started_at=2026-06-09T18:39:31Z completed_at=2026-06-09T18:43:59Z conclusion=success
 ```
 
 Hosted host tests and benchmark gate:
 
 ```text
-Test Suite 'SwiftTextEnginePackageTests.xctest' passed at 2026-06-09 18:27:49.116.
-Executed 39 tests, with 0 failures (0 unexpected) in 0.010 (0.011) seconds
-Test Suite 'All tests' passed at 2026-06-09 18:27:49.116.
-Executed 39 tests, with 0 failures (0 unexpected) in 0.010 (0.013) seconds
-mode=pipeline scenario=1k_lines_20_visible_overscan_0 iterations=10000 operations_per_sample=256 p95_ns=2065 p99_ns=2354 failures=0 budget_p95_ns=20000 budget_p99_ns=50000 gate=pass checksum=1319670707200
-mode=pipeline scenario=100k_lines_80_visible_overscan_5 iterations=10000 operations_per_sample=256 p95_ns=8669 p99_ns=11324 failures=0 budget_p95_ns=50000 budget_p99_ns=100000 gate=pass checksum=570448232307200
-mode=pipeline scenario=1m_lines_200_visible_overscan_50 iterations=10000 operations_per_sample=256 p95_ns=29290 p99_ns=38172 failures=0 budget_p95_ns=100000 budget_p99_ns=200000 gate=pass checksum=18852477646272000
+Test Suite 'SwiftTextEnginePackageTests.xctest' passed at 2026-06-09 18:39:58.930.
+Executed 39 tests, with 0 failures (0 unexpected) in 0.013 (0.015) seconds
+Test Suite 'All tests' passed at 2026-06-09 18:39:58.930.
+Executed 39 tests, with 0 failures (0 unexpected) in 0.013 (0.017) seconds
+mode=pipeline scenario=1k_lines_20_visible_overscan_0 iterations=10000 operations_per_sample=256 p95_ns=2534 p99_ns=4993 failures=0 budget_p95_ns=20000 budget_p99_ns=50000 gate=pass checksum=1319670707200
+mode=pipeline scenario=100k_lines_80_visible_overscan_5 iterations=10000 operations_per_sample=256 p95_ns=11201 p99_ns=18081 failures=0 budget_p95_ns=50000 budget_p99_ns=100000 gate=pass checksum=570448232307200
+mode=pipeline scenario=1m_lines_200_visible_overscan_50 iterations=10000 operations_per_sample=256 p95_ns=41029 p99_ns=58328 failures=0 budget_p95_ns=100000 budget_p99_ns=200000 gate=pass checksum=18852477646272000
 ```
 
 Hosted memory diagnostics:
@@ -219,7 +219,7 @@ mode=memory_observation provider=large_text scenario=100k_lines_10mb_text line_c
 Hosted realistic observation:
 
 ```text
-mode=realistic_relative_observation base_sha=7c329289c5bbd148c85bd0e62bbc806cac767964 head_sha=9af776d428e43538400e5f6e608d60ff3e9cc437 max_ratio=1.182859 observation_threshold=1.221556 observation=clean blocking_ready=false
+mode=realistic_relative_observation base_sha=7c329289c5bbd148c85bd0e62bbc806cac767964 head_sha=5b157e9c62fdd2ecb75edd50ebc8f46dcee34126 max_ratio=1.044520 observation_threshold=1.221556 observation=clean blocking_ready=false
 ```
 
 WASM provisioning outcome:
