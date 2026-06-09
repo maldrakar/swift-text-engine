@@ -250,10 +250,21 @@ ci_result=wasm_targets_skipped_nonblocking
 ## Post-Merge Push Run
 
 ```text
-state=pre_merge_pending
-reason=PR #7 has not been merged yet
-expected_event=push
-expected_branch=main
+run_id=27236364855
+run_attempt=1
+run_url=https://github.com/arthurbanshchikov/swift-text-engine/actions/runs/27236364855
+event=push
+branch=main
+head_sha=6e205ae383a8fbc4e3bd76f1933981618ae97de3
+conclusion=success
+host_tests_and_benchmark_gate=2026-06-09T21:16:28Z -> 2026-06-09T21:19:14Z conclusion=success
+cross_target_compile=2026-06-09T21:16:28Z -> 2026-06-09T21:17:24Z conclusion=success
+mode=cross_target_compile target=ios_device result=pass reason=none blocking=true
+mode=cross_target_compile target=ios_simulator result=pass reason=none blocking=true
+mode=cross_target_compile target=wasm result=skipped reason=sdk_unavailable blocking=false
+mode=cross_target_compile target=wasm_embedded result=skipped reason=sdk_unavailable blocking=false
+mode=cross_target_compile_summary ios_device=pass ios_simulator=pass wasm=skipped wasm_embedded=skipped blocking_failures=0 exit=0
+realistic_relative_observation=skipped_on_push
 ```
 
 ## Non-Goal Checks
