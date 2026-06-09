@@ -47,7 +47,7 @@ jobs:
         if: github.event_name == 'pull_request'
         continue-on-error: true
         env:
-          REALISTIC_RELATIVE_OBSERVATION_THRESHOLD: "1.50"
+          REALISTIC_RELATIVE_OBSERVATION_THRESHOLD: "1.221556"
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
