@@ -77,3 +77,24 @@ jobs:
             --threshold "${REALISTIC_RELATIVE_OBSERVATION_THRESHOLD}"
 
           echo "observation_finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  cross-target-compile:
+    name: Cross-target compile
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          echo "developer_dir=${DEVELOPER_DIR:-unset}"
+          xcode-select -p
+          ls -d /Applications/Xcode*.app || true
+          swift --version
+          xcodebuild -version
+          uname -a
+
+      - name: Compile TextEngineCore for non-host targets
+        run: ./.github/scripts/cross-target-compile.sh
