@@ -144,10 +144,11 @@ The core cannot scan all offsets without breaking O(viewport)/O(log N). The
 protocol therefore states a precondition the core trusts: offsets are finite,
 **strictly increasing** on `0..<lineCount` (every line has finite positive
 height), and `offset(ofLine: 0) == 0`. The contract also requires **stability**:
-`lineCount` and `offset(ofLine:)` must not change during a single `compute` or a
-single `VariableLineGeometryCursor` pass, so the binary search and the geometry
-walk see one consistent set of prefix sums. (This is the static query half;
-mutation between frames is a later slice.)
+`lineCount` and `offset(ofLine:)` must not change during a single layout
+operation — one `compute` together with any `VariableLineGeometryCursor`
+traversal derived from the range it produced — so the range and the geometry are
+computed from one consistent snapshot of prefix sums. (This is the static query
+half; mutation between frames is a later slice.)
 
 **Recorded product decision:** this slice requires strictly increasing offsets
 and so forbids zero-height (collapsed/hidden) lines. The reason is the contract,
@@ -224,8 +225,10 @@ public protocol LineMetricsSource {
     /// Contract precondition: finite and strictly increasing on 0..<lineCount
     /// (every line has finite positive height). See Decision 5.
     /// Stability precondition: `lineCount` and `offset(ofLine:)` must be stable
-    /// for the duration of one `compute` and one `VariableLineGeometryCursor`
-    /// pass (the static query half; mutation is a later slice).
+    /// for one layout operation — a `compute` and any `VariableLineGeometryCursor`
+    /// traversal derived from the range it produced — so the range and the
+    /// geometry come from one snapshot (the static query half; mutation is a
+    /// later slice).
     func offset(ofLine index: Int) -> Double
 }
 ```
@@ -401,8 +404,10 @@ so every virtualize is O(log N) queries regardless of locality.
 
 **Scenarios and budgets.** A new variable-height scenario (non-uniform heights
 drawn from a fixed distribution) measures compute + geometry p95/p99 at
-1k / 100k / 1M lines and shows the cost stays flat as N grows (the O(log N) +
-O(buffer) claim). Per Decision 6 it is a blocking gate; budgets are
+1k / 100k / 1M lines and shows the cost stays within budget and scales
+logarithmically, not linearly, in N (the O(log N) search + O(buffer) geometry
+claim; the buffer is fixed by the viewport/overscan and so is constant across the
+scale points, leaving only the log-N search term to vary). Per Decision 6 it is a blocking gate; budgets are
 local-deterministic with **generous** headroom (the Slice 11 lesson: a thin
 margin — a hosted sample once hit 98.7% of its budget — is CI-fragile; the
 synthetic gate is robust precisely because its margins are wide).
