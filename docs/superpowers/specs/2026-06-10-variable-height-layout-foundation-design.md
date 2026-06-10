@@ -83,22 +83,30 @@ Rejected alternatives:
 ### Decision 2: Provider supplies cumulative offsets; core owns the search
 
 The problem splits cleanly into **data** (cumulative offsets) and **algorithm**
-(the search that virtualizes). The provider supplies a monotonic cumulative-offset
-query, `offset(ofLine:)`. The core owns the O(log N) binary search that turns a
-`scrollOffsetY` into a line index.
+(the search that virtualizes). The provider supplies a monotonic (strictly
+increasing; see Decision 5) cumulative-offset query, `offset(ofLine:)`. The core
+owns the O(log N) binary search that turns a `scrollOffsetY` into a line index.
 
 This keeps the brief's division of labor intact ("the core virtualizes the
 visible area"; the document lives outside the core): the provider owns the data,
-the core owns the algorithm. Core memory stays O(1); a virtualize is O(log N) in
-the document size plus O(viewport) for geometry. It is exact and fast for *any*
-scroll pattern — incremental scrolling and a scrollbar drag to an arbitrary
-offset are both O(log N).
+the core owns the algorithm. Core memory stays O(1). A virtualize costs O(log N)
+`offset(ofLine:)` *queries* (the binary search), and the geometry pass costs
+O(buffer) queries; the per-query cost is provider-defined (see below). It is
+exact and fast for *any* scroll pattern — incremental scrolling and a scrollbar
+drag to an arbitrary offset are both O(log N) queries.
 
 The contract mandates a *query*, not a data structure, exactly as
 `DocumentLineSource.line(at:)` does not dictate storage. A toy provider may sum
 heights on the fly (correct, slow); a production provider uses a prefix array,
 Fenwick tree, or B-tree. The core is exact either way, and any O(N) prefix
 structure lives in the provider — never the core.
+
+**Performance expectation.** Because the per-virtualize cost is O(log N) *queries*
+times the provider's per-query cost, a gated or production provider must answer
+`offset(ofLine:)` in O(1) or O(log N) (the reference `PrefixSumLineMetrics` is
+O(1)). The sum-on-the-fly toy provider is correctness-only: it makes each query
+O(N) and a virtualize O(N log N), which is acceptable for tests but not for the
+gate or production.
 
 Rejected alternatives:
 
@@ -128,38 +136,67 @@ and the equivalence oracle (see Testing).
 
 ### Decision 5: Validation is contractual and local, not global
 
-The core cannot scan all offsets for monotonicity or finiteness without breaking
-O(viewport)/O(log N). The protocol therefore *requires* the provider to return
-finite, monotonic-non-decreasing offsets with `offset(ofLine: 0) == 0`. The core
-validates only the scalar inputs it is handed, plus one O(1) defensive check on
-the total height it queries.
+The core cannot scan all offsets without breaking O(viewport)/O(log N). The
+protocol therefore states a precondition the core trusts: offsets are finite,
+**strictly increasing** on `0..<lineCount` (every line has finite positive
+height), and `offset(ofLine: 0) == 0`.
+
+**Recorded product decision:** this slice requires strictly increasing offsets
+and so forbids zero-height (collapsed/hidden) lines. The reason is the contract,
+not precision: "non-decreasing" would let a provider return equal adjacent
+offsets, for which the containing-interval search
+(`offset(i) <= y < offset(i + 1)`) has no defined answer and the tie-break across
+an equal-offset run is ambiguous. (Precision collapse of adjacent positive-height
+sums is not a real driver: with a 53-bit significand, adjacent prefix sums round
+equal only when total height approaches `height · 2^52` — for 16 px lines that is
+about 4.5×10^15 lines, which is unreachable.) If collapsed lines become a
+near-term requirement, a later slice can relax to non-decreasing and define the
+run tie-break precisely (for example `visibleStart` = first line of the run,
+`visibleEndExclusive` = past the last) with tests.
+
+The core enforces only the O(1) checks it can afford: `offset(ofLine: 0) == 0`,
+and the queried total height finite and non-negative. Global strict monotonicity
+is **not** verified — that needs an O(N) scan, which violates the budget — so a
+mid-document contract violation is undefined behavior, like any precondition.
+Contract violations the core does detect cheaply surface as a dedicated
+`invalidLineMetrics` error rather than overloading `nonFiniteValue`.
 
 ### Decision 6: The variable-height benchmark is a blocking gate
 
-The new variable-height `compute` benchmark is a deterministic local p95/p99
-measurement, the same kind as the existing synthetic gate, and the brief requires
-regression benchmarks to block merge on degradation. It is introduced as a
-blocking gate (not observation-first) with budgets set with generous headroom and
-tunable later.
+The new variable-height benchmark is a deterministic local p95/p99 measurement,
+the same kind as the existing synthetic gate, and the brief requires regression
+benchmarks to block merge on degradation. It is introduced as a blocking gate
+(not observation-first) with budgets set with generous headroom and tunable
+later.
 
 ## Architecture Overview
 
 The variable-height path reuses the existing pure-transform architecture
 wholesale. No new state is introduced anywhere in the core. The data flow mirrors
 the fixed-height pipeline exactly, with a metrics source replacing the constant
-`lineHeight`:
+`lineHeight`, and geometry and content traversed over the same `VirtualRange`:
 
 ```text
 host/provider computes per-line heights (out of scope how)
   -> exposes cumulative offsets via LineMetricsSource.offset(ofLine:)
   -> ViewportVirtualizer.compute(VariableViewportInput, metrics) -> VirtualRange
-  -> ViewportVirtualizer.geometry(for: range, metrics:) -> LineGeometry stream
+       |
+       +-> ViewportVirtualizer.geometry(for: range, metrics:)        -> LineGeometry stream
+       +-> ViewportVirtualizer.lines(for: range, in: contentSource)  -> content stream
   -> host renders
 ```
 
-Cost profile: O(1) core memory; O(log N) per virtualize (binary search over
-`offset(ofLine:)`); O(viewport) for geometry. No per-line core state at any
-point.
+Cost profile: O(1) core memory; per virtualize O(log N) `offset(ofLine:)` queries
+(binary search) plus O(buffer) queries for geometry; per-query cost is
+provider-defined (Decision 2). No per-line core state at any point.
+
+**Two `lineCount` sources.** Both `LineMetricsSource` and the existing
+`DocumentLineSource` expose `lineCount`. The host is responsible for keeping them
+consistent, as it already is for a single source today; if they disagree the
+result is undefined. Composition is otherwise unchanged from the fixed path: the
+same `VirtualRange` produced by the variable `compute` feeds both the
+metrics-driven geometry cursor and the existing `ViewportVirtualizer.lines(for:in:)`
+content cursor, so geometry and content are traversed over identical indices.
 
 ## Public API Surface
 
@@ -174,7 +211,8 @@ public protocol LineMetricsSource {
     /// Cumulative top offset (y) of line `index`, in layout units.
     /// Domain: 0...lineCount.  offset(ofLine: 0) == 0.
     /// offset(ofLine: lineCount) == total document height.
-    /// Contract precondition: finite and monotonic non-decreasing.
+    /// Contract precondition: finite and strictly increasing on 0..<lineCount
+    /// (every line has finite positive height). See Decision 5.
     func offset(ofLine index: Int) -> Double
 }
 ```
@@ -227,11 +265,13 @@ extension ViewportVirtualizer {
 }
 ```
 
-### Reused unchanged
+### Reused, with one additive error case
 
-`VirtualRange`, `LineGeometry`, `ViewportComputation`, and
-`ViewportValidationError` carry no height assumptions, so the variable path
-produces the same output and error types as the fixed path.
+`VirtualRange`, `LineGeometry`, and `ViewportComputation` carry no height
+assumptions and are reused unchanged. `ViewportValidationError` gains one
+additive case, `invalidLineMetrics`, for the O(1) contract checks in Decision 5;
+its existing cases are unchanged. The variable path otherwise produces the same
+output and error types as the fixed path.
 
 ## Algorithms
 
@@ -244,20 +284,23 @@ arithmetic for searches over `offset(ofLine:)`:
    (`negativeLineCount`); `scrollOffsetY` and `viewportHeight` finite
    (`nonFiniteValue`); `viewportHeight >= 0` (`negativeViewportHeight`); overscan
    values `>= 0` (`negativeOverscan`). `nonPositiveLineHeight` no longer applies
-   (there is no `lineHeight`). As a cheap O(1) defensive check, if
-   `offset(ofLine: lineCount)` (total height) is non-finite, fail with
-   `nonFiniteValue`. This catches a broken provider without an O(N) scan.
-2. `lineCount == 0` -> `emptyRange()` (identical to the fixed path).
-3. `totalHeight = offset(ofLine: lineCount)`;
+   (there is no `lineHeight`).
+2. **O(1) metrics contract checks** (Decision 5), for `lineCount > 0`:
+   `offset(ofLine: 0) == 0`, and the queried total height
+   `offset(ofLine: lineCount)` finite and `>= 0`; otherwise fail with
+   `invalidLineMetrics`. Global strict monotonicity is not scanned (that would be
+   O(N)).
+3. `lineCount == 0` -> `emptyRange()` (identical to the fixed path).
+4. `totalHeight = offset(ofLine: lineCount)`;
    `maxOffsetY = max(0, totalHeight - viewportHeight)`; clamp `scrollOffsetY`
    into `[0, maxOffsetY]`. Identical clamping policy to the fixed path.
-4. `visibleStart` = binary search for the line `i` such that
+5. `visibleStart` = binary search for the line `i` such that
    `offset(i) <= effOffsetY < offset(i + 1)` (the line containing the viewport
-   top).
-5. `visibleEndExclusive` = binary search for the smallest `i` such that
+   top), with the boundary comparison defined per Precision And Equivalence.
+6. `visibleEndExclusive` = binary search for the smallest `i` such that
    `offset(i) >= effOffsetY + viewportHeight` (the first line fully below the
    viewport bottom), clamped to `lineCount`.
-6. **overscan -> buffer -> `isAtTop`/`isAtBottom`**: identical to the fixed path
+7. **overscan -> buffer -> `isAtTop`/`isAtBottom`**: identical to the fixed path
    (index arithmetic on `visibleStart`/`visibleEndExclusive` with the overscan
    counts and clamps; `isAtTop = effOffsetY == 0`,
    `isAtBottom = effOffsetY == maxOffsetY`).
@@ -268,11 +311,12 @@ Parallels `LineGeometryCursor`: walks `[bufferStart, bufferEndExclusive)`,
 emitting `LineGeometry(lineIndex, y, height)` where `y = offset(ofLine: i)` and
 `height = offset(ofLine: i + 1) - offset(ofLine: i)`. It caches the rolling
 offset so it makes one `offset` call per line (plus one to seed the first), and
-stays O(bufferSize).
+stays O(bufferSize). It holds the `Metrics` value as a copy-safe handle (see
+Memory-Shape Demonstration).
 
 ## Internal Refactor
 
-Step 6 of `compute` (overscan -> buffer -> top/bottom flags) is identical between
+Step 7 of `compute` (overscan -> buffer -> top/bottom flags) is identical between
 the fixed and variable paths. To prevent the two paths from drifting, that logic
 is extracted into one private helper that both call. This is a targeted internal
 change: no public API change and no behavior change to the fixed path (guarded by
@@ -280,18 +324,34 @@ the unchanged fixed-height tests and the unchanged synthetic gate).
 
 ## Precision And Equivalence
 
-The fixed path snaps near-integer quotients to integers using an ulp tolerance
-(`snappedIntegerQuotient`), so floating-point dust at exact line boundaries does
-not push a line in or out of the range. The variable path compares offsets
+The fixed path snaps near-integer *quotients* (`scrollOffsetY / lineHeight`) to
+integers using an ulp tolerance (`snappedIntegerQuotient`), so floating-point
+dust at exact line boundaries does not move a line in or out of the range. The
+variable path has no division; it compares `scrollOffsetY` against `offset(i)`
 directly.
 
-For the `UniformLineMetrics` equivalence oracle to hold exactly (variable path
-with uniform metrics == fixed path), the binary-search boundary comparisons must
-reproduce the fixed path's boundary semantics. The plan is to define the search's
-boundary handling to match that snapping intent, with the equivalence test as the
-guard. If exact equivalence proves impractical at some pathological float
-boundary, the documented fallback is equivalence "up to one line at exact
-floating-point boundaries"; the intent is exact equivalence.
+This slice commits to **exact** `UniformLineMetrics` equivalence: the variable
+path driven by `UniformLineMetrics(lineCount, lineHeight)` must produce a
+`VirtualRange` byte-identical to the fixed path's for the same inputs. There is no
+"±1 line" fallback. To achieve it, the binary search's boundary comparison is
+defined to reproduce the fixed path's snapping in offset space — a comparison
+tolerance keyed to the offset magnitude at the candidate line, chosen so that for
+`offset(i) = i · lineHeight` the search lands on the same line the quotient
+snapping would.
+
+The equivalence oracle must cover, at minimum, these boundary positions:
+
+- `scrollOffsetY` exactly on a line top (`offset(i)`), including the first and
+  last lines;
+- `scrollOffsetY` clamped to `maxOffsetY`, and the `effOffsetY == totalHeight`
+  edge (where `visibleStart` takes the fixed path's high-end clamp,
+  `clampedIndex(…, lineCount)`);
+- `viewportHeight == 0`;
+- a range of non-boundary offsets.
+
+If implementation surfaces a specific boundary where exact equivalence is
+genuinely unachievable, that is a plan-time finding to resolve explicitly — not a
+pre-authorized soft fallback.
 
 ## Reference Provider And Performance Gate
 
@@ -300,15 +360,63 @@ benchmark/test target — **outside** the core. It is backed by a `[Double]` pre
 array of length `lineCount + 1`, so `offset(ofLine:)` is an O(1) array read. Its
 O(N) memory is legitimate: it represents the document store living outside the
 core, exactly like the existing synthetic and realistic providers in
-`ViewportBenchmarks`. It drives both scale correctness tests and the performance
+`ViewportBenchmarks`. It drives both scale-correctness tests and the performance
 proof.
 
-A new variable-height benchmark scenario (non-uniform heights drawn from a fixed
-distribution) measures `compute` p95/p99 at 1k / 100k / 1M lines and proves
-offset→line stays flat (O(log N)) at 1M lines. Per Decision 6 it is a blocking
-gate that mirrors the existing synthetic gate, with budgets set with generous
-headroom and tunable later. This extends the brief's "stable scroll on 100k+
-lines" criterion to the variable-height path.
+**What the gate measures.** The existing synthetic gate measures a full traversal
+(compute plus a per-line provider walk), not compute alone. The variable-height
+gate matches that philosophy by measuring **compute plus the variable geometry
+traversal** (`VariableLineGeometryCursor` over the buffer range) — the geometry
+walk is the variable-height-specific per-line work, since each emitted line costs
+an `offset(ofLine:)` query. Content traversal is unchanged by line height and is
+already covered by the existing pipeline gate, so it is not duplicated here.
+
+**Access pattern.** The benchmark reuses the existing `deterministicScrollOffset`
+generator, which already spreads offsets across `[0, maxOffset]` rather than
+scrolling sequentially. Varied offsets are kept for benchmark realism — they
+exercise varied prefix-array cache behavior and avoid optimizer/branch-prediction
+artifacts from a fixed offset — not because the search would otherwise be
+under-exercised: the search is **stateless** (Decision 2, not anchored walking),
+so every virtualize is O(log N) queries regardless of locality.
+
+**Scenarios and budgets.** A new variable-height scenario (non-uniform heights
+drawn from a fixed distribution) measures compute + geometry p95/p99 at
+1k / 100k / 1M lines and shows the cost stays flat as N grows (the O(log N) +
+O(buffer) claim). Per Decision 6 it is a blocking gate; budgets are
+local-deterministic with **generous** headroom (the Slice 11 lesson: a thin
+margin — a hosted sample once hit 98.7% of its budget — is CI-fragile; the
+synthetic gate is robust precisely because its margins are wide).
+
+**CLI and CI wiring.** The benchmark CLI separates a *mode* flag from the
+orthogonal `--gate` enforcement switch, so the gate is invoked through a new
+gateable mode, `--variable-height`, combined with `--gate`
+(`ViewportBenchmarks --variable-height --gate`), mirroring
+`--realistic-provider --gate`. In `.github/workflows/swift-ci.yml` it runs as a
+new step in the host job immediately after the existing synthetic-gate step,
+consistent with the Slice 5 / Slice 7 convention of naming the exact invocation
+and CI placement.
+
+## Memory-Shape Demonstration
+
+The brief's headline memory criterion (core-owned memory does not grow with
+document size) is argued by construction in Decision 1, but this project's
+practice (Slice 7) is to turn that claim into a deterministic diagnostic. The
+`--memory-shape` diagnostic gains a variable-height scenario that runs the same
+viewport/overscan against 100k and 1M lines through `compute` and
+`VariableLineGeometryCursor`, and asserts identical `core_owned_bytes` across the
+two line counts (O(1) core memory) and `geometry_lines == buffered_lines`
+(O(buffer) traversal). `coreOwnedBytesEstimate` already sums `MemoryLayout` sizes,
+so it extends to the variable cursor naturally. This is a structural invariant,
+not a memory hard budget (which stays out of scope).
+
+This depends on the metrics value stored in the cursor being a lightweight,
+copy-safe **handle**: `VariableLineGeometryCursor<Metrics>` holds the `Metrics`
+by value to query offsets per line, exactly as `DocumentLineCursor<Source>` holds
+its `Source`. `PrefixSumLineMetrics`'s `[Double]` is a copy-on-write reference, so
+only an 8-byte pointer lives in the cursor's static size; the prefix array stays
+provider-owned and is counted as `provider_owned_bytes`. A conforming metrics
+type must keep its index/prefix storage out of line (provider-owned), not inlined
+into the value.
 
 ## Testing Strategy
 
@@ -318,22 +426,62 @@ lines" criterion to the variable-height path.
 - geometry-cursor `y`/`height` derivation on hand-built non-uniform metrics
   (for example heights `[10, 30, 5, 100]`) with known expected output.
 - `UniformLineMetrics` equivalence oracle: the variable path with uniform metrics
-  must equal the fixed path across an input matrix. This is the keystone test
-  proving the variable path subsumes the fixed path.
-- validation-error parity with the fixed path for each applicable error case.
+  must equal the fixed path **exactly** across the boundary positions enumerated
+  in Precision And Equivalence and a non-boundary input matrix. This is the
+  keystone test proving the variable path subsumes the fixed path.
+- validation-error parity with the fixed path for each applicable error case,
+  plus the O(1) `invalidLineMetrics` checks (`offset(ofLine: 0) != 0`,
+  non-finite/negative total height) and a valid strictly-increasing non-uniform
+  case. Global monotonicity violations are out of reach for the core and are not
+  tested as core rejections.
 - scale correctness and the blocking performance gate via `PrefixSumLineMetrics`
   at 1M lines.
 
-## Portability Verification
+## Verification
 
-This slice changes the public core API, so the standard portability checks run:
+This slice changes the public core API, so the full verification set runs:
 
-- host `swift test`;
-- iOS cross-target CI (continuous and blocking since Slice 13);
-- local WASM and embedded-WASM package-graph builds of `TextEngineCore`.
+- `swift test` (host XCTest suite, including the new variable-height tests);
+- `swift build -c release`;
+- `swift run -c release ViewportBenchmarks -- --gate` (synthetic gate, unchanged);
+- `swift run -c release ViewportBenchmarks -- --variable-height --gate` (the new
+  blocking variable-height gate);
+- `swift run -c release ViewportBenchmarks -- --memory-shape` (including the new
+  variable-height scenario);
+- `swift run -c release ViewportBenchmarks -- --memory-observation` (host RSS,
+  unchanged);
+- iOS device + simulator cross-target compile via the Slice 13 `xcodebuild` CI
+  job (continuous and blocking);
+- local WASM and embedded-WASM package-graph builds of `TextEngineCore`;
+- the Slice 13 cross-target helper self-test and the hosted-job evidence on the
+  merge commit.
 
 WASM-in-CI remains skipped on the hosted runner (default Swift 6.1.2 has no
 matching public WASM SDK) — unchanged from Slice 13, not a regression.
+
+## Acceptance Criteria
+
+- [ ] `LineMetricsSource`, `UniformLineMetrics`, `VariableViewportInput`,
+  `VariableLineGeometryCursor`, and the two `ViewportVirtualizer` entry points are
+  public and compile in `TextEngineCore`.
+- [ ] The fixed-height public API and behavior are byte-for-byte unchanged; the
+  existing tests, synthetic gate, memory-shape, and memory-observation pass
+  without retuning.
+- [ ] `ViewportValidationError` gains only the additive `invalidLineMetrics`
+  case; existing cases are unchanged.
+- [ ] offset→line and line→offset are correct across the boundary, mid-line,
+  clamp, empty, single-line, `viewportHeight == 0`, and huge/negative-offset
+  cases.
+- [ ] The `UniformLineMetrics` equivalence oracle passes **exactly** for the
+  enumerated boundary positions and a non-boundary matrix.
+- [ ] The shared overscan→buffer→flags helper is used by both `compute` paths
+  with no behavior change to the fixed path.
+- [ ] `--variable-height --gate` passes at 1k / 100k / 1M lines with generous
+  headroom and is wired into CI after the synthetic-gate step.
+- [ ] `--memory-shape` shows identical `core_owned_bytes` for the variable-height
+  scenario at 100k vs 1M lines, and `geometry_lines == buffered_lines`.
+- [ ] Host tests, release build, iOS cross-target CI, and local WASM +
+  embedded-WASM builds all pass.
 
 ## Out Of Scope
 
@@ -358,6 +506,9 @@ Restating the locked boundary for this slice:
   rather than an O(N) rebuild), with end-to-end tests that a height change yields
   a correct, cheap re-layout. The stateless core needs no change for this; it is
   provider-side work plus tests.
+- **Collapsed/hidden lines**: if zero-height lines become a requirement, relax the
+  Decision 5 strictly-increasing precondition to non-decreasing and define the
+  equal-offset-run tie-break precisely, with tests.
 - **Measurement source**: once shaping/rasterization can produce real per-line
   heights, revisit whether an estimated-height-plus-measurement model (the
   Decision 1 rejected alternative) becomes worthwhile for asynchronous measuring.
