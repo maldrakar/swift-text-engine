@@ -126,11 +126,15 @@ purpose, and so a host can supply heights independently of content.
 
 ### Decision 4: The fixed-height path is preserved unchanged
 
-The existing fixed-height public API and behavior (`ViewportInput`,
+The existing fixed-height entry points (`ViewportInput`,
 `compute(_: ViewportInput)`, `LineGeometryCursor`, `geometry(for:lineHeight:)`)
-stay byte-for-byte unchanged, so the synthetic gate, the realistic-provider
-observation, and the memory diagnostics keep passing without retuning. The
-variable-height path is purely additive. A `UniformLineMetrics` conformance lets
+keep their signatures and behavior unchanged, so the synthetic gate, the
+realistic-provider observation, and the memory diagnostics keep passing without
+retuning. The variable-height path is otherwise purely additive. The one
+public-surface change touching a shared type is the additive
+`ViewportValidationError.invalidLineMetrics` case (existing cases unchanged, never
+returned by the fixed path); note that adding an enum case is source-breaking for
+any consumer doing an exhaustive `switch` without a `default`. A `UniformLineMetrics` conformance lets
 the new general API be driven with a constant height; it is both a convenience
 and the equivalence oracle (see Testing).
 
@@ -139,7 +143,11 @@ and the equivalence oracle (see Testing).
 The core cannot scan all offsets without breaking O(viewport)/O(log N). The
 protocol therefore states a precondition the core trusts: offsets are finite,
 **strictly increasing** on `0..<lineCount` (every line has finite positive
-height), and `offset(ofLine: 0) == 0`.
+height), and `offset(ofLine: 0) == 0`. The contract also requires **stability**:
+`lineCount` and `offset(ofLine:)` must not change during a single `compute` or a
+single `VariableLineGeometryCursor` pass, so the binary search and the geometry
+walk see one consistent set of prefix sums. (This is the static query half;
+mutation between frames is a later slice.)
 
 **Recorded product decision:** this slice requires strictly increasing offsets
 and so forbids zero-height (collapsed/hidden) lines. The reason is the contract,
@@ -155,9 +163,11 @@ run tie-break precisely (for example `visibleStart` = first line of the run,
 `visibleEndExclusive` = past the last) with tests.
 
 The core enforces only the O(1) checks it can afford: `offset(ofLine: 0) == 0`,
-and the queried total height finite and non-negative. Global strict monotonicity
-is **not** verified — that needs an O(N) scan, which violates the budget — so a
-mid-document contract violation is undefined behavior, like any precondition.
+and for `lineCount > 0` the queried total height `offset(ofLine: lineCount)`
+finite and **strictly positive** (a non-positive total contradicts the
+strict-positive-height contract). Global strict monotonicity is **not** verified —
+that needs an O(N) scan, which violates the budget — so a mid-document contract
+violation is undefined behavior, like any precondition.
 Contract violations the core does detect cheaply surface as a dedicated
 `invalidLineMetrics` error rather than overloading `nonFiniteValue`.
 
@@ -213,6 +223,9 @@ public protocol LineMetricsSource {
     /// offset(ofLine: lineCount) == total document height.
     /// Contract precondition: finite and strictly increasing on 0..<lineCount
     /// (every line has finite positive height). See Decision 5.
+    /// Stability precondition: `lineCount` and `offset(ofLine:)` must be stable
+    /// for the duration of one `compute` and one `VariableLineGeometryCursor`
+    /// pass (the static query half; mutation is a later slice).
     func offset(ofLine index: Int) -> Double
 }
 ```
@@ -285,18 +298,22 @@ arithmetic for searches over `offset(ofLine:)`:
    (`nonFiniteValue`); `viewportHeight >= 0` (`negativeViewportHeight`); overscan
    values `>= 0` (`negativeOverscan`). `nonPositiveLineHeight` no longer applies
    (there is no `lineHeight`).
-2. **O(1) metrics contract checks** (Decision 5), for `lineCount > 0`:
-   `offset(ofLine: 0) == 0`, and the queried total height
-   `offset(ofLine: lineCount)` finite and `>= 0`; otherwise fail with
-   `invalidLineMetrics`. Global strict monotonicity is not scanned (that would be
-   O(N)).
+2. **O(1) metrics contract checks** (Decision 5): `offset(ofLine: 0) == 0`; and
+   for `lineCount > 0`, the queried total height `offset(ofLine: lineCount)` is
+   finite and strictly positive (`> 0`). Otherwise fail with `invalidLineMetrics`.
+   (For `lineCount == 0`, `offset(ofLine: 0) == 0` is also the total height and the
+   result is `emptyRange` — step 3.) Global strict monotonicity is not scanned
+   (that would be O(N)).
 3. `lineCount == 0` -> `emptyRange()` (identical to the fixed path).
 4. `totalHeight = offset(ofLine: lineCount)`;
    `maxOffsetY = max(0, totalHeight - viewportHeight)`; clamp `scrollOffsetY`
    into `[0, maxOffsetY]`. Identical clamping policy to the fixed path.
-5. `visibleStart` = binary search for the line `i` such that
-   `offset(i) <= effOffsetY < offset(i + 1)` (the line containing the viewport
-   top), with the boundary comparison defined per Precision And Equivalence.
+5. `visibleStart`: if `effOffsetY >= totalHeight` (reachable only when
+   `viewportHeight == 0` at the document end, where no line contains the top),
+   `visibleStart = lineCount`; otherwise a binary search for the line `i` such
+   that `offset(i) <= effOffsetY < offset(i + 1)` (the line containing the
+   viewport top), with the boundary comparison defined per Precision And
+   Equivalence.
 6. `visibleEndExclusive` = binary search for the smallest `i` such that
    `offset(i) >= effOffsetY + viewportHeight` (the first line fully below the
    viewport bottom), clamped to `lineCount`.
@@ -337,7 +354,10 @@ path driven by `UniformLineMetrics(lineCount, lineHeight)` must produce a
 defined to reproduce the fixed path's snapping in offset space — a comparison
 tolerance keyed to the offset magnitude at the candidate line, chosen so that for
 `offset(i) = i · lineHeight` the search lands on the same line the quotient
-snapping would.
+snapping would. The implementation plan must define the exact comparison
+predicate (the snapping helper, written with the fixed path's
+`snappedIntegerQuotient` in hand) before coding the search: this spec fixes the
+requirement (exact equivalence), the plan fixes the formula.
 
 The equivalence oracle must cover, at minimum, these boundary positions:
 
@@ -430,10 +450,10 @@ into the value.
   in Precision And Equivalence and a non-boundary input matrix. This is the
   keystone test proving the variable path subsumes the fixed path.
 - validation-error parity with the fixed path for each applicable error case,
-  plus the O(1) `invalidLineMetrics` checks (`offset(ofLine: 0) != 0`,
-  non-finite/negative total height) and a valid strictly-increasing non-uniform
-  case. Global monotonicity violations are out of reach for the core and are not
-  tested as core rejections.
+  plus the O(1) `invalidLineMetrics` checks (`offset(ofLine: 0) != 0`, and for
+  `lineCount > 0` a non-finite or non-positive total height) and a valid
+  strictly-increasing non-uniform case. Global monotonicity violations are out of
+  reach for the core and are not tested as core rejections.
 - scale correctness and the blocking performance gate via `PrefixSumLineMetrics`
   at 1M lines.
 
@@ -464,9 +484,10 @@ matching public WASM SDK) — unchanged from Slice 13, not a regression.
 - [ ] `LineMetricsSource`, `UniformLineMetrics`, `VariableViewportInput`,
   `VariableLineGeometryCursor`, and the two `ViewportVirtualizer` entry points are
   public and compile in `TextEngineCore`.
-- [ ] The fixed-height public API and behavior are byte-for-byte unchanged; the
-  existing tests, synthetic gate, memory-shape, and memory-observation pass
-  without retuning.
+- [ ] The fixed-height entry points keep their signatures and behavior unchanged
+  (the only shared-surface change is the additive
+  `ViewportValidationError.invalidLineMetrics` case); the existing tests, synthetic
+  gate, memory-shape, and memory-observation pass without retuning.
 - [ ] `ViewportValidationError` gains only the additive `invalidLineMetrics`
   case; existing cases are unchanged.
 - [ ] offset→line and line→offset are correct across the boundary, mid-line,
