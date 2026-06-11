@@ -601,7 +601,9 @@ extension ViewportVirtualizer {
             return .failure(.negativeOverscan)
         }
 
-        // O(1) metrics contract checks (Decision 5).
+        // O(1) metrics contract checks (Decision 5). offset(ofLine: 0) is checked
+        // BEFORE the empty short-circuit below — deliberate parity with the fixed
+        // path (which validates before its lineCount == 0 return). Do not reorder.
         if metrics.offset(ofLine: 0) != 0.0 {
             return .failure(.invalidLineMetrics)
         }
@@ -626,7 +628,8 @@ extension ViewportVirtualizer {
             effectiveOffsetY + input.viewportHeight,
             metrics: metrics,
             lineCount: lineCount,
-            totalHeight: totalHeight
+            totalHeight: totalHeight,
+            lowerBound: visibleStart
         )
 
         return .success(
@@ -683,19 +686,22 @@ extension ViewportVirtualizer {
         return result
     }
 
-    // Smallest i in [0, lineCount] with offset(i) >= target (the first line whose
-    // top is at or below the viewport bottom, exclusive). For `target` at or past
-    // the document end, returns lineCount.
+    // Smallest i in [lowerBound, lineCount] with offset(i) >= target (the first
+    // line whose top is at or below the viewport bottom, exclusive). The caller
+    // passes lowerBound = visibleStart, since the answer is provably >= it
+    // (offset(visibleStart) <= effOffsetY <= target). For `target` at or past the
+    // document end, returns lineCount.
     private static func firstLineTopAtOrAbove<Metrics: LineMetricsSource>(
         _ target: Double,
         metrics: Metrics,
         lineCount: Int,
-        totalHeight: Double
+        totalHeight: Double,
+        lowerBound: Int
     ) -> Int {
         if target >= totalHeight {
             return lineCount
         }
-        var low = 0
+        var low = lowerBound
         var high = lineCount - 1
         var result = lineCount
         while low <= high {
@@ -1338,7 +1344,7 @@ Expected: three `mode=variable_height provider=prefix_sum scenario=… p95_ns=�
 Run: `swift run -c release ViewportBenchmarks -- --variable-height --gate`
 Expected: three `gate=pass` lines, exit code 0.
 
-Inspect the printed `p95_ns`/`p99_ns` against `budget_p95_ns`/`budget_p99_ns`. Each observed value should be comfortably under budget (target ≥ 2× headroom). If any observed value is within 2× of its budget, raise the corresponding budget so the CI-failing gate stays robust (Slice 11 lesson: thin CI margins are fragile) and re-run. If a `gate=fail` appears, STOP and report the observed numbers rather than loosening blindly.
+Inspect the printed `p95_ns`/`p99_ns` against `budget_p95_ns`/`budget_p99_ns`. Per the spec's budget-derivation rule (`budget = ceil(observed × safety_factor)`, `safety_factor >= 4`), each observed value must sit at or below `budget / 4`. If any observed value exceeds `budget / 4`, raise that budget to `ceil(observed × 4)` (rounded up to a clean number) so the CI-failing gate stays robust (Slice 11 lesson: thin CI margins are fragile), then re-run — never loosen on a real regression. If a `gate=fail` appears, STOP and report the observed numbers.
 
 - [ ] **Step 7: Confirm `--help` lists the new flag**
 

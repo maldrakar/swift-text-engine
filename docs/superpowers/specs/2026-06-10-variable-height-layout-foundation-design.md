@@ -215,6 +215,17 @@ same `VirtualRange` produced by the variable `compute` feeds both the
 metrics-driven geometry cursor and the existing `ViewportVirtualizer.lines(for:in:)`
 content cursor, so geometry and content are traversed over identical indices.
 
+**Portability (Embedded).** `LineMetricsSource` is consumed only through generic
+specialization — `compute<Metrics: LineMetricsSource>`, `geometry<Metrics>`,
+`VariableLineGeometryCursor<Metrics>` — never as an existential
+(`any LineMetricsSource`), deliberately mirroring `DocumentLineSource`, which is
+already proven to compile on every cross-target (iOS, WASM, embedded WASM). For
+Swift Embedded this is a *compilation requirement*, not a stylistic choice:
+existentials are unsupported there, so the new protocol inherits the proven
+portability shape by construction rather than relying solely on re-running
+cross-target CI. The protocol and its conformances stay Foundation-free for the
+same reason.
+
 ## Public API Surface
 
 Names are proposed and may be adjusted during implementation review.
@@ -313,7 +324,13 @@ arithmetic for searches over `offset(ofLine:)`:
    (For `lineCount == 0`, `offset(ofLine: 0) == 0` is also the total height and the
    result is `emptyRange` — step 3.) Global strict monotonicity is not scanned
    (that would be O(N)).
-3. `lineCount == 0` -> `emptyRange()` (identical to the fixed path).
+3. `lineCount == 0` -> `emptyRange()` (identical to the fixed path). The
+   `offset(ofLine: 0) == 0` check in step 2 runs *before* this short-circuit, so an
+   empty document still makes exactly that one query and a broken provider yields
+   `invalidLineMetrics` rather than `emptyRange`. This is deliberate parity with
+   the fixed path, which validates `nonPositiveLineHeight` before its
+   `lineCount == 0` short-circuit; implementations must not reorder the empty
+   return ahead of the contract check.
 4. `totalHeight = offset(ofLine: lineCount)`;
    `maxOffsetY = max(0, totalHeight - viewportHeight)`; clamp `scrollOffsetY`
    into `[0, maxOffsetY]`. Identical clamping policy to the fixed path.
@@ -324,7 +341,13 @@ arithmetic for searches over `offset(ofLine:)`:
    viewport top), by direct offset comparison (see Precision And Equivalence).
 6. `visibleEndExclusive` = binary search for the smallest `i` such that
    `offset(i) >= effOffsetY + viewportHeight` (the first line fully below the
-   viewport bottom), clamped to `lineCount`.
+   viewport bottom), clamped to `lineCount`. The search seeds its lower bound at
+   `visibleStart` rather than 0: since
+   `offset(visibleStart) <= effOffsetY <= effOffsetY + viewportHeight`, the answer
+   is provably `>= visibleStart`. This is exact and removes a constant factor of
+   `offset(ofLine:)` queries for providers whose query is itself O(log N)
+   (Decision 2). (When this search runs, `effOffsetY < totalHeight`, so
+   `visibleStart <= lineCount - 1` and the seed is in range.)
 7. **overscan -> buffer -> `isAtTop`/`isAtBottom`**: identical to the fixed path
    (index arithmetic on `visibleStart`/`visibleEndExclusive` with the overscan
    counts and clamps; `isAtTop = effOffsetY == 0`,
@@ -435,6 +458,22 @@ repository-policy-blocked); budgets are local-deterministic with **generous**
 headroom (the Slice 11 lesson: a thin margin — a hosted sample once hit 98.7% of
 its budget — is CI-fragile; the synthetic gate is robust precisely because its
 margins are wide).
+
+**Budget derivation.** To make "generous headroom" a rule rather than a matter of
+taste, each budget is set as `budget = ceil(observed_pXX × safety_factor)` with
+`safety_factor >= 4`, measured on the first local release run and rounded up to a
+clean number. Four is a floor, not a target — it keeps the variable-height gate in
+the same ballpark as the existing synthetic gate (whose 1M scenario runs at
+roughly 6× headroom). The plan ships concrete starter budgets; the first local run
+confirms each observed value sits at or below `budget / 4`, otherwise the budget is
+raised (never the gate loosened on a real regression).
+
+**Content-axis scope.** The brief's success criterion is "100k+ lines / >10 MB".
+This gate scales the *line-count* axis (1k / 100k / 1M) at variable heights; it has
+no byte/content dimension by design, because line heights are orthogonal to line
+content. The *content* axis (>10 MB) is already covered by the realistic-provider
+gate, which this slice does not touch, so the slice neither extends nor regresses
+that axis.
 
 **CLI and CI wiring.** The benchmark CLI separates a *mode* flag from the
 orthogonal `--gate` enforcement switch, so the gate is invoked through a new
@@ -575,3 +614,10 @@ Restating the locked boundary for this slice:
 - **Measurement source**: once shaping/rasterization can produce real per-line
   heights, revisit whether an estimated-height-plus-measurement model (the
   Decision 1 rejected alternative) becomes worthwhile for asynchronous measuring.
+- **Anchored / galloping search** (deliberately NOT now): the stateless O(log N)
+  binary search recomputes from scratch every frame. If a future gate shows that
+  search cost dominates on incremental scroll, the core could accept a caller-supplied
+  hint (the previous frame's top line) and gallop from it in O(log Δ), keeping the
+  `offset(ofLine:)` contract but returning per-frame state. This is consciously
+  deferred to preserve the pure-transform, stateless design (Decision 1/2);
+  statelessness here is a chosen trade-off, not an oversight.
