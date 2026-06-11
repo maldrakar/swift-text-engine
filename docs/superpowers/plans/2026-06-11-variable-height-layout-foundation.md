@@ -4,7 +4,7 @@
 
 **Goal:** Add the static (query) half of variable-height layout — a stateless core that virtualizes and lays out documents whose lines have different heights, driven by a provider-supplied cumulative-offset query.
 
-**Architecture:** A new `LineMetricsSource` protocol supplies `offset(ofLine:)` (cumulative top y). The core keeps zero per-line state: a new `ViewportVirtualizer.compute(_:metrics:)` overload binary-searches `offset(ofLine:)` to virtualize (O(log N), O(1) memory), and a `VariableLineGeometryCursor` emits per-line geometry over the buffer range. The fixed-height path is preserved unchanged; the two `compute` paths share an extracted `bufferedRange` helper. A reference `PrefixSumLineMetrics` plus a CI-failing benchmark gate (fails Swift CI on regression; actual merge-blocking stays repository-policy-blocked) live in the benchmark target.
+**Architecture:** A new `LineMetricsSource` protocol supplies `offset(ofLine:)` (cumulative top y). The core keeps zero per-line state: a new `ViewportVirtualizer.compute(_:metrics:)` overload binary-searches `offset(ofLine:)` to virtualize (O(log N), O(1) memory), and a `VariableLineGeometryCursor` emits per-line geometry over the buffer range. The fixed-height path is preserved unchanged; the two `compute` paths share an extracted `bufferedRange` helper. A reference `PrefixSumLineMetrics` plus a locally-enforcing `--variable-height --gate` live in the benchmark target; CI runs the variable-height benchmark observation-only without `--gate`, with CI-failing promotion deferred to a follow-up slice.
 
 **Tech Stack:** Swift 6.0 package (`swift-tools-version: 6.0`), XCTest (`@testable import TextEngineCore`), `ViewportBenchmarks` executable, GitHub Actions (`.github/workflows/swift-ci.yml`). Spec: `docs/superpowers/specs/2026-06-10-variable-height-layout-foundation-design.md`.
 
@@ -54,8 +54,11 @@ public protocol LineMetricsSource {
     /// Domain: `0...lineCount`. `offset(ofLine: 0) == 0` and
     /// `offset(ofLine: lineCount)` is the total document height.
     ///
-    /// Contract precondition: finite and strictly increasing on `0..<lineCount`
-    /// (every line has finite positive height).
+    /// Contract precondition: for every `i` in `0..<lineCount`, both
+    /// `offset(ofLine: i)` and `offset(ofLine: i + 1)` are finite and
+    /// `offset(ofLine: i) < offset(ofLine: i + 1)` (every line has finite
+    /// positive height, and `offset(ofLine: lineCount)` is part of the monotone
+    /// chain). The core never queries outside `0...lineCount`.
     ///
     /// Stability precondition: `lineCount` and `offset(ofLine:)` must be stable
     /// for one layout operation — a `compute` and any `VariableLineGeometryCursor`
@@ -456,6 +459,16 @@ final class VariableViewportComputeTests: XCTestCase {
         )
     }
 
+    func testEmptyDocumentStillValidatesFirstOffset() {
+        let metrics = ClosureLineMetrics(lineCount: 0) { _ in 1.0 }
+        let result = ViewportVirtualizer.compute(
+            input(scrollOffsetY: 0.0, viewportHeight: 100.0),
+            metrics: metrics
+        )
+
+        XCTAssertEqual(result, .failure(.invalidLineMetrics))
+    }
+
     func testZeroHeightViewportExactLineTopIsEmpty() {
         // offsets: [0, 10, 40, 45, 145]. scrollOffset 40 == line 2 top -> empty [2, 2).
         let metrics = ListLineMetrics(heights: [10, 30, 5, 100])
@@ -522,6 +535,14 @@ final class VariableViewportComputeTests: XCTestCase {
         let metrics = ListLineMetrics(heights: [10, 10])
         XCTAssertEqual(
             ViewportVirtualizer.compute(input(scrollOffsetY: .infinity, viewportHeight: 10.0), metrics: metrics),
+            .failure(.nonFiniteValue)
+        )
+    }
+
+    func testNonFiniteViewportHeightFails() {
+        let metrics = ListLineMetrics(heights: [10, 10])
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input(scrollOffsetY: 0.0, viewportHeight: .nan), metrics: metrics),
             .failure(.nonFiniteValue)
         )
     }
@@ -981,7 +1002,208 @@ git commit -m "feat: add VariableLineGeometryCursor"
 
 ---
 
-### Task 7: Add the `--variable-height` benchmark mode, runner, and CI-failing gate
+### Task 7: Deterministic query-count complexity tests
+
+**Files:**
+- Test: `Tests/TextEngineCoreTests/VariableHeightQueryCountTests.swift`
+
+This is the CI-stable proof of the algorithmic contract from the spec: `compute`
+must stay O(log N) in `offset(ofLine:)` queries, and geometry traversal must stay
+O(buffer). It complements the wall-clock benchmark, which catches constant-factor
+regressions but is not the deterministic proof of asymptotic behavior.
+
+- [ ] **Step 1: Write the query-count regression test**
+
+Create `Tests/TextEngineCoreTests/VariableHeightQueryCountTests.swift`:
+
+```swift
+import XCTest
+@testable import TextEngineCore
+
+final class VariableHeightQueryCountTests: XCTestCase {
+    private final class QueryCounter {
+        var count = 0
+    }
+
+    private struct CountingLineMetrics: LineMetricsSource {
+        let base: UniformLineMetrics
+        let counter: QueryCounter
+
+        init(lineCount: Int, lineHeight: Double, counter: QueryCounter) {
+            self.base = UniformLineMetrics(lineCount: lineCount, lineHeight: lineHeight)
+            self.counter = counter
+        }
+
+        var lineCount: Int { base.lineCount }
+
+        func offset(ofLine index: Int) -> Double {
+            counter.count += 1
+            return base.offset(ofLine: index)
+        }
+    }
+
+    private func input(
+        scrollOffsetY: Double,
+        viewportHeight: Double,
+        overscanLinesBefore: Int = 0,
+        overscanLinesAfter: Int = 0
+    ) -> VariableViewportInput {
+        VariableViewportInput(
+            scrollOffsetY: scrollOffsetY,
+            viewportHeight: viewportHeight,
+            overscanLinesBefore: overscanLinesBefore,
+            overscanLinesAfter: overscanLinesAfter
+        )
+    }
+
+    private func assertSuccess(
+        _ computation: ViewportComputation,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> VirtualRange? {
+        switch computation {
+        case let .success(range):
+            return range
+        case let .failure(error):
+            XCTFail("expected success, got \(error)", file: file, line: line)
+            return nil
+        }
+    }
+
+    private func ceilLog2(_ value: Int) -> Int {
+        if value <= 1 {
+            return 0
+        }
+
+        var power = 0
+        var capacity = 1
+        while capacity < value {
+            capacity <<= 1
+            power += 1
+        }
+        return power
+    }
+
+    func testComputeUsesLogarithmicQueriesAtOneMillionLines() {
+        let lineCount = 1_000_000
+        let counter = QueryCounter()
+        let metrics = CountingLineMetrics(lineCount: lineCount, lineHeight: 16.0, counter: counter)
+        let result = ViewportVirtualizer.compute(
+            input(
+                scrollOffsetY: Double(lineCount / 2) * 16.0 + 8.0,
+                viewportHeight: 80.0 * 16.0,
+                overscanLinesBefore: 5,
+                overscanLinesAfter: 5
+            ),
+            metrics: metrics
+        )
+
+        XCTAssertNotNil(assertSuccess(result))
+
+        // Two O(1) contract queries (offset 0 and total height) plus two binary
+        // searches. A linear scan over 1M lines would be hundreds of thousands of
+        // queries; this bound intentionally stays small and deterministic.
+        let expectedMax = 2 + (ceilLog2(lineCount) + 1) * 2
+        XCTAssertLessThanOrEqual(counter.count, expectedMax)
+        XCTAssertLessThan(counter.count, 100)
+    }
+
+    func testComputeEmptyDocumentQueriesOnlyFirstOffset() {
+        let counter = QueryCounter()
+        let metrics = CountingLineMetrics(lineCount: 0, lineHeight: 16.0, counter: counter)
+        let result = ViewportVirtualizer.compute(
+            input(scrollOffsetY: 0.0, viewportHeight: 80.0 * 16.0),
+            metrics: metrics
+        )
+
+        XCTAssertNotNil(assertSuccess(result))
+        XCTAssertEqual(counter.count, 1)
+    }
+
+    func testComputeSingleLineStaysBounded() {
+        let counter = QueryCounter()
+        let metrics = CountingLineMetrics(lineCount: 1, lineHeight: 16.0, counter: counter)
+        let result = ViewportVirtualizer.compute(
+            input(scrollOffsetY: 4.0, viewportHeight: 8.0),
+            metrics: metrics
+        )
+
+        XCTAssertNotNil(assertSuccess(result))
+        XCTAssertLessThanOrEqual(counter.count, 6)
+    }
+
+    func testComputeClampAtDocumentEndDoesNotSearchMidDocumentOffsets() {
+        let lineCount = 1_000_000
+        let counter = QueryCounter()
+        let metrics = CountingLineMetrics(lineCount: lineCount, lineHeight: 16.0, counter: counter)
+        let result = ViewportVirtualizer.compute(
+            input(scrollOffsetY: Double(lineCount) * 16.0, viewportHeight: 0.0),
+            metrics: metrics
+        )
+
+        XCTAssertNotNil(assertSuccess(result))
+        XCTAssertEqual(counter.count, 2)
+    }
+
+    func testNonEmptyGeometryCursorQueriesSeedPlusOnePerBufferedLine() {
+        let counter = QueryCounter()
+        let metrics = CountingLineMetrics(lineCount: 100, lineHeight: 16.0, counter: counter)
+        let range = VirtualRange(
+            visibleStart: 11,
+            visibleEndExclusive: 14,
+            bufferStart: 10,
+            bufferEndExclusive: 15,
+            isAtTop: false,
+            isAtBottom: false
+        )
+
+        var cursor = ViewportVirtualizer.geometry(for: range, metrics: metrics)
+        var emitted = 0
+        while cursor.next() != nil {
+            emitted += 1
+        }
+
+        XCTAssertEqual(emitted, 5)
+        XCTAssertEqual(counter.count, 6)
+    }
+
+    func testEmptyGeometryCursorDoesNotSeedOffsetQuery() {
+        let counter = QueryCounter()
+        let metrics = CountingLineMetrics(lineCount: 100, lineHeight: 16.0, counter: counter)
+        let range = VirtualRange(
+            visibleStart: 10,
+            visibleEndExclusive: 10,
+            bufferStart: 10,
+            bufferEndExclusive: 10,
+            isAtTop: false,
+            isAtBottom: false
+        )
+
+        var cursor = ViewportVirtualizer.geometry(for: range, metrics: metrics)
+
+        XCTAssertNil(cursor.next())
+        XCTAssertEqual(counter.count, 0)
+    }
+}
+```
+
+- [ ] **Step 2: Run the query-count tests**
+
+Run: `swift test --filter VariableHeightQueryCountTests`
+Expected: PASS. The 1M-line `compute` case stays below `2 + 2 × (ceil(log2(N)) + 1)` queries and below 100 total queries; the non-empty geometry cursor issues exactly `bufferSize + 1`; the empty geometry cursor issues exactly zero.
+
+If this test fails, fix the implementation rather than weakening the bound. A failure means the core is scanning too much metadata, seeding empty geometry unnecessarily, or re-querying offsets beyond the planned O(log N) / O(buffer) contract.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add Tests/TextEngineCoreTests/VariableHeightQueryCountTests.swift
+git commit -m "test: pin variable-height query counts"
+```
+
+---
+
+### Task 8: Add the `--variable-height` benchmark mode, runner, and local gate
 
 **Files:**
 - Modify: `Sources/ViewportBenchmarks/BenchmarkOptions.swift`
@@ -1344,7 +1566,7 @@ Expected: three `mode=variable_height provider=prefix_sum scenario=… p95_ns=�
 Run: `swift run -c release ViewportBenchmarks -- --variable-height --gate`
 Expected: three `gate=pass` lines, exit code 0.
 
-Inspect the printed `p95_ns`/`p99_ns` against `budget_p95_ns`/`budget_p99_ns`. Per the spec's budget-derivation rule (`budget = ceil(observed × safety_factor)`, `safety_factor >= 4`), each observed value must sit at or below `budget / 4`. If any observed value exceeds `budget / 4`, raise that budget to `ceil(observed × 4)` (rounded up to a clean number) so the CI-failing gate stays robust (Slice 11 lesson: thin CI margins are fragile), then re-run — never loosen on a real regression. If a `gate=fail` appears, STOP and report the observed numbers.
+Inspect the printed `p95_ns`/`p99_ns` against `budget_p95_ns`/`budget_p99_ns`. Per the spec's budget-derivation rule (`budget = ceil(observed × safety_factor)`, `safety_factor >= 4`), each observed value must sit at or below `budget / 4`. If any observed value exceeds `budget / 4`, raise that budget to `ceil(observed × 4)` (rounded up to a clean number) so the local gate has robust headroom (Slice 11 lesson: thin CI margins are fragile), then re-run — never loosen on a real regression. If a `gate=fail` appears, STOP and report the observed numbers.
 
 - [ ] **Step 7: Confirm `--help` lists the new flag**
 
@@ -1355,17 +1577,17 @@ Expected: usage text includes the `--variable-height` line.
 
 ```bash
 git add Sources/ViewportBenchmarks/BenchmarkOptions.swift Sources/ViewportBenchmarks/BenchmarkProgram.swift Sources/ViewportBenchmarks/VariableHeightBenchmark.swift
-git commit -m "feat: add --variable-height benchmark mode and CI-failing gate"
+git commit -m "feat: add --variable-height benchmark mode and local gate"
 ```
 
 ---
 
-### Task 8: Wire the variable-height gate into CI
+### Task 9: Wire the variable-height observation into CI
 
 **Files:**
 - Modify: `.github/workflows/swift-ci.yml`
 
-- [ ] **Step 1: Add the gate step after the synthetic gate**
+- [ ] **Step 1: Add the observation step after the synthetic gate**
 
 In `.github/workflows/swift-ci.yml`, in the `host-tests-and-benchmark-gate` job, insert a new step immediately after the existing `Run synthetic benchmark gate` step and before `Run memory shape diagnostic`. Change:
 
@@ -1383,8 +1605,9 @@ to:
       - name: Run synthetic benchmark gate
         run: swift run -c release ViewportBenchmarks -- --gate
 
-      - name: Run variable-height benchmark gate
-        run: swift run -c release ViewportBenchmarks -- --variable-height --gate
+      - name: Run variable-height benchmark observation
+        continue-on-error: true
+        run: swift run -c release ViewportBenchmarks -- --variable-height
 
       - name: Run memory shape diagnostic
         run: swift run -c release ViewportBenchmarks -- --memory-shape
@@ -1399,12 +1622,12 @@ Expected: `yaml_ok`.
 
 ```bash
 git add .github/workflows/swift-ci.yml
-git commit -m "ci: run variable-height benchmark gate after synthetic gate"
+git commit -m "ci: observe variable-height benchmark after synthetic gate"
 ```
 
 ---
 
-### Task 9: Variable-height memory-shape scenario
+### Task 10: Variable-height memory-shape scenario
 
 **Files:**
 - Modify: `Sources/ViewportBenchmarks/MemoryShapeDiagnostics.swift`
@@ -1533,7 +1756,7 @@ git commit -m "feat: add variable-height memory-shape scenario"
 
 ---
 
-### Task 10: Full verification (host, gates, diagnostics, portability)
+### Task 11: Full verification (host, gates, diagnostics, portability)
 
 **Files:** none (verification only).
 
@@ -1559,17 +1782,32 @@ Expected: three `gate=pass` lines.
 Run: `swift run -c release ViewportBenchmarks -- --variable-height --gate`
 Expected: three `gate=pass` lines.
 
-- [ ] **Step 5: Memory-shape diagnostic (with new variable scenario)**
+- [ ] **Step 5: Workflow scan for hosted observation wiring**
+
+Run:
+```bash
+rg -n -C 2 "Run variable-height benchmark observation" .github/workflows/swift-ci.yml
+rg -n "swift run -c release ViewportBenchmarks -- --variable-height" .github/workflows/swift-ci.yml
+```
+Expected: the workflow shows a `Run variable-height benchmark observation` step
+after the synthetic gate with `continue-on-error: true`, and the run command is
+`swift run -c release ViewportBenchmarks -- --variable-height`.
+
+Run: `rg -n "swift run -c release ViewportBenchmarks -- --variable-height --gate" .github/workflows/swift-ci.yml`
+Expected: no matches (exit code 1). The hosted workflow must remain
+observation-only this slice.
+
+- [ ] **Step 6: Memory-shape diagnostic (with new variable scenario)**
 
 Run: `swift run -c release ViewportBenchmarks -- --memory-shape`
 Expected: all `invariant=pass`, including the two `provider=variable_uniform` lines.
 
-- [ ] **Step 6: RSS memory observation (unchanged)**
+- [ ] **Step 7: RSS memory observation (unchanged)**
 
 Run: `swift run -c release ViewportBenchmarks -- --memory-observation`
 Expected: three `observation=pass` lines.
 
-- [ ] **Step 7: Local WASM and embedded-WASM core builds**
+- [ ] **Step 8: Local WASM and embedded-WASM core builds**
 
 Run:
 ```bash
@@ -1578,7 +1816,7 @@ swift build --swift-sdk swift-6.2.1-RELEASE_wasm-embedded --target TextEngineCor
 ```
 Expected: both succeed. (If the installed Swift SDK identifiers differ on the maintainer's machine, use `swift sdk list` to find the matching `wasm` / `wasm-embedded` SDK ids and substitute them.)
 
-- [ ] **Step 8: Cross-target helper self-test, then iOS compile (the Slice 13 helper)**
+- [ ] **Step 9: Cross-target helper self-test, then iOS compile (the Slice 13 helper)**
 
 First the toolchain-independent self-test:
 
@@ -1590,27 +1828,27 @@ Then the full cross-target compile:
 Run: `./.github/scripts/cross-target-compile.sh`
 Expected: `target=ios_device result=pass` and `target=ios_simulator result=pass`; WASM lines may be `skipped` depending on the local toolchain; summary `blocking_failures=0 exit=0`.
 
-- [ ] **Step 9: Confirm core is Foundation-free**
+- [ ] **Step 10: Confirm core is Foundation-free**
 
 Run: `rg -n "Foundation" Sources/TextEngineCore`
 Expected: no matches (exit code 1) — the brief's no-Foundation-in-core constraint, re-checked because this slice changes the public surface.
 
-- [ ] **Step 10: Push the branch and confirm CI is green**
+- [ ] **Step 11: Push the branch and confirm CI is green**
 
-Push `slice-14-variable-height-layout-foundation`, open the PR, and confirm the `Host tests and benchmark gate` job (now including the variable-height gate step) and the `Cross-target compile` job both conclude `success`. iOS targets pass and block; WASM stays skipped on the hosted runner (Swift 6.1.2), unchanged from Slice 13. Record the PR number, head SHA, and run id for the verification document (Task 11).
+Push `slice-14-variable-height-layout-foundation`, open the PR, and confirm the `Host tests and benchmark gate` job (now including the non-blocking variable-height observation step) and the `Cross-target compile` job both conclude `success`. The variable-height hosted step runs without `--gate` and has `continue-on-error: true`; iOS targets pass and block; WASM stays skipped on the hosted runner (Swift 6.1.2), unchanged from Slice 13. Record the PR number, head SHA, and run id for the verification document (Task 12).
 
 ---
 
-### Task 11: Verification document and post-merge evidence
+### Task 12: Verification document and post-merge evidence
 
 **Files:**
 - Create: `docs/superpowers/verification/2026-06-11-variable-height-layout-foundation.md`
 
-Records the Task 10 evidence in the project's verification-doc convention (follow the shape of `docs/superpowers/verification/2026-06-09-cross-target-textenginecore-ci.md`) and anchors proof in the post-merge push run on the merge commit, as the Slice 11/12/13 reviews recommend.
+Records the Task 11 evidence in the project's verification-doc convention (follow the shape of `docs/superpowers/verification/2026-06-09-cross-target-textenginecore-ci.md`) and anchors proof in the post-merge push run on the merge commit, as the Slice 11/12/13 reviews recommend.
 
 - [ ] **Step 1: Write the verification document**
 
-Create `docs/superpowers/verification/2026-06-11-variable-height-layout-foundation.md` with the following sections, filled with the **actual** Task 10 outputs (paste real command output, not summaries), using the `Command:` / `Output:` pattern from the Slice 13 verification doc:
+Create `docs/superpowers/verification/2026-06-11-variable-height-layout-foundation.md` with the following sections, filled with the **actual** Task 11 outputs (paste real command output, not summaries), using the `Command:` / `Output:` pattern from the Slice 13 verification doc:
 
 ```text
 # Variable-Height Layout Foundation Verification
@@ -1621,18 +1859,20 @@ Date: 2026-06-11
 <one paragraph: branch slice-14-variable-height-layout-foundation, what is covered>
 
 ## Local Verification
-<for each Task 10 command (Steps 1-9): the command and its real output —
-swift test; swift build -c release; rg Foundation; synthetic gate;
-variable-height gate; memory-shape; memory-observation; local wasm + wasm-embedded
-builds; cross-target helper --self-test and the full helper run>
+<for each Task 11 command (Steps 1-10): the command and its real output —
+swift test; swift build -c release; synthetic gate; variable-height local gate;
+workflow scan proving observation-only CI wiring; memory-shape;
+memory-observation; local wasm + wasm-embedded builds; cross-target helper
+--self-test and the full helper run; rg Foundation>
 
 ## Hosted PR Run
 <PR number, head SHA, run id, conclusion, runner image, Swift/Xcode versions,
-the variable-height gate step lines, and the cross-target job result>
+the variable-height observation step lines, and the cross-target job result>
 
 ## Post-Merge Push Run
-<merge commit SHA, push run id, conclusion; the variable-height gate and the
-cross-target job both green on the merge commit>
+<merge commit SHA, push run id, conclusion; the variable-height observation step
+ran without `--gate` and with `continue-on-error: true`; the cross-target job is
+green on the merge commit>
 
 ## Conclusion
 <one paragraph: the slice meets the spec's Acceptance Criteria; iOS cross-target
@@ -1658,11 +1898,11 @@ gh run list --branch main --workflow "Swift CI" --json databaseId,headSha,conclu
   jq --arg sha "$MERGE_SHA" '[.[] | select(.headSha == $sha and .event == "push")]'
 ```
 
-Confirm the run concluded `success` with both the `Host tests and benchmark gate` job (including the variable-height gate step) and the `Cross-target compile` job green. Re-fetch the variable-height gate lines from that run's logs.
+Confirm the run concluded `success` with both the `Host tests and benchmark gate` job (including the variable-height observation step) and the `Cross-target compile` job green. Re-fetch the variable-height observation lines from that run's logs and confirm the workflow step used `continue-on-error: true` and no `--gate`.
 
 - [ ] **Step 4: Finalize the verification document with post-merge evidence and commit**
 
-Fill the "Post-Merge Push Run" section with the merge commit SHA, the push run id, the `success` conclusion, and the variable-height gate + cross-target results, then:
+Fill the "Post-Merge Push Run" section with the merge commit SHA, the push run id, the `success` conclusion, the variable-height observation output, and the cross-target results, then:
 
 ```bash
 git add docs/superpowers/verification/2026-06-11-variable-height-layout-foundation.md
@@ -1679,16 +1919,17 @@ git commit -m "docs: record variable-height layout post-merge run"
 - Separate metrics protocol (Decision 3): Task 1. ✓
 - Fixed path preserved + `UniformLineMetrics` oracle (Decision 4): Tasks 3, 5. ✓
 - Contractual O(1) validation + `invalidLineMetrics` (Decision 5): Tasks 2, 4. ✓
-- CI-failing variable-height gate (Decision 6): Tasks 7, 8. ✓
+- Local variable-height gate + CI observation (Decision 6): Tasks 8, 9. ✓
 - `VariableViewportInput`, reused output types: Task 2. ✓
 - `compute` algorithm incl. `effOffsetY >= totalHeight → lineCount` special case: Task 4 (`firstLineTopAtOrBelow`/`firstLineTopAtOrAbove` early-out). ✓
 - `VariableLineGeometryCursor` (rolling offset, copy-safe handle): Task 6. ✓
 - Internal shared `bufferedRange` refactor: Task 3. ✓
 - Precision: direct comparison + representable-height oracle (resolved finding): Task 5. ✓
-- Reference `PrefixSumLineMetrics` + perf gate (compute + geometry, varied offsets): Task 7. ✓
-- Memory-shape demonstration (100k vs 1M, identical core bytes; handle): Task 9. ✓
-- Verification runs (incl. cross-target helper `--self-test`) + Acceptance Criteria: Task 10. ✓
-- Verification document + hosted PR run + post-merge merge-commit evidence (spec Verification): Task 11. ✓
+- Deterministic query-count complexity test (O(log N) compute, O(buffer) geometry, zero-query empty cursor): Task 7. ✓
+- Reference `PrefixSumLineMetrics` + perf gate (compute + geometry, varied offsets): Task 8. ✓
+- Memory-shape demonstration (100k vs 1M, identical core bytes; handle): Task 10. ✓
+- Verification runs (incl. workflow scan and cross-target helper `--self-test`) + Acceptance Criteria: Task 11. ✓
+- Verification document + hosted PR run + post-merge merge-commit evidence (spec Verification): Task 12. ✓
 - Out of scope (mutation, WASM-CI promotion, branch protection, storage adapters, memory budgets, measurement source): untouched. ✓
 
 **Placeholder scan:** No TBD/TODO; every code step shows complete code; every run step shows the command and expected output.
