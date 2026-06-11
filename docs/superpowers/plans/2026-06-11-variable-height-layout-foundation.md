@@ -975,12 +975,14 @@ git commit -m "feat: add VariableLineGeometryCursor"
 
 ---
 
-### Task 7: Add the `--variable-height` benchmark mode flag
+### Task 7: Add the `--variable-height` benchmark mode, runner, and CI-failing gate
 
 **Files:**
 - Modify: `Sources/ViewportBenchmarks/BenchmarkOptions.swift`
+- Modify: `Sources/ViewportBenchmarks/BenchmarkProgram.swift`
+- Create: `Sources/ViewportBenchmarks/VariableHeightBenchmark.swift`
 
-The benchmark target has no XCTest coverage (it is an executable), so this task is verified by building and running the executable's `--help`.
+The benchmark target has no XCTest coverage (it is an executable), so this task is verified by building and running the executable. All three files land in **one commit**: `BenchmarkMode.variableHeight`, the `BenchmarkProgram` switch arm, and `runVariableHeightBenchmarks` are mutually dependent (a partial commit would not compile — non-exhaustive switch and/or undefined symbol), so the build step runs only after all three files exist.
 
 - [ ] **Step 1: Replace `BenchmarkOptions.swift` with the version that knows `--variable-height`**
 
@@ -1089,7 +1091,7 @@ struct BenchmarkOptions {
 
 (The mutual-exclusion checks are simplified to "only one non-pipeline mode flag" — behavior-equivalent to the old pairwise checks, and it now covers `--variable-height` too.)
 
-- [ ] **Step 2: Add the new mode to the program router so it compiles**
+- [ ] **Step 2: Route the new mode in the program**
 
 In `Sources/ViewportBenchmarks/BenchmarkProgram.swift`, change:
 
@@ -1123,23 +1125,9 @@ to:
     }
 ```
 
-This references `runVariableHeightBenchmarks`, which Task 8 creates. The build will fail until Task 8 — that is expected; do not run the build as a pass gate here.
+This references `runVariableHeightBenchmarks`, created in Step 3 below. Do not build yet — the build step (Step 4) runs after all three files exist.
 
-- [ ] **Step 3: Commit**
-
-```bash
-git add Sources/ViewportBenchmarks/BenchmarkOptions.swift Sources/ViewportBenchmarks/BenchmarkProgram.swift
-git commit -m "feat: add --variable-height benchmark mode flag"
-```
-
----
-
-### Task 8: Variable-height benchmark, `PrefixSumLineMetrics`, and blocking gate
-
-**Files:**
-- Create: `Sources/ViewportBenchmarks/VariableHeightBenchmark.swift`
-
-- [ ] **Step 1: Implement the benchmark**
+- [ ] **Step 3: Create the benchmark runner and `PrefixSumLineMetrics`**
 
 Create `Sources/ViewportBenchmarks/VariableHeightBenchmark.swift`:
 
@@ -1335,33 +1323,38 @@ func runVariableHeightBenchmarks(enforceGate: Bool) -> Bool {
 }
 ```
 
-- [ ] **Step 2: Build and run the benchmark (observation, no gate)**
+- [ ] **Step 4: Build (now that all three files exist)**
+
+Run: `swift build -c release`
+Expected: build succeeds.
+
+- [ ] **Step 5: Run the benchmark (observation, no gate)**
 
 Run: `swift run -c release ViewportBenchmarks -- --variable-height`
 Expected: three `mode=variable_height provider=prefix_sum scenario=… p95_ns=… p99_ns=… failures=0 checksum=…` lines, no `gate=` field.
 
-- [ ] **Step 3: Run the gate and confirm generous headroom**
+- [ ] **Step 6: Run the gate and confirm generous headroom**
 
 Run: `swift run -c release ViewportBenchmarks -- --variable-height --gate`
 Expected: three `gate=pass` lines, exit code 0.
 
-Inspect the printed `p95_ns`/`p99_ns` against `budget_p95_ns`/`budget_p99_ns`. Each observed value should be comfortably under budget (target ≥ 2× headroom). If any observed value is within 2× of its budget, raise the corresponding budget so the blocking gate stays robust (Slice 11 lesson: thin CI margins are fragile) and re-run. If a `gate=fail` appears, STOP and report the observed numbers rather than loosening blindly.
+Inspect the printed `p95_ns`/`p99_ns` against `budget_p95_ns`/`budget_p99_ns`. Each observed value should be comfortably under budget (target ≥ 2× headroom). If any observed value is within 2× of its budget, raise the corresponding budget so the CI-failing gate stays robust (Slice 11 lesson: thin CI margins are fragile) and re-run. If a `gate=fail` appears, STOP and report the observed numbers rather than loosening blindly.
 
-- [ ] **Step 4: Confirm `--help` lists the new flag**
+- [ ] **Step 7: Confirm `--help` lists the new flag**
 
 Run: `swift run ViewportBenchmarks -- --help`
 Expected: usage text includes the `--variable-height` line.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add Sources/ViewportBenchmarks/VariableHeightBenchmark.swift
-git commit -m "feat: add blocking variable-height benchmark gate"
+git add Sources/ViewportBenchmarks/BenchmarkOptions.swift Sources/ViewportBenchmarks/BenchmarkProgram.swift Sources/ViewportBenchmarks/VariableHeightBenchmark.swift
+git commit -m "feat: add --variable-height benchmark mode and CI-failing gate"
 ```
 
 ---
 
-### Task 9: Wire the variable-height gate into CI
+### Task 8: Wire the variable-height gate into CI
 
 **Files:**
 - Modify: `.github/workflows/swift-ci.yml`
@@ -1393,7 +1386,7 @@ to:
 
 - [ ] **Step 2: Validate the workflow YAML locally**
 
-Run: `python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/swift-ci.yml')); print('yaml_ok')"`
+Run: `ruby -e "require 'yaml'; YAML.load_file('.github/workflows/swift-ci.yml'); puts 'yaml_ok'"`
 Expected: `yaml_ok`.
 
 - [ ] **Step 3: Commit**
@@ -1405,7 +1398,7 @@ git commit -m "ci: run variable-height benchmark gate after synthetic gate"
 
 ---
 
-### Task 10: Variable-height memory-shape scenario
+### Task 9: Variable-height memory-shape scenario
 
 **Files:**
 - Modify: `Sources/ViewportBenchmarks/MemoryShapeDiagnostics.swift`
@@ -1534,7 +1527,7 @@ git commit -m "feat: add variable-height memory-shape scenario"
 
 ---
 
-### Task 11: Full verification (host, gates, diagnostics, portability)
+### Task 10: Full verification (host, gates, diagnostics, portability)
 
 **Files:** none (verification only).
 
@@ -1603,15 +1596,15 @@ Push `slice-14-variable-height-layout-foundation` and confirm the `Host tests an
 - Separate metrics protocol (Decision 3): Task 1. ✓
 - Fixed path preserved + `UniformLineMetrics` oracle (Decision 4): Tasks 3, 5. ✓
 - Contractual O(1) validation + `invalidLineMetrics` (Decision 5): Tasks 2, 4. ✓
-- CI-failing variable-height gate (Decision 6): Tasks 7, 8, 9. ✓
+- CI-failing variable-height gate (Decision 6): Tasks 7, 8. ✓
 - `VariableViewportInput`, reused output types: Task 2. ✓
 - `compute` algorithm incl. `effOffsetY >= totalHeight → lineCount` special case: Task 4 (`firstLineTopAtOrBelow`/`firstLineTopAtOrAbove` early-out). ✓
 - `VariableLineGeometryCursor` (rolling offset, copy-safe handle): Task 6. ✓
 - Internal shared `bufferedRange` refactor: Task 3. ✓
 - Precision: direct comparison + representable-height oracle (resolved finding): Task 5. ✓
-- Reference `PrefixSumLineMetrics` + perf gate (compute + geometry, varied offsets): Task 8. ✓
-- Memory-shape demonstration (100k vs 1M, identical core bytes; handle): Task 10. ✓
-- Verification + Acceptance Criteria: Task 11. ✓
+- Reference `PrefixSumLineMetrics` + perf gate (compute + geometry, varied offsets): Task 7. ✓
+- Memory-shape demonstration (100k vs 1M, identical core bytes; handle): Task 9. ✓
+- Verification + Acceptance Criteria: Task 10. ✓
 - Out of scope (mutation, WASM-CI promotion, branch protection, storage adapters, memory budgets, measurement source): untouched. ✓
 
 **Placeholder scan:** No TBD/TODO; every code step shows complete code; every run step shows the command and expected output.
