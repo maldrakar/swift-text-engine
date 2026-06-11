@@ -1572,7 +1572,14 @@ swift build --swift-sdk swift-6.2.1-RELEASE_wasm-embedded --target TextEngineCor
 ```
 Expected: both succeed. (If the installed Swift SDK identifiers differ on the maintainer's machine, use `swift sdk list` to find the matching `wasm` / `wasm-embedded` SDK ids and substitute them.)
 
-- [ ] **Step 8: iOS cross-target compile (the Slice 13 helper)**
+- [ ] **Step 8: Cross-target helper self-test, then iOS compile (the Slice 13 helper)**
+
+First the toolchain-independent self-test:
+
+Run: `./.github/scripts/cross-target-compile.sh --self-test`
+Expected: `self_test=pass`.
+
+Then the full cross-target compile:
 
 Run: `./.github/scripts/cross-target-compile.sh`
 Expected: `target=ios_device result=pass` and `target=ios_simulator result=pass`; WASM lines may be `skipped` depending on the local toolchain; summary `blocking_failures=0 exit=0`.
@@ -1584,7 +1591,77 @@ Expected: no matches (exit code 1) — the brief's no-Foundation-in-core constra
 
 - [ ] **Step 10: Push the branch and confirm CI is green**
 
-Push `slice-14-variable-height-layout-foundation` and confirm the `Host tests and benchmark gate` job (now including the variable-height gate step) and the `Cross-target compile` job both conclude `success`. iOS targets pass and block; WASM stays skipped on the hosted runner (Swift 6.1.2), unchanged from Slice 13.
+Push `slice-14-variable-height-layout-foundation`, open the PR, and confirm the `Host tests and benchmark gate` job (now including the variable-height gate step) and the `Cross-target compile` job both conclude `success`. iOS targets pass and block; WASM stays skipped on the hosted runner (Swift 6.1.2), unchanged from Slice 13. Record the PR number, head SHA, and run id for the verification document (Task 11).
+
+---
+
+### Task 11: Verification document and post-merge evidence
+
+**Files:**
+- Create: `docs/superpowers/verification/2026-06-11-variable-height-layout-foundation.md`
+
+Records the Task 10 evidence in the project's verification-doc convention (follow the shape of `docs/superpowers/verification/2026-06-09-cross-target-textenginecore-ci.md`) and anchors proof in the post-merge push run on the merge commit, as the Slice 11/12/13 reviews recommend.
+
+- [ ] **Step 1: Write the verification document**
+
+Create `docs/superpowers/verification/2026-06-11-variable-height-layout-foundation.md` with the following sections, filled with the **actual** Task 10 outputs (paste real command output, not summaries), using the `Command:` / `Output:` pattern from the Slice 13 verification doc:
+
+```text
+# Variable-Height Layout Foundation Verification
+
+Date: 2026-06-11
+
+## Scope
+<one paragraph: branch slice-14-variable-height-layout-foundation, what is covered>
+
+## Local Verification
+<for each Task 10 command (Steps 1-9): the command and its real output —
+swift test; swift build -c release; rg Foundation; synthetic gate;
+variable-height gate; memory-shape; memory-observation; local wasm + wasm-embedded
+builds; cross-target helper --self-test and the full helper run>
+
+## Hosted PR Run
+<PR number, head SHA, run id, conclusion, runner image, Swift/Xcode versions,
+the variable-height gate step lines, and the cross-target job result>
+
+## Post-Merge Push Run
+<merge commit SHA, push run id, conclusion; the variable-height gate and the
+cross-target job both green on the merge commit>
+
+## Conclusion
+<one paragraph: the slice meets the spec's Acceptance Criteria; iOS cross-target
+stays blocking-and-green; WASM stays skipped on the runner (Swift 6.1.2),
+unchanged from Slice 13>
+```
+
+- [ ] **Step 2: Commit the verification document (pre-merge state)**
+
+```bash
+git add docs/superpowers/verification/2026-06-11-variable-height-layout-foundation.md
+git commit -m "docs: record variable-height layout verification"
+```
+
+- [ ] **Step 3: After the PR merges, capture the post-merge push run**
+
+After merging to `main`, find the `Swift CI` push run on the merge commit:
+
+```bash
+git fetch origin main
+MERGE_SHA=$(git rev-parse origin/main)
+gh run list --branch main --workflow "Swift CI" --json databaseId,headSha,conclusion,event | \
+  jq --arg sha "$MERGE_SHA" '[.[] | select(.headSha == $sha and .event == "push")]'
+```
+
+Confirm the run concluded `success` with both the `Host tests and benchmark gate` job (including the variable-height gate step) and the `Cross-target compile` job green. Re-fetch the variable-height gate lines from that run's logs.
+
+- [ ] **Step 4: Finalize the verification document with post-merge evidence and commit**
+
+Fill the "Post-Merge Push Run" section with the merge commit SHA, the push run id, the `success` conclusion, and the variable-height gate + cross-target results, then:
+
+```bash
+git add docs/superpowers/verification/2026-06-11-variable-height-layout-foundation.md
+git commit -m "docs: record variable-height layout post-merge run"
+```
 
 ---
 
@@ -1604,7 +1681,8 @@ Push `slice-14-variable-height-layout-foundation` and confirm the `Host tests an
 - Precision: direct comparison + representable-height oracle (resolved finding): Task 5. ✓
 - Reference `PrefixSumLineMetrics` + perf gate (compute + geometry, varied offsets): Task 7. ✓
 - Memory-shape demonstration (100k vs 1M, identical core bytes; handle): Task 9. ✓
-- Verification + Acceptance Criteria: Task 10. ✓
+- Verification runs (incl. cross-target helper `--self-test`) + Acceptance Criteria: Task 10. ✓
+- Verification document + hosted PR run + post-merge merge-commit evidence (spec Verification): Task 11. ✓
 - Out of scope (mutation, WASM-CI promotion, branch protection, storage adapters, memory budgets, measurement source): untouched. ✓
 
 **Placeholder scan:** No TBD/TODO; every code step shows complete code; every run step shows the command and expected output.
