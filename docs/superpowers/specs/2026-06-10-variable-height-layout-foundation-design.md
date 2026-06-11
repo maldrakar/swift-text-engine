@@ -133,8 +133,11 @@ realistic-provider observation, and the memory diagnostics keep passing without
 retuning. The variable-height path is otherwise purely additive. The one
 public-surface change touching a shared type is the additive
 `ViewportValidationError.invalidLineMetrics` case (existing cases unchanged, never
-returned by the fixed path); note that adding an enum case is source-breaking for
-any consumer doing an exhaustive `switch` without a `default`. A `UniformLineMetrics` conformance lets
+returned by the fixed path). **Migration note:** adding an enum case is a source
+break for any consumer doing an exhaustive `switch` over `ViewportValidationError`
+without a `default`. This package contains no such switch (errors are only
+compared by value), so the addition is safe here; the break is called out only for
+a future or external exhaustive switch. A `UniformLineMetrics` conformance lets
 the new general API be driven with a constant height; it is both a convenience
 and the equivalence oracle (see Testing).
 
@@ -172,13 +175,16 @@ violation is undefined behavior, like any precondition.
 Contract violations the core does detect cheaply surface as a dedicated
 `invalidLineMetrics` error rather than overloading `nonFiniteValue`.
 
-### Decision 6: The variable-height benchmark is a blocking gate
+### Decision 6: The variable-height benchmark is a CI-failing gate
 
 The new variable-height benchmark is a deterministic local p95/p99 measurement,
-the same kind as the existing synthetic gate, and the brief requires regression
-benchmarks to block merge on degradation. It is introduced as a blocking gate
-(not observation-first) with budgets set with generous headroom and tunable
-later.
+the same kind as the existing synthetic gate. The brief calls for regression
+benchmarks to block merge on degradation; like the existing synthetic gate, this
+gate **fails Swift CI** on regression, but *actual* merge-blocking remains
+repository-policy-blocked — branch protection / required status checks are
+unavailable on the private repo (the Slice 6 blocker, out of scope here). It is
+introduced as a CI-failing gate (not observation-first), with budgets set with
+generous headroom and tunable later.
 
 ## Architecture Overview
 
@@ -372,11 +378,21 @@ correct computation for the given offsets.
 - `scrollOffsetY` clamped to `maxOffsetY`, and the `effOffsetY == totalHeight`
   edge (where `visibleStart` takes the fixed path's high-end clamp to
   `lineCount`);
-- `viewportHeight == 0`, both mid-document (empty range at the offset line) and at
-  the document end (`visibleStart == lineCount`);
+- `viewportHeight == 0` at three positions, matching the fixed path: an **exact
+  line top** → empty range `[i, i)`; a **mid-line** offset → the single crossed
+  line `[i, i + 1)`; the **document end** → `visibleStart == lineCount`;
 - a range of non-boundary (mid-line) offsets;
-- a large `lineCount` (including the `Int.max` clamp case) driven by
-  `UniformLineMetrics`, which is allocation-free.
+- a moderately large `lineCount` (for example 100k) where adjacent
+  `Double(i) · lineHeight` offsets stay distinct, so the strictly-increasing
+  contract holds.
+
+The `Int.max` clamp-at-end case is tested **separately**, not through the general
+oracle: at `Int.max`, `UniformLineMetrics`' `Double(i) · lineHeight` offsets are
+no longer strictly increasing (consecutive integers above `2^53` collapse to the
+same `Double`), so it must not be used to exercise the offset→line search. The
+clamp special case (`effOffsetY >= totalHeight → visibleStart == lineCount`) never
+inspects mid-document offsets, so it is valid regardless and only proves
+clamp/overflow-safety.
 
 The oracle deliberately uses exactly-representable heights; equivalence at sub-ulp
 boundaries of non-representable heights is explicitly **not** claimed, per the
@@ -413,10 +429,12 @@ drawn from a fixed distribution) measures compute + geometry p95/p99 at
 1k / 100k / 1M lines and shows the cost stays within budget and scales
 logarithmically, not linearly, in N (the O(log N) search + O(buffer) geometry
 claim; the buffer is fixed by the viewport/overscan and so is constant across the
-scale points, leaving only the log-N search term to vary). Per Decision 6 it is a blocking gate; budgets are
-local-deterministic with **generous** headroom (the Slice 11 lesson: a thin
-margin — a hosted sample once hit 98.7% of its budget — is CI-fragile; the
-synthetic gate is robust precisely because its margins are wide).
+scale points, leaving only the log-N search term to vary). Per Decision 6 it is a
+CI-failing gate (it fails Swift CI on regression; actual merge-blocking stays
+repository-policy-blocked); budgets are local-deterministic with **generous**
+headroom (the Slice 11 lesson: a thin margin — a hosted sample once hit 98.7% of
+its budget — is CI-fragile; the synthetic gate is robust precisely because its
+margins are wide).
 
 **CLI and CI wiring.** The benchmark CLI separates a *mode* flag from the
 orthogonal `--gate` enforcement switch, so the gate is invoked through a new
@@ -434,20 +452,24 @@ document size) is argued by construction in Decision 1, but this project's
 practice (Slice 7) is to turn that claim into a deterministic diagnostic. The
 `--memory-shape` diagnostic gains a variable-height scenario that runs the same
 viewport/overscan against 100k and 1M lines through `compute` and
-`VariableLineGeometryCursor`, and asserts identical `core_owned_bytes` across the
-two line counts (O(1) core memory) and `geometry_lines == buffered_lines`
-(O(buffer) traversal). `coreOwnedBytesEstimate` already sums `MemoryLayout` sizes,
-so it extends to the variable cursor naturally. This is a structural invariant,
-not a memory hard budget (which stays out of scope).
+`VariableLineGeometryCursor`, using the **allocation-free** `UniformLineMetrics`,
+and asserts identical `core_owned_bytes` across the two line counts (O(1) core
+memory) and `geometry_lines == buffered_lines` (O(buffer) traversal). A dedicated
+`variableCoreOwnedBytesEstimate` sums the `MemoryLayout` sizes of `VirtualRange`
+and `VariableLineGeometryCursor<UniformLineMetrics>`. This is a structural
+invariant, not a memory hard budget (which stays out of scope). `UniformLineMetrics`
+is chosen over the indexed `PrefixSumLineMetrics` precisely because it allocates
+nothing, so the diagnostic proves the core's O(1) memory without itself allocating
+an O(N) prefix array (and therefore reports no `provider_owned_bytes`).
 
-This depends on the metrics value stored in the cursor being a lightweight,
-copy-safe **handle**: `VariableLineGeometryCursor<Metrics>` holds the `Metrics`
-by value to query offsets per line, exactly as `DocumentLineCursor<Source>` holds
-its `Source`. `PrefixSumLineMetrics`'s `[Double]` is a copy-on-write reference, so
-only an 8-byte pointer lives in the cursor's static size; the prefix array stays
-provider-owned and is counted as `provider_owned_bytes`. A conforming metrics
-type must keep its index/prefix storage out of line (provider-owned), not inlined
-into the value.
+The invariant holds for *any* conforming metrics because the cursor stores the
+`Metrics` value as a lightweight, copy-safe **handle**:
+`VariableLineGeometryCursor<Metrics>` holds the `Metrics` by value to query
+offsets per line, exactly as `DocumentLineCursor<Source>` holds its `Source`. For
+an indexed provider such as `PrefixSumLineMetrics`, the `[Double]` prefix array is
+a copy-on-write reference, so only a pointer lives in the cursor's static size and
+the array stays provider-owned. A conforming metrics type must keep its
+index/prefix storage out of line (provider-owned), not inlined into the value.
 
 ## Testing Strategy
 
@@ -466,7 +488,7 @@ into the value.
   `lineCount > 0` a non-finite or non-positive total height) and a valid
   strictly-increasing non-uniform case. Global monotonicity violations are out of
   reach for the core and are not tested as core rejections.
-- scale correctness and the blocking performance gate via `PrefixSumLineMetrics`
+- scale correctness and the CI-failing performance gate via `PrefixSumLineMetrics`
   at 1M lines.
 
 ## Verification
@@ -475,9 +497,12 @@ This slice changes the public core API, so the full verification set runs:
 
 - `swift test` (host XCTest suite, including the new variable-height tests);
 - `swift build -c release`;
+- `rg -n "Foundation" Sources/TextEngineCore` (must return no matches — the
+  brief's no-Foundation-in-core constraint, re-checked because this slice changes
+  the public surface);
 - `swift run -c release ViewportBenchmarks -- --gate` (synthetic gate, unchanged);
 - `swift run -c release ViewportBenchmarks -- --variable-height --gate` (the new
-  blocking variable-height gate);
+  CI-failing variable-height gate);
 - `swift run -c release ViewportBenchmarks -- --memory-shape` (including the new
   variable-height scenario);
 - `swift run -c release ViewportBenchmarks -- --memory-observation` (host RSS,
@@ -496,12 +521,16 @@ matching public WASM SDK) — unchanged from Slice 13, not a regression.
 - [ ] `LineMetricsSource`, `UniformLineMetrics`, `VariableViewportInput`,
   `VariableLineGeometryCursor`, and the two `ViewportVirtualizer` entry points are
   public and compile in `TextEngineCore`.
-- [ ] The fixed-height entry points keep their signatures and behavior unchanged
-  (the only shared-surface change is the additive
-  `ViewportValidationError.invalidLineMetrics` case); the existing tests, synthetic
-  gate, memory-shape, and memory-observation pass without retuning.
+- [ ] The fixed-height entry points keep their signatures and runtime behavior
+  unchanged. The shared `ViewportValidationError` gains the additive
+  `invalidLineMetrics` case — a source break only for an exhaustive `switch`
+  without a `default` (none exists in this package; see the Decision 4 migration
+  note). The existing tests, synthetic gate, memory-shape, and memory-observation
+  pass without retuning.
 - [ ] `ViewportValidationError` gains only the additive `invalidLineMetrics`
   case; existing cases are unchanged.
+- [ ] `TextEngineCore` stays Foundation-free: `rg -n "Foundation"
+  Sources/TextEngineCore` returns no matches.
 - [ ] offset→line and line→offset are correct across the boundary, mid-line,
   clamp, empty, single-line, `viewportHeight == 0`, and huge/negative-offset
   cases.

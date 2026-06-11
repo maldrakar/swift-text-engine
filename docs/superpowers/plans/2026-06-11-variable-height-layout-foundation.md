@@ -4,7 +4,7 @@
 
 **Goal:** Add the static (query) half of variable-height layout — a stateless core that virtualizes and lays out documents whose lines have different heights, driven by a provider-supplied cumulative-offset query.
 
-**Architecture:** A new `LineMetricsSource` protocol supplies `offset(ofLine:)` (cumulative top y). The core keeps zero per-line state: a new `ViewportVirtualizer.compute(_:metrics:)` overload binary-searches `offset(ofLine:)` to virtualize (O(log N), O(1) memory), and a `VariableLineGeometryCursor` emits per-line geometry over the buffer range. The fixed-height path is preserved unchanged; the two `compute` paths share an extracted `bufferedRange` helper. A reference `PrefixSumLineMetrics` plus a blocking benchmark gate live in the benchmark target.
+**Architecture:** A new `LineMetricsSource` protocol supplies `offset(ofLine:)` (cumulative top y). The core keeps zero per-line state: a new `ViewportVirtualizer.compute(_:metrics:)` overload binary-searches `offset(ofLine:)` to virtualize (O(log N), O(1) memory), and a `VariableLineGeometryCursor` emits per-line geometry over the buffer range. The fixed-height path is preserved unchanged; the two `compute` paths share an extracted `bufferedRange` helper. A reference `PrefixSumLineMetrics` plus a CI-failing benchmark gate (fails Swift CI on regression; actual merge-blocking stays repository-policy-blocked) live in the benchmark target.
 
 **Tech Stack:** Swift 6.0 package (`swift-tools-version: 6.0`), XCTest (`@testable import TextEngineCore`), `ViewportBenchmarks` executable, GitHub Actions (`.github/workflows/swift-ci.yml`). Spec: `docs/superpowers/specs/2026-06-10-variable-height-layout-foundation-design.md`.
 
@@ -456,6 +456,60 @@ final class VariableViewportComputeTests: XCTestCase {
         )
     }
 
+    func testZeroHeightViewportExactLineTopIsEmpty() {
+        // offsets: [0, 10, 40, 45, 145]. scrollOffset 40 == line 2 top -> empty [2, 2).
+        let metrics = ListLineMetrics(heights: [10, 30, 5, 100])
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input(scrollOffsetY: 40.0, viewportHeight: 0.0), metrics: metrics),
+            .success(
+                VirtualRange(
+                    visibleStart: 2,
+                    visibleEndExclusive: 2,
+                    bufferStart: 2,
+                    bufferEndExclusive: 2,
+                    isAtTop: false,
+                    isAtBottom: false
+                )
+            )
+        )
+    }
+
+    func testZeroHeightViewportMidLineKeepsCrossedLine() {
+        // scrollOffset 20 is inside line 1 ([10, 40)) -> single crossed line [1, 2).
+        let metrics = ListLineMetrics(heights: [10, 30, 5, 100])
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input(scrollOffsetY: 20.0, viewportHeight: 0.0), metrics: metrics),
+            .success(
+                VirtualRange(
+                    visibleStart: 1,
+                    visibleEndExclusive: 2,
+                    bufferStart: 1,
+                    bufferEndExclusive: 2,
+                    isAtTop: false,
+                    isAtBottom: false
+                )
+            )
+        )
+    }
+
+    func testZeroHeightViewportAtDocumentEndClampsToLineCount() {
+        // scrollOffset 145 == totalHeight (document end) -> visibleStart == lineCount.
+        let metrics = ListLineMetrics(heights: [10, 30, 5, 100])
+        XCTAssertEqual(
+            ViewportVirtualizer.compute(input(scrollOffsetY: 145.0, viewportHeight: 0.0), metrics: metrics),
+            .success(
+                VirtualRange(
+                    visibleStart: 4,
+                    visibleEndExclusive: 4,
+                    bufferStart: 4,
+                    bufferEndExclusive: 4,
+                    isAtTop: false,
+                    isAtBottom: true
+                )
+            )
+        )
+    }
+
     func testNegativeLineCountFails() {
         let metrics = ClosureLineMetrics(lineCount: -1) { Double($0) }
         XCTAssertEqual(
@@ -722,6 +776,8 @@ final class VariableUniformEquivalenceTests: XCTestCase {
 
     func testMatchesFixedAcrossRepresentableHeights() {
         let heights: [Double] = [1.0, 10.0, 16.0, 12.5, 256.0]
+        // Counts stay well under 2^53, so Double(i) * lineHeight is strictly
+        // increasing and the metrics honor their own contract.
         let counts = [1, 2, 3, 100, 100_000]
 
         for height in heights {
@@ -756,6 +812,12 @@ final class VariableUniformEquivalenceTests: XCTestCase {
         }
     }
 
+    // Clamp-at-end special case ONLY. UniformLineMetrics at Int.max is NOT
+    // strictly increasing (consecutive Ints above 2^53 collapse to the same
+    // Double), so this must not exercise the offset->line search — and it does
+    // not: scrollOffsetY clamps to totalHeight, so both paths take the
+    // `target >= totalHeight -> visibleStart == lineCount` early-out. This only
+    // proves clamp/overflow-safety, not strict-increasing equivalence.
     func testMatchesFixedForIntMaxClamp() {
         assertEquivalent(
             lineCount: Int.max, lineHeight: 1.0,
@@ -1522,7 +1584,12 @@ Expected: both succeed. (If the installed Swift SDK identifiers differ on the ma
 Run: `./.github/scripts/cross-target-compile.sh`
 Expected: `target=ios_device result=pass` and `target=ios_simulator result=pass`; WASM lines may be `skipped` depending on the local toolchain; summary `blocking_failures=0 exit=0`.
 
-- [ ] **Step 9: Push the branch and confirm CI is green**
+- [ ] **Step 9: Confirm core is Foundation-free**
+
+Run: `rg -n "Foundation" Sources/TextEngineCore`
+Expected: no matches (exit code 1) — the brief's no-Foundation-in-core constraint, re-checked because this slice changes the public surface.
+
+- [ ] **Step 10: Push the branch and confirm CI is green**
 
 Push `slice-14-variable-height-layout-foundation` and confirm the `Host tests and benchmark gate` job (now including the variable-height gate step) and the `Cross-target compile` job both conclude `success`. iOS targets pass and block; WASM stays skipped on the hosted runner (Swift 6.1.2), unchanged from Slice 13.
 
@@ -1536,7 +1603,7 @@ Push `slice-14-variable-height-layout-foundation` and confirm the `Host tests an
 - Separate metrics protocol (Decision 3): Task 1. ✓
 - Fixed path preserved + `UniformLineMetrics` oracle (Decision 4): Tasks 3, 5. ✓
 - Contractual O(1) validation + `invalidLineMetrics` (Decision 5): Tasks 2, 4. ✓
-- Blocking variable-height gate (Decision 6): Tasks 7, 8, 9. ✓
+- CI-failing variable-height gate (Decision 6): Tasks 7, 8, 9. ✓
 - `VariableViewportInput`, reused output types: Task 2. ✓
 - `compute` algorithm incl. `effOffsetY >= totalHeight → lineCount` special case: Task 4 (`firstLineTopAtOrBelow`/`firstLineTopAtOrAbove` early-out). ✓
 - `VariableLineGeometryCursor` (rolling offset, copy-safe handle): Task 6. ✓
