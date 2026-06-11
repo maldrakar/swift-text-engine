@@ -4,7 +4,16 @@ Date: 2026-06-10
 
 ## Status
 
-Approved design.
+Approved design. Revised 2026-06-11 after spec review: the variable-height gate
+enforces locally but lands observation-only in CI, with CI-failing promotion
+deferred to a follow-up slice (Decision 6); the `LineMetricsSource` monotonicity
+contract wording is tightened and the query domain bounded (Decision 5); the
+strict-virtualization/metadata-probe distinction is made explicit (Decision 2);
+the memory-shape invariant is scoped to contract-honoring conformers; and a
+deterministic query-count complexity test is required (Testing Strategy),
+including the empty-cursor query-count edge case. The benchmark wording is also
+tightened: the wall-clock gate is representative end-to-end coverage, while the
+query-count test is the deterministic proof of asymptotic complexity.
 
 ## Source Context
 
@@ -95,6 +104,15 @@ O(buffer) queries; the per-query cost is provider-defined (see below). It is
 exact and fast for *any* scroll pattern — incremental scrolling and a scrollbar
 drag to an arbitrary offset are both O(log N) queries.
 
+**Strict virtualization is preserved.** The brief's strict-virtualization
+criterion ("compute only the visible viewport + buffer/overscan") constrains
+*materialization*: only visible+buffer lines have their geometry or content
+produced. The O(log N) `offset(ofLine:)` lookups the binary search performs are
+**bounded scalar metadata probes** (a single cumulative-offset read at each search
+midpoint), not line-content or layout materialization — they touch O(log N)
+indices' metadata, allocate nothing, and materialize no line. They are therefore
+consistent with strict virtualization, not an exception to it.
+
 The contract mandates a *query*, not a data structure, exactly as
 `DocumentLineSource.line(at:)` does not dictate storage. A toy provider may sum
 heights on the fly (correct, slow); a production provider uses a prefix array,
@@ -144,9 +162,13 @@ and the equivalence oracle (see Testing).
 ### Decision 5: Validation is contractual and local, not global
 
 The core cannot scan all offsets without breaking O(viewport)/O(log N). The
-protocol therefore states a precondition the core trusts: offsets are finite,
-**strictly increasing** on `0..<lineCount` (every line has finite positive
-height), and `offset(ofLine: 0) == 0`. The contract also requires **stability**:
+protocol therefore states a precondition the core trusts: the domain is
+`0...lineCount`; `offset(ofLine: 0) == 0`; and for every `i` in `0..<lineCount`
+both `offset(ofLine: i)` and `offset(ofLine: i + 1)` are finite and
+`offset(ofLine: i) < offset(ofLine: i + 1)` (every line has finite positive
+height, so the endpoint `offset(ofLine: lineCount)` is included in the monotone
+chain). The core never queries outside `0...lineCount`. The contract also requires
+**stability**:
 `lineCount` and `offset(ofLine:)` must not change during a single layout
 operation — one `compute` together with any `VariableLineGeometryCursor`
 traversal derived from the range it produced — so the range and the geometry are
@@ -175,16 +197,38 @@ violation is undefined behavior, like any precondition.
 Contract violations the core does detect cheaply surface as a dedicated
 `invalidLineMetrics` error rather than overloading `nonFiniteValue`.
 
-### Decision 6: The variable-height benchmark is a CI-failing gate
+### Decision 6: The variable-height gate is local-enforcing, CI-observational
 
 The new variable-height benchmark is a deterministic local p95/p99 measurement,
-the same kind as the existing synthetic gate. The brief calls for regression
-benchmarks to block merge on degradation; like the existing synthetic gate, this
-gate **fails Swift CI** on regression, but *actual* merge-blocking remains
-repository-policy-blocked — branch protection / required status checks are
-unavailable on the private repo (the Slice 6 blocker, out of scope here). It is
-introduced as a CI-failing gate (not observation-first), with budgets set with
-generous headroom and tunable later.
+the same kind as the existing synthetic gate. `--variable-height --gate`
+**enforces budgets locally** (it fails the developer's run on regression) so the
+budget travels with the code. In CI it lands as an **observation-only** step this
+slice (prints p95/p99, non-blocking); it does **not** fail Swift CI yet.
+
+Two prior lessons drive this split. Slice 12's post-slice review #5 says
+explicitly: "do not mix variable-height layout with benchmark enforcement … in one
+slice; each needs its own design and review." And both existing gates were shipped
+that way — the synthetic gate's measurement, its local gate, and its CI-enforcement
+wiring landed across *separate* slices, and the realistic-provider gate stayed
+CI-deferred until hosted samples justified enforcement (Slice 10/11). A brand-new
+CI-failing gate introduced in the same slice as the public-API change it guards
+would repeat exactly the mix those reviews warn against, and would enforce a budget
+whose hosted behavior has not been observed even once.
+
+Promotion of the CI step from observation-only to CI-failing is a small follow-up
+slice (see Future Slices): collect a handful of hosted p95/p99 samples, set the
+budget from `max(local, hosted) · safety_factor` with generous headroom, and — per
+the Slice 10 fallback — do not wire CI enforcement if the hosted margin is thin.
+Local budgets this slice are set with generous headroom (the Slice 11 lesson; see
+Budget derivation) and are tunable later. Independent of either gate, a
+deterministic call-counting unit test pins the O(log N) / O(buffer) query
+complexity (see Testing Strategy), so the *algorithmic* guarantee is enforced in CI
+even while the wall-clock gate is observation-only.
+
+(The brief asks for regression benchmarks that block merge; *actual* merge-block
+also remains repository-policy-blocked regardless — branch protection / required
+status checks are unavailable on the private repo, the Slice 6 blocker, out of
+scope here.)
 
 ## Architecture Overview
 
@@ -239,8 +283,11 @@ public protocol LineMetricsSource {
     /// Cumulative top offset (y) of line `index`, in layout units.
     /// Domain: 0...lineCount.  offset(ofLine: 0) == 0.
     /// offset(ofLine: lineCount) == total document height.
-    /// Contract precondition: finite and strictly increasing on 0..<lineCount
-    /// (every line has finite positive height). See Decision 5.
+    /// Contract precondition: for every i in 0..<lineCount both offset(ofLine: i)
+    /// and offset(ofLine: i + 1) are finite and offset(ofLine: i) <
+    /// offset(ofLine: i + 1) (every line has finite positive height; the endpoint
+    /// offset(ofLine: lineCount) is part of the monotone chain). The core never
+    /// queries outside 0...lineCount. See Decision 5.
     /// Stability precondition: `lineCount` and `offset(ofLine:)` must be stable
     /// for one layout operation — a `compute` and any `VariableLineGeometryCursor`
     /// traversal derived from the range it produced — so the range and the
@@ -449,15 +496,20 @@ so every virtualize is O(log N) queries regardless of locality.
 
 **Scenarios and budgets.** A new variable-height scenario (non-uniform heights
 drawn from a fixed distribution) measures compute + geometry p95/p99 at
-1k / 100k / 1M lines and shows the cost stays within budget and scales
-logarithmically, not linearly, in N (the O(log N) search + O(buffer) geometry
-claim; the buffer is fixed by the viewport/overscan and so is constant across the
-scale points, leaving only the log-N search term to vary). Per Decision 6 it is a
-CI-failing gate (it fails Swift CI on regression; actual merge-blocking stays
-repository-policy-blocked); budgets are local-deterministic with **generous**
-headroom (the Slice 11 lesson: a thin margin — a hosted sample once hit 98.7% of
-its budget — is CI-fragile; the synthetic gate is robust precisely because its
-margins are wide).
+1k / 100k / 1M lines and shows the representative compute + geometry workload
+stays within budget. The wall-clock benchmark may vary viewport height and
+overscan across those scenario sizes to mirror the existing benchmark shape, so
+it is **not** the sole proof that the algorithm scales logarithmically in
+`lineCount`; it is an end-to-end performance gate and scale smoke test. The
+deterministic O(log N) search + O(buffer) geometry guarantee is pinned by the
+query-count unit test in Testing Strategy, while this gate catches constant-factor
+regressions and provider/core interaction costs on the reference prefix-sum
+provider. Per Decision 6 the gate **enforces locally** (`--variable-height --gate`
+fails the developer's run) and lands **observation-only in CI** this slice
+(non-blocking); CI enforcement is a follow-up after hosted calibration. Budgets
+are local-deterministic with **generous** headroom (the Slice 11 lesson: a thin
+margin — a hosted sample once hit 98.7% of its budget — is CI-fragile; the
+synthetic gate is robust precisely because its margins are wide).
 
 **Budget derivation.** To make "generous headroom" a rule rather than a matter of
 taste, each budget is set as `budget = ceil(observed_pXX × safety_factor)` with
@@ -479,10 +531,16 @@ that axis.
 orthogonal `--gate` enforcement switch, so the gate is invoked through a new
 gateable mode, `--variable-height`, combined with `--gate`
 (`ViewportBenchmarks --variable-height --gate`), mirroring
-`--realistic-provider --gate`. In `.github/workflows/swift-ci.yml` it runs as a
-new step in the host job immediately after the existing synthetic-gate step,
-consistent with the Slice 5 / Slice 7 convention of naming the exact invocation
-and CI placement.
+`--realistic-provider --gate`. In `.github/workflows/swift-ci.yml` the
+variable-height benchmark runs as a new step in the host job immediately after the
+existing synthetic-gate step, but **without `--gate`** (observation-only,
+non-blocking) this slice — it prints p95/p99 for hosted-sample collection and does
+not fail CI. The workflow step must set `continue-on-error: true`; that is the
+mechanism that makes this hosted timing observation non-blocking while still
+surfacing infrastructure or benchmark-output problems in the step logs. Promoting
+that step to `--variable-height --gate` (CI-failing) is the follow-up slice. This
+still follows the Slice 5 / Slice 7 convention of naming the exact invocation and
+CI placement.
 
 ## Memory-Shape Demonstration
 
@@ -501,14 +559,17 @@ is chosen over the indexed `PrefixSumLineMetrics` precisely because it allocates
 nothing, so the diagnostic proves the core's O(1) memory without itself allocating
 an O(N) prefix array (and therefore reports no `provider_owned_bytes`).
 
-The invariant holds for *any* conforming metrics because the cursor stores the
-`Metrics` value as a lightweight, copy-safe **handle**:
-`VariableLineGeometryCursor<Metrics>` holds the `Metrics` by value to query
-offsets per line, exactly as `DocumentLineCursor<Source>` holds its `Source`. For
-an indexed provider such as `PrefixSumLineMetrics`, the `[Double]` prefix array is
-a copy-on-write reference, so only a pointer lives in the cursor's static size and
-the array stays provider-owned. A conforming metrics type must keep its
-index/prefix storage out of line (provider-owned), not inlined into the value.
+The invariant holds for any metrics that **honor the provider storage contract** —
+index/prefix storage kept out of line (provider-owned) rather than inlined into the
+value, so the value is a lightweight, copy-safe **handle**.
+`VariableLineGeometryCursor<Metrics>` holds the `Metrics` by value to query offsets
+per line, exactly as `DocumentLineCursor<Source>` holds its `Source`; holding by
+value preserves the O(1) static size *only* under that contract — the protocol
+cannot by itself forbid a heavy inlined value, so this is a documented requirement
+on conformers, not a guarantee the type system provides. For an indexed provider
+such as `PrefixSumLineMetrics`, the `[Double]` prefix array is a copy-on-write
+reference, so only a pointer lives in the cursor's static size and the array stays
+provider-owned.
 
 ## Testing Strategy
 
@@ -527,8 +588,22 @@ index/prefix storage out of line (provider-owned), not inlined into the value.
   `lineCount > 0` a non-finite or non-positive total height) and a valid
   strictly-increasing non-uniform case. Global monotonicity violations are out of
   reach for the core and are not tested as core rejections.
-- scale correctness and the CI-failing performance gate via `PrefixSumLineMetrics`
-  at 1M lines.
+- a deterministic **query-count** test: a `CountingLineMetrics` wrapper around the
+  closed-form `UniformLineMetrics` (each query stays O(1) and offsets strictly
+  increasing) counts `offset(ofLine:)` calls and asserts the algorithmic contract
+  at 1M lines — `compute` issues O(log N) queries (a bound proportional to
+  `log2(lineCount)`, comfortably under a small constant × `log2 N`, versus the ~N a
+  stray linear scan would make). For geometry, a non-empty cursor issues exactly
+  `bufferSize + 1` queries (one seed plus one bottom offset per emitted line), and
+  an empty cursor issues **zero** queries because it must not seed an offset it
+  will never emit. This catches an accidental O(N) scan deterministically, in the
+  unit suite, independent of wall-clock/CI variance — complementing the perf gate,
+  which then only has to cover constant factors. Edge inputs (empty, single line,
+  the `effOffsetY >= totalHeight` clamp short-circuit) are included so no path
+  scans. The implementation plan for this slice must include a concrete task/file
+  for this test; it is not optional documentation.
+- scale correctness and the locally-enforcing performance gate via
+  `PrefixSumLineMetrics` at 1M lines.
 
 ## Verification
 
@@ -541,7 +616,12 @@ This slice changes the public core API, so the full verification set runs:
   the public surface);
 - `swift run -c release ViewportBenchmarks -- --gate` (synthetic gate, unchanged);
 - `swift run -c release ViewportBenchmarks -- --variable-height --gate` (the new
-  CI-failing variable-height gate);
+  variable-height gate — enforces budgets locally; in CI the benchmark runs without
+  `--gate` as an observation-only step this slice);
+- workflow scan for the hosted observation step: `Run variable-height benchmark
+  observation`, `continue-on-error: true`, and
+  `swift run -c release ViewportBenchmarks -- --variable-height` with no
+  `--variable-height --gate` in `.github/workflows/swift-ci.yml`;
 - `swift run -c release ViewportBenchmarks -- --memory-shape` (including the new
   variable-height scenario);
 - `swift run -c release ViewportBenchmarks -- --memory-observation` (host RSS,
@@ -578,8 +658,15 @@ matching public WASM SDK) — unchanged from Slice 13, not a regression.
   non-boundary matrix.
 - [ ] The shared overscan→buffer→flags helper is used by both `compute` paths
   with no behavior change to the fixed path.
-- [ ] `--variable-height --gate` passes at 1k / 100k / 1M lines with generous
-  headroom and is wired into CI after the synthetic-gate step.
+- [ ] `--variable-height --gate` enforces budgets locally and passes at
+  1k / 100k / 1M lines with generous headroom; the CI step runs the benchmark
+  observation-only (without `--gate`, with `continue-on-error: true`) after the
+  synthetic-gate step.
+- [ ] A `CountingLineMetrics` query-count test asserts `compute` issues O(log N)
+  `offset(ofLine:)` queries, a non-empty geometry cursor issues exactly
+  `bufferSize + 1`, and an empty geometry cursor issues zero queries, at 1M lines
+  and on the empty / single-line / clamp edge inputs. This acceptance criterion is
+  backed by a dedicated implementation-plan task/test file, not only by prose.
 - [ ] `--memory-shape` shows identical `core_owned_bytes` for the variable-height
   scenario at 100k vs 1M lines, and `geometry_lines == buffered_lines`.
 - [ ] Host tests, release build, iOS cross-target CI, and local WASM +
@@ -593,6 +680,8 @@ Restating the locked boundary for this slice:
   (the next slice; because the core is stateless, this is entirely a provider
   concern);
 - WASM CI promotion from skipped to compiled/blocking;
+- promoting the variable-height CI step from observation-only to CI-failing
+  enforcement (its own follow-up slice; see Future Slices and Decision 6);
 - repository branch protection / required status checks (Slice 6 external
   blocker, unchanged);
 - storage adapters / additional providers;
@@ -603,6 +692,13 @@ Restating the locked boundary for this slice:
 
 ## Future Slices
 
+- **Variable-height gate CI promotion**: collect a handful of hosted p95/p99
+  samples for the variable-height benchmark, set the budget from
+  `max(local, hosted) · safety_factor` with generous headroom, and promote the CI
+  step from observation-only to `--variable-height --gate` (CI-failing) — unless
+  the hosted margin is thin, in which case keep it observational (the Slice 10
+  fallback). This is the deliberately-separated benchmark-enforcement slice
+  (Slice 12 review #5).
 - **Variable-height mutation**: a reference indexed provider whose single-line
   height change is a localized update (for example an O(log N) Fenwick update
   rather than an O(N) rebuild), with end-to-end tests that a height change yields
