@@ -315,8 +315,7 @@ arithmetic for searches over `offset(ofLine:)`:
    `viewportHeight == 0` at the document end, where no line contains the top),
    `visibleStart = lineCount`; otherwise a binary search for the line `i` such
    that `offset(i) <= effOffsetY < offset(i + 1)` (the line containing the
-   viewport top), with the boundary comparison defined per Precision And
-   Equivalence.
+   viewport top), by direct offset comparison (see Precision And Equivalence).
 6. `visibleEndExclusive` = binary search for the smallest `i` such that
    `offset(i) >= effOffsetY + viewportHeight` (the first line fully below the
    viewport bottom), clamped to `lineCount`.
@@ -346,35 +345,42 @@ the unchanged fixed-height tests and the unchanged synthetic gate).
 
 The fixed path snaps near-integer *quotients* (`scrollOffsetY / lineHeight`) to
 integers using an ulp tolerance (`snappedIntegerQuotient`), so floating-point
-dust at exact line boundaries does not move a line in or out of the range. The
+dust from its own division does not move a line in or out of the range. The
 variable path has no division; it compares `scrollOffsetY` against `offset(i)`
-directly.
+directly, so it needs no snapping of its own.
 
-This slice commits to **exact** `UniformLineMetrics` equivalence: the variable
-path driven by `UniformLineMetrics(lineCount, lineHeight)` must produce a
-`VirtualRange` byte-identical to the fixed path's for the same inputs. There is no
-"±1 line" fallback. To achieve it, the binary search's boundary comparison is
-defined to reproduce the fixed path's snapping in offset space — a comparison
-tolerance keyed to the offset magnitude at the candidate line, chosen so that for
-`offset(i) = i · lineHeight` the search lands on the same line the quotient
-snapping would. The implementation plan must define the exact comparison
-predicate (the snapping helper, written with the fixed path's
-`snappedIntegerQuotient` in hand) before coding the search: this spec fixes the
-requirement (exact equivalence), the plan fixes the formula.
+**Resolved plan-time finding.** The variable search uses a plain direct offset
+comparison — no fuzzy tolerance. For **exactly-representable** line heights
+(`16.0`, `10.0`, `1.0`, `12.5`, …) this reproduces the fixed path **exactly**:
+`offset(i) = Double(i) · lineHeight` is exact, every boundary position is
+unambiguous, and direct comparison lands on the same line the fixed path's
+divide-snap-floor/ceil does (verified against every existing fixed-path test
+scenario). For **non-power-of-two** heights such as `0.1`, the two paths can
+differ by at most one line at sub-ulp boundaries: the fixed path divides once and
+snaps the quotient, while the variable path multiplies `Double(i) · lineHeight`
+and compares, and with *varying* heights there is no single `h` to divide by, so
+the variable path cannot reproduce the division-snap. This 1-ulp
+divide-vs-multiply gap is fundamental to the architecture, not a tunable defect,
+and is meaningless at the ~1e-16 scale; the variable result is the more-direct,
+correct computation for the given offsets.
 
-The equivalence oracle must cover, at minimum, these boundary positions:
+**Equivalence oracle.** The `UniformLineMetrics` oracle proves **exact**
+`variable == fixed` using exactly-representable line heights, covering at minimum:
 
 - `scrollOffsetY` exactly on a line top (`offset(i)`), including the first and
   last lines;
 - `scrollOffsetY` clamped to `maxOffsetY`, and the `effOffsetY == totalHeight`
-  edge (where `visibleStart` takes the fixed path's high-end clamp,
-  `clampedIndex(…, lineCount)`);
-- `viewportHeight == 0`;
-- a range of non-boundary offsets.
+  edge (where `visibleStart` takes the fixed path's high-end clamp to
+  `lineCount`);
+- `viewportHeight == 0`, both mid-document (empty range at the offset line) and at
+  the document end (`visibleStart == lineCount`);
+- a range of non-boundary (mid-line) offsets;
+- a large `lineCount` (including the `Int.max` clamp case) driven by
+  `UniformLineMetrics`, which is allocation-free.
 
-If implementation surfaces a specific boundary where exact equivalence is
-genuinely unachievable, that is a plan-time finding to resolve explicitly — not a
-pre-authorized soft fallback.
+The oracle deliberately uses exactly-representable heights; equivalence at sub-ulp
+boundaries of non-representable heights is explicitly **not** claimed, per the
+finding above.
 
 ## Reference Provider And Performance Gate
 
@@ -451,9 +457,10 @@ into the value.
 - geometry-cursor `y`/`height` derivation on hand-built non-uniform metrics
   (for example heights `[10, 30, 5, 100]`) with known expected output.
 - `UniformLineMetrics` equivalence oracle: the variable path with uniform metrics
-  must equal the fixed path **exactly** across the boundary positions enumerated
-  in Precision And Equivalence and a non-boundary input matrix. This is the
-  keystone test proving the variable path subsumes the fixed path.
+  must equal the fixed path **exactly** (using exactly-representable line heights)
+  across the boundary positions enumerated in Precision And Equivalence and a
+  non-boundary input matrix. This is the keystone test proving the variable path
+  subsumes the fixed path.
 - validation-error parity with the fixed path for each applicable error case,
   plus the O(1) `invalidLineMetrics` checks (`offset(ofLine: 0) != 0`, and for
   `lineCount > 0` a non-finite or non-positive total height) and a valid
@@ -498,8 +505,9 @@ matching public WASM SDK) — unchanged from Slice 13, not a regression.
 - [ ] offset→line and line→offset are correct across the boundary, mid-line,
   clamp, empty, single-line, `viewportHeight == 0`, and huge/negative-offset
   cases.
-- [ ] The `UniformLineMetrics` equivalence oracle passes **exactly** for the
-  enumerated boundary positions and a non-boundary matrix.
+- [ ] The `UniformLineMetrics` equivalence oracle passes **exactly** (with
+  exactly-representable line heights) for the enumerated boundary positions and a
+  non-boundary matrix.
 - [ ] The shared overscan→buffer→flags helper is used by both `compute` paths
   with no behavior change to the fixed path.
 - [ ] `--variable-height --gate` passes at 1k / 100k / 1M lines with generous
