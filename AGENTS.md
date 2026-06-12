@@ -88,9 +88,10 @@ Local WASM build (needs a matching Swift SDK installed):
 Two parallel jobs on `macos-latest`:
 
 - **Host tests and benchmark gate**: `swift test` → synthetic `--gate` (blocking)
-  → `--variable-height` (observation only, `continue-on-error`) → `--memory-shape`
+  → `--variable-height --gate` (blocking) → `--memory-shape`
   → `--memory-observation` → realistic relative observation (PR-only,
-  `continue-on-error`). The synthetic gate **fails the job on perf regression**.
+  `continue-on-error`). The synthetic and variable-height gates **fail the job
+  on perf regression**.
 - **Cross-target compile**: iOS device + simulator are **blocking**. WASM +
   embedded WASM are **observational**: the helper compiles them when a matching
   Swift SDK is installed/provisioned, otherwise records a non-blocking skip
