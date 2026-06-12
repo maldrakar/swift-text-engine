@@ -32,8 +32,8 @@ extension ViewportVirtualizer {
             return .failure(.invalidLineMetrics)
         }
 
-        let maxOffsetY = variableMaximumOffsetY(totalHeight: totalHeight, viewportHeight: input.viewportHeight)
-        let effectiveOffsetY = variableClampedOffsetY(scrollOffsetY: input.scrollOffsetY, maxOffsetY: maxOffsetY)
+        let maxOffsetY = nonNegative(totalHeight - input.viewportHeight)
+        let effectiveOffsetY = clamp(input.scrollOffsetY, to: maxOffsetY)
 
         let visibleStart = firstLineTopAtOrBelow(
             effectiveOffsetY,
@@ -60,21 +60,6 @@ extension ViewportVirtualizer {
                 isAtBottom: effectiveOffsetY == maxOffsetY
             )
         )
-    }
-
-    private static func variableMaximumOffsetY(totalHeight: Double, viewportHeight: Double) -> Double {
-        let maxOffsetY = totalHeight - viewportHeight
-        return maxOffsetY < 0.0 ? 0.0 : maxOffsetY
-    }
-
-    private static func variableClampedOffsetY(scrollOffsetY: Double, maxOffsetY: Double) -> Double {
-        if scrollOffsetY < 0.0 {
-            return 0.0
-        }
-        if scrollOffsetY > maxOffsetY {
-            return maxOffsetY
-        }
-        return scrollOffsetY
     }
 
     // Largest i in [0, lineCount) with offset(i) <= target (the line containing
