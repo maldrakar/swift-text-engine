@@ -259,12 +259,37 @@ Host tests and benchmark gate	Run variable-height benchmark gate	2026-06-12T21:1
 
 ## Post-Merge Push Run
 
-Pending: record the merge commit SHA, Swift CI push run id, run conclusion, job
-conclusions, and hosted `mode=variable_height` lines showing `gate=pass` on
-`main` after the post-merge push run completes.
+PR #11 merged on 2026-06-12 at 21:42:44Z.
+Merge commit SHA: `cbb50364ddd0fb47b3805659074e04b1800943a4`
+Swift CI push run id: `27444745973`
+Run URL: https://github.com/arthurbanshchikov/swift-text-engine/actions/runs/27444745973
+Event: `push`
+Conclusion: `failure`
+
+Job conclusions:
+
+```text
+Cross-target compile: failure (job id 81127007885)
+Host tests and benchmark gate: failure (job id 81127007921)
+```
+
+No hosted `mode=variable_height` lines were produced for the post-merge push
+run. Both jobs completed with zero workflow steps, no downloadable log, and the
+same GitHub check-run annotation:
+
+```text
+The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings
+```
+
+This records the post-merge `main` run status for the merged code. It is not a
+benchmark, test, or cross-target failure: the hosted jobs did not start because
+GitHub Actions account billing/spending limits blocked runner execution.
 
 ## Conclusion
 
-Slice 15 meets the approved design when local verification passes, the hosted PR
-run passes with the variable-height benchmark as a blocking gate, and the
-post-merge push run on `main` passes with the same blocking gate.
+Local verification passed, and hosted PR evidence showed the variable-height
+benchmark running as a blocking gate with `gate=pass`. The post-merge push run
+on `main` exists for merge commit `cbb50364ddd0fb47b3805659074e04b1800943a4`,
+but GitHub Actions did not start either job because of account billing/spending
+limits. Re-run Swift CI after restoring Actions capacity to collect final
+post-merge hosted `gate=pass` lines.
