@@ -108,13 +108,21 @@ public enum ViewportVirtualizer {
             lineHeight: lineHeight,
             viewportHeight: viewportHeight
         )
-        if scrollOffsetY < 0.0 {
+        return clamp(scrollOffsetY, to: maxOffsetY)
+    }
+
+    static func nonNegative(_ value: Double) -> Double {
+        value < 0.0 ? 0.0 : value
+    }
+
+    static func clamp(_ value: Double, to maxValue: Double) -> Double {
+        if value < 0.0 {
             return 0.0
         }
-        if scrollOffsetY > maxOffsetY {
-            return maxOffsetY
+        if value > maxValue {
+            return maxValue
         }
-        return scrollOffsetY
+        return value
     }
 
     private static func maximumScrollOffsetY(
@@ -123,11 +131,7 @@ public enum ViewportVirtualizer {
         viewportHeight: Double
     ) -> Double {
         let documentHeight = Double(lineCount) * lineHeight
-        let maxOffsetY = documentHeight - viewportHeight
-        if maxOffsetY < 0.0 {
-            return 0.0
-        }
-        return maxOffsetY
+        return nonNegative(documentHeight - viewportHeight)
     }
 
     private static func clampedIndex(_ candidate: Double, lineCount: Int) -> Int {

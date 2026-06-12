@@ -370,6 +370,8 @@ func runVariableMemoryShapeScenario(lineCount: Int) -> VariableMemoryShapeSummar
     case let .success(range):
         let visibleLines = range.visibleEndExclusive - range.visibleStart
         let bufferedLines = range.bufferEndExclusive - range.bufferStart
+        let expectedVisibleLines = min(lineCount, Int((viewportHeight / lineHeight).rounded(.up)))
+        let expectedBufferedLines = min(lineCount, expectedVisibleLines + overscanBefore + overscanAfter)
         let rangePasses = memoryShapeRangeIsOrderedAndBounded(range, lineCount: lineCount)
         var cursor = ViewportVirtualizer.geometry(for: range, metrics: metrics)
         var geometryLines = 0
@@ -388,8 +390,8 @@ func runVariableMemoryShapeScenario(lineCount: Int) -> VariableMemoryShapeSummar
             geometryLines: geometryLines,
             coreOwnedBytes: coreOwnedBytes,
             traversalPasses: rangePasses
-                && visibleLines == 80
-                && bufferedLines == 90
+                && visibleLines == expectedVisibleLines
+                && bufferedLines == expectedBufferedLines
                 && geometryLines == bufferedLines,
             checksum: checksum
         )
