@@ -37,9 +37,8 @@ jobs:
       - name: Run synthetic benchmark gate
         run: swift run -c release ViewportBenchmarks -- --gate
 
-      - name: Run variable-height benchmark observation
-        continue-on-error: true
-        run: swift run -c release ViewportBenchmarks -- --variable-height
+      - name: Run variable-height benchmark gate
+        run: swift run -c release ViewportBenchmarks -- --variable-height --gate
 
       - name: Run memory shape diagnostic
         run: swift run -c release ViewportBenchmarks -- --memory-shape
