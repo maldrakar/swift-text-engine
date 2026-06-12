@@ -5,6 +5,8 @@ func runBenchmarks(options: BenchmarkOptions) -> Bool {
         return runSyntheticBenchmarks(options: options)
     case .realisticProvider:
         return runRealisticProviderBenchmarks(enforceGate: options.enforceGate)
+    case .variableHeight:
+        return runVariableHeightBenchmarks(enforceGate: options.enforceGate)
     case .memoryShape:
         return runMemoryShapeDiagnostics()
     case .memoryObservation:

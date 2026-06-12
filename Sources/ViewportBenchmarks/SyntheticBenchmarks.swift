@@ -115,6 +115,8 @@ func runScenario(
                 operationResult = runRangeOnlyOperation(input: input)
             case .realisticProvider:
                 preconditionFailure("realistic provider mode uses runRealisticProviderScenario")
+            case .variableHeight:
+                preconditionFailure("variable height mode uses runVariableHeightScenario")
             case .memoryShape:
                 preconditionFailure("memory shape mode uses runMemoryShapeDiagnostics")
             case .memoryObservation:

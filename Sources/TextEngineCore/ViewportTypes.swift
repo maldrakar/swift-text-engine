@@ -70,9 +70,29 @@ public enum ViewportValidationError: Equatable {
     case nonPositiveLineHeight
     case negativeViewportHeight
     case negativeOverscan
+    case invalidLineMetrics
 }
 
 public enum ViewportComputation: Equatable {
     case success(VirtualRange)
     case failure(ViewportValidationError)
+}
+
+public struct VariableViewportInput: Equatable {
+    public let scrollOffsetY: Double
+    public let viewportHeight: Double
+    public let overscanLinesBefore: Int
+    public let overscanLinesAfter: Int
+
+    public init(
+        scrollOffsetY: Double,
+        viewportHeight: Double,
+        overscanLinesBefore: Int,
+        overscanLinesAfter: Int
+    ) {
+        self.scrollOffsetY = scrollOffsetY
+        self.viewportHeight = viewportHeight
+        self.overscanLinesBefore = overscanLinesBefore
+        self.overscanLinesAfter = overscanLinesAfter
+    }
 }
