@@ -101,6 +101,22 @@ func coreOwnedBytesEstimate() -> Int {
         + MemoryLayout<Int>.size * 2
 }
 
+func variableCoreOwnedBytesEstimate() -> Int {
+    MemoryLayout<VirtualRange>.size
+        + MemoryLayout<VariableLineGeometryCursor<UniformLineMetrics>>.size
+        + MemoryLayout<Int>.size * 2
+}
+
+struct VariableMemoryShapeSummary {
+    let scenarioName: String
+    let lineCount: Int
+    let bufferedLines: Int
+    let geometryLines: Int
+    let coreOwnedBytes: Int
+    let traversalPasses: Bool
+    let checksum: Int
+}
+
 func expectedMemoryShapeVisibleLines(_ scenario: MemoryShapeScenario) -> Int {
     if scenario.lineCount <= 0 || scenario.lineHeight <= 0.0 || scenario.viewportHeight <= 0.0 {
         return 0
@@ -331,6 +347,80 @@ func formatMemoryShapeSummary(_ summary: MemoryShapeSummary, invariantPasses: Bo
     return output
 }
 
+func runVariableMemoryShapeScenario(lineCount: Int) -> VariableMemoryShapeSummary {
+    let lineHeight = 16.0
+    let viewportHeight = 80.0 * lineHeight
+    let overscanBefore = 5
+    let overscanAfter = 5
+    let metrics = UniformLineMetrics(lineCount: lineCount, lineHeight: lineHeight)
+    let totalHeight = metrics.offset(ofLine: lineCount)
+    let maxOffset = totalHeight > viewportHeight ? totalHeight - viewportHeight : 0.0
+    let middleOffset = Double(lineCount / 2) * lineHeight
+    let scrollOffsetY = middleOffset > maxOffset ? maxOffset : middleOffset
+    let input = VariableViewportInput(
+        scrollOffsetY: scrollOffsetY,
+        viewportHeight: viewportHeight,
+        overscanLinesBefore: overscanBefore,
+        overscanLinesAfter: overscanAfter
+    )
+    let coreOwnedBytes = variableCoreOwnedBytesEstimate()
+    let scenarioName = "\(lineCount)_lines_80_visible_overscan_5"
+
+    switch ViewportVirtualizer.compute(input, metrics: metrics) {
+    case let .success(range):
+        let visibleLines = range.visibleEndExclusive - range.visibleStart
+        let bufferedLines = range.bufferEndExclusive - range.bufferStart
+        let expectedVisibleLines = min(lineCount, Int((viewportHeight / lineHeight).rounded(.up)))
+        let expectedBufferedLines = min(lineCount, expectedVisibleLines + overscanBefore + overscanAfter)
+        let rangePasses = memoryShapeRangeIsOrderedAndBounded(range, lineCount: lineCount)
+        var cursor = ViewportVirtualizer.geometry(for: range, metrics: metrics)
+        var geometryLines = 0
+        var checksum = 0
+        while let geometry = cursor.next() {
+            geometryLines += 1
+            checksum &+= geometry.lineIndex
+            checksum &+= Int(geometry.y)
+            checksum &+= Int(geometry.height)
+        }
+
+        return VariableMemoryShapeSummary(
+            scenarioName: scenarioName,
+            lineCount: lineCount,
+            bufferedLines: bufferedLines,
+            geometryLines: geometryLines,
+            coreOwnedBytes: coreOwnedBytes,
+            traversalPasses: rangePasses
+                && visibleLines == expectedVisibleLines
+                && bufferedLines == expectedBufferedLines
+                && geometryLines == bufferedLines,
+            checksum: checksum
+        )
+    case .failure:
+        return VariableMemoryShapeSummary(
+            scenarioName: scenarioName,
+            lineCount: lineCount,
+            bufferedLines: 0,
+            geometryLines: 0,
+            coreOwnedBytes: coreOwnedBytes,
+            traversalPasses: false,
+            checksum: -1
+        )
+    }
+}
+
+func formatVariableMemoryShapeSummary(_ summary: VariableMemoryShapeSummary, invariantPasses: Bool) -> String {
+    var output = "mode=\(BenchmarkMode.memoryShape.outputName)"
+    output += " provider=variable_uniform"
+    output += " scenario=\(summary.scenarioName)"
+    output += " line_count=\(summary.lineCount)"
+    output += " buffered_lines=\(summary.bufferedLines)"
+    output += " geometry_lines=\(summary.geometryLines)"
+    output += " core_owned_bytes=\(summary.coreOwnedBytes)"
+    output += " invariant=\(invariantPasses ? "pass" : "fail")"
+    output += " checksum=\(summary.checksum)"
+    return output
+}
+
 func runMemoryShapeDiagnostics() -> Bool {
     let summaries = memoryShapeScenarios().map(runMemoryShapeScenario)
     let syntheticCoreOwnedBytes = summaries
@@ -350,6 +440,18 @@ func runMemoryShapeDiagnostics() -> Bool {
 
         let invariantPasses = summary.baseInvariantPasses && comparisonPasses
         print(formatMemoryShapeSummary(summary, invariantPasses: invariantPasses))
+
+        if !invariantPasses {
+            passed = false
+        }
+    }
+
+    let variableSummaries = [100_000, 1_000_000].map(runVariableMemoryShapeScenario)
+    let referenceVariableCoreOwnedBytes = variableSummaries.first?.coreOwnedBytes
+    for summary in variableSummaries {
+        let coreBytesMatches = summary.coreOwnedBytes == referenceVariableCoreOwnedBytes
+        let invariantPasses = summary.traversalPasses && coreBytesMatches
+        print(formatVariableMemoryShapeSummary(summary, invariantPasses: invariantPasses))
 
         if !invariantPasses {
             passed = false

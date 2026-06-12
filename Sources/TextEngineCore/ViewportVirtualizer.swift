@@ -42,31 +42,20 @@ public enum ViewportVirtualizer {
             lineHeight: input.lineHeight,
             viewportHeight: input.viewportHeight
         )
-        let bufferStart = if input.overscanLinesBefore >= visibleStart {
-            0
-        } else {
-            visibleStart - input.overscanLinesBefore
-        }
-        let remainingAfterVisible = input.lineCount - visibleEndExclusive
-        let bufferEndExclusive = if input.overscanLinesAfter >= remainingAfterVisible {
-            input.lineCount
-        } else {
-            visibleEndExclusive + input.overscanLinesAfter
-        }
-
         return .success(
-            VirtualRange(
+            bufferedRange(
                 visibleStart: visibleStart,
                 visibleEndExclusive: visibleEndExclusive,
-                bufferStart: bufferStart,
-                bufferEndExclusive: bufferEndExclusive,
+                lineCount: input.lineCount,
+                overscanLinesBefore: input.overscanLinesBefore,
+                overscanLinesAfter: input.overscanLinesAfter,
                 isAtTop: effectiveOffsetY == 0.0,
                 isAtBottom: effectiveOffsetY == maxOffsetY
             )
         )
     }
 
-    private static func emptyRange() -> VirtualRange {
+    static func emptyRange() -> VirtualRange {
         VirtualRange(
             visibleStart: 0,
             visibleEndExclusive: 0,
@@ -74,6 +63,37 @@ public enum ViewportVirtualizer {
             bufferEndExclusive: 0,
             isAtTop: true,
             isAtBottom: true
+        )
+    }
+
+    static func bufferedRange(
+        visibleStart: Int,
+        visibleEndExclusive: Int,
+        lineCount: Int,
+        overscanLinesBefore: Int,
+        overscanLinesAfter: Int,
+        isAtTop: Bool,
+        isAtBottom: Bool
+    ) -> VirtualRange {
+        let bufferStart = if overscanLinesBefore >= visibleStart {
+            0
+        } else {
+            visibleStart - overscanLinesBefore
+        }
+        let remainingAfterVisible = lineCount - visibleEndExclusive
+        let bufferEndExclusive = if overscanLinesAfter >= remainingAfterVisible {
+            lineCount
+        } else {
+            visibleEndExclusive + overscanLinesAfter
+        }
+
+        return VirtualRange(
+            visibleStart: visibleStart,
+            visibleEndExclusive: visibleEndExclusive,
+            bufferStart: bufferStart,
+            bufferEndExclusive: bufferEndExclusive,
+            isAtTop: isAtTop,
+            isAtBottom: isAtBottom
         )
     }
 
@@ -88,13 +108,21 @@ public enum ViewportVirtualizer {
             lineHeight: lineHeight,
             viewportHeight: viewportHeight
         )
-        if scrollOffsetY < 0.0 {
+        return clamp(scrollOffsetY, to: maxOffsetY)
+    }
+
+    static func nonNegative(_ value: Double) -> Double {
+        value < 0.0 ? 0.0 : value
+    }
+
+    static func clamp(_ value: Double, to maxValue: Double) -> Double {
+        if value < 0.0 {
             return 0.0
         }
-        if scrollOffsetY > maxOffsetY {
-            return maxOffsetY
+        if value > maxValue {
+            return maxValue
         }
-        return scrollOffsetY
+        return value
     }
 
     private static func maximumScrollOffsetY(
@@ -103,11 +131,7 @@ public enum ViewportVirtualizer {
         viewportHeight: Double
     ) -> Double {
         let documentHeight = Double(lineCount) * lineHeight
-        let maxOffsetY = documentHeight - viewportHeight
-        if maxOffsetY < 0.0 {
-            return 0.0
-        }
-        return maxOffsetY
+        return nonNegative(documentHeight - viewportHeight)
     }
 
     private static func clampedIndex(_ candidate: Double, lineCount: Int) -> Int {
