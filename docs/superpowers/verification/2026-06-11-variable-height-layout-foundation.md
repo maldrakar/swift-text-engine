@@ -272,8 +272,67 @@ mode=realistic_relative_observation base_sha=67320f0d01f830fdff75d49208aee4b8757
 
 ## Post-Merge Push Run
 
-Pending. PR #9 has not been merged, so there is no post-merge `push` run on the merge commit yet. After merge, fill this section with the merge commit SHA, push run id, success conclusion, variable-height observation output, and cross-target results, then commit the follow-up evidence update.
+PR #9 merged to `main` as merge commit `7f7df2f8df9ccc78d3a5e5544bbee715d9632649`; the `push` workflow on that commit is green.
+
+```text
+run_id=27404861416
+run_url=https://github.com/arthurbanshchikov/swift-text-engine/actions/runs/27404861416
+event=push
+branch=main
+head_sha=7f7df2f8df9ccc78d3a5e5544bbee715d9632649
+conclusion=success
+created_at=2026-06-12T08:41:37Z
+updated_at=2026-06-12T08:44:39Z
+```
+
+Job conclusions:
+
+```text
+job=Cross-target compile id=80991367556 started_at=2026-06-12T08:41:41Z completed_at=2026-06-12T08:42:41Z conclusion=success
+job=Host tests and benchmark gate id=80991367513 started_at=2026-06-12T08:41:41Z completed_at=2026-06-12T08:44:37Z conclusion=success
+```
+
+Hosted toolchain and cross-target result:
+
+```text
+cross_target_swift_version=6.1.2
+cross_target_xcodebuild_version=Xcode 16.4;Build version 16F6
+mode=cross_target_compile target=ios_device result=pass reason=none blocking=true
+mode=cross_target_compile target=ios_simulator result=pass reason=none blocking=true
+mode=cross_target_compile target=wasm result=skipped reason=sdk_unavailable blocking=false
+mode=cross_target_compile target=wasm_embedded result=skipped reason=sdk_unavailable blocking=false
+mode=cross_target_compile_summary ios_device=pass ios_simulator=pass wasm=skipped wasm_embedded=skipped blocking_failures=0 exit=0
+```
+
+Host tests and synthetic gate:
+
+```text
+Executed 67 tests, with 0 failures (0 unexpected) in 0.016 (0.018) seconds
+mode=pipeline scenario=1k_lines_20_visible_overscan_0 iterations=10000 operations_per_sample=256 p95_ns=4238 p99_ns=5600 failures=0 budget_p95_ns=20000 budget_p99_ns=50000 gate=pass checksum=1319670707200
+mode=pipeline scenario=100k_lines_80_visible_overscan_5 iterations=10000 operations_per_sample=256 p95_ns=12785 p99_ns=18040 failures=0 budget_p95_ns=50000 budget_p99_ns=100000 gate=pass checksum=570448232307200
+mode=pipeline scenario=1m_lines_200_visible_overscan_50 iterations=10000 operations_per_sample=256 p95_ns=45739 p99_ns=62710 failures=0 budget_p95_ns=100000 budget_p99_ns=200000 gate=pass checksum=18852477646272000
+```
+
+Variable-height observation:
+
+```text
+mode=variable_height provider=prefix_sum scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=509 p99_ns=838 failures=0 checksum=231017730560
+mode=variable_height provider=prefix_sum scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=1553 p99_ns=3153 failures=0 checksum=101209179008000
+mode=variable_height provider=prefix_sum scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=6456 p99_ns=9884 failures=0 checksum=3536425156727040
+```
+
+Memory diagnostics:
+
+```text
+mode=memory_shape provider=synthetic scenario=100k_lines_80_visible_overscan_5 line_count=100000 visible_lines=80 buffered_lines=90 touched_lines=90 geometry_lines=90 provider_lines=90 missing_lines=0 core_owned_bytes=74 provider_owned_bytes=0 benchmark_owned_bytes=0 invariant=pass checksum=220776509
+mode=memory_shape provider=variable_uniform scenario=100000_lines_80_visible_overscan_5 line_count=100000 buffered_lines=90 geometry_lines=90 core_owned_bytes=90 invariant=pass checksum=76561875
+mode=memory_shape provider=variable_uniform scenario=1000000_lines_80_visible_overscan_5 line_count=1000000 buffered_lines=90 geometry_lines=90 core_owned_bytes=90 invariant=pass checksum=765061875
+mode=memory_observation provider=synthetic scenario=100k_lines_80_visible_overscan_5 line_count=100000 core_owned_bytes_model=74 provider_owned_bytes=0 rss_core_operation_delta_bytes=16384 observation=pass checksum=220776509
+mode=memory_observation provider=large_text scenario=100k_lines_10mb_text line_count=100000 document_bytes=11200000 core_owned_bytes_model=74 provider_owned_bytes=11200000 rss_provider_delta_bytes=11223040 rss_core_operation_delta_bytes=65536 observation=pass checksum=596788650
+```
+
+The realistic relative observation does not run on `push` (`realistic_relative_observation=skipped_on_push`); it is a pull-request-only diagnostic, consistent with prior slices.
 
 ## Conclusion
 
-The slice meets the pre-merge acceptance criteria: local host tests, release build, synthetic gate, variable-height local gate, workflow observation scan, memory-shape diagnostics, RSS memory observation, local WASM builds, local cross-target helper, Foundation-free scan, and hosted PR Swift CI all pass. Hosted PR CI runs variable-height as observation-only without `--gate` and with `continue-on-error: true`; iOS hosted targets are blocking and green; hosted WASM targets remain skipped on Swift 6.1.2, unchanged from Slice 13. Post-merge push-run evidence remains pending until PR #9 is merged.
+The slice meets the pre-merge acceptance criteria: local host tests, release build, synthetic gate, variable-height local gate, workflow observation scan, memory-shape diagnostics, RSS memory observation, local WASM builds, local cross-target helper, Foundation-free scan, and hosted PR Swift CI all pass. Hosted PR CI runs variable-height as observation-only without `--gate` and with `continue-on-error: true`; iOS hosted targets are blocking and green; hosted WASM targets remain skipped on Swift 6.1.2, unchanged from Slice 13. Post-merge push CI on merge commit `7f7df2f8df9ccc78d3a5e5544bbee715d9632649` (run 27404861416) is green, completing the slice's evidence set.
