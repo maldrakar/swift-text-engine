@@ -234,9 +234,28 @@ There is no `continue-on-error: true` in the `Run variable-height benchmark gate
 
 ## Hosted PR Run
 
-Pending: record the PR number, head SHA, Swift CI run id, run conclusion, job
-conclusions, and hosted `mode=variable_height` lines showing `gate=pass` after
-the PR run completes.
+PR: #11
+URL: https://github.com/arthurbanshchikov/swift-text-engine/pull/11
+Head SHA: `c06c6d11585b43b2dbddc7d26029abb9f1ce1c47`
+Swift CI run id: `27443136804`
+Run URL: https://github.com/arthurbanshchikov/swift-text-engine/actions/runs/27443136804
+Event: `pull_request`
+Conclusion: `success`
+
+Job conclusions:
+
+```text
+Cross-target compile: success (job id 81121757362)
+Host tests and benchmark gate: success (job id 81121757364)
+```
+
+Hosted variable-height gate output:
+
+```text
+Host tests and benchmark gate	Run variable-height benchmark gate	2026-06-12T21:10:14.4627240Z mode=variable_height provider=prefix_sum scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=450 p99_ns=851 failures=0 budget_p95_ns=50000 budget_p99_ns=100000 gate=pass checksum=231017730560
+Host tests and benchmark gate	Run variable-height benchmark gate	2026-06-12T21:10:14.4636930Z mode=variable_height provider=prefix_sum scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=1337 p99_ns=3253 failures=0 budget_p95_ns=100000 budget_p99_ns=200000 gate=pass checksum=101209179008000
+Host tests and benchmark gate	Run variable-height benchmark gate	2026-06-12T21:10:14.4639300Z mode=variable_height provider=prefix_sum scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=9584 p99_ns=13841 failures=0 budget_p95_ns=250000 budget_p99_ns=500000 gate=pass checksum=3536425156727040
+```
 
 ## Post-Merge Push Run
 
