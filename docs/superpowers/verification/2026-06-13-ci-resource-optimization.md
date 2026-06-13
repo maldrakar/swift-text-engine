@@ -231,7 +231,13 @@ if rg -n "Foundation" Sources/TextEngineCore; then exit 1; fi
 
 Exit 0 with no matches.
 
-Linux RSS source scan:
+Linux RSS source scan command -> exit 0:
+
+```bash
+rg -n "fieldIndex == 1|/proc/self/statm|size resident shared text lib data dt" Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift
+```
+
+Relevant output:
 
 ```text
 Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift:
@@ -240,7 +246,13 @@ size resident shared text lib data dt
 fieldIndex == 1
 ```
 
-Benchmark entry-point scan:
+Benchmark entry-point scan command -> exit 0:
+
+```bash
+rg -n "canImport\\(Darwin\\)|os\\(Linux\\)|import Glibc|exit\\(exitCode\\)" Sources/ViewportBenchmarks/main.swift
+```
+
+Relevant output:
 
 ```text
 Sources/ViewportBenchmarks/main.swift:
@@ -250,14 +262,39 @@ import Glibc
 exit(exitCode)
 ```
 
-Cross-target helper scratch-path scan:
+Cross-target helper scratch-path scan command -> exit 0:
+
+```bash
+rg -n -- '--scratch-path.*--swift-sdk|swiftpm-\$\{target_name\}' .github/scripts/cross-target-compile.sh
+```
+
+Relevant output:
 
 ```text
 local scratch_path="${WORK}/swiftpm-${target_name}"
 swift build --scratch-path "$scratch_path" --swift-sdk "$sdk_id" --target "$PACKAGE_TARGET"
 ```
 
-Workflow scan:
+Workflow scan commands -> exit 0:
+
+```bash
+rg -n "paths-ignore|docs/\\*\\*|\\*\\*/\\*\\.md|container: swift:6\\.2\\.1-bookworm|--targets ios|--targets wasm|timeout-minutes: 20|cancel-in-progress: true|safe.directory|--scratch-path /tmp/text-engine-host-build" .github/workflows/swift-ci.yml
+python3 - <<'PY'
+from pathlib import Path
+text = Path(".github/workflows/swift-ci.yml").read_text()
+host = text.split("  host-tests-and-benchmark-gate:", 1)[1].split("  ios-cross-target-compile:", 1)[0]
+assert "xcodebuild" not in host
+assert "machdep.cpu.brand_string" not in host
+assert "realistic-relative-observation.sh" in host
+assert "git --version" in host
+assert 'git config --global --add safe.directory "$GITHUB_WORKSPACE"' in host
+assert "git worktree add" in host
+assert "--scratch-path /tmp/text-engine-host-build" in host
+print("workflow_scan=pass")
+PY
+```
+
+Relevant output:
 
 ```text
 paths-ignore
@@ -273,7 +310,13 @@ safe.directory
 workflow_scan=pass
 ```
 
-AGENTS.md scan:
+AGENTS.md scan command -> exit 0:
+
+```bash
+rg -n "Three jobs|only hosted macOS job|Docs-only changes are ignored|--targets ios|--targets wasm|/tmp/text-engine-host-build" AGENTS.md
+```
+
+Relevant output:
 
 ```text
 Three jobs
