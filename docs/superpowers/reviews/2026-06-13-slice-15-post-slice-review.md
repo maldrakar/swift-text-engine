@@ -256,7 +256,7 @@ risk, not a code defect; it is tracked under Risks And Gaps.
 
 ### P3 / Minor But Valid
 
-#### P3 - Output schema carries duplicate `touched_lines` / `provider_lines`
+#### P3 - Memory-shape diagnostic output carries duplicate `touched_lines` / `provider_lines`
 
 `formatMemoryShapeSummary` emits both `touched_lines` and `provider_lines` from
 the same `summary.providerLines` field, so the two columns are always identical
@@ -286,9 +286,14 @@ push) fail to start. Root cause analysis performed during this review:
 - Both CI jobs run on `macos-latest`, which bills at a **10x** multiplier against
   the account's 2000 included minutes (GitHub Free).
 - Across the 43 hosted runs (05–12 June), actual macOS wall-clock time was only
-  ~145 minutes, but the 10x multiplier inflated that to ~1780 quota-minutes —
-  about 89% of the 2000-minute quota from this repository alone, before any other
-  private-repo usage.
+  ~145.3 minutes over 63 jobs. Two GitHub billing rules then stack on top of that
+  raw number: each job is rounded **up to the nearest minute** (~145.3 raw →
+  ~178 billable macOS minutes), and the **10x** macOS multiplier is applied to the
+  rounded total (~178 → ~1780 quota-minutes) — about 89% of the 2000-minute quota
+  from this repository alone, before any other private-repo usage. (The ~1780
+  comes from round-up *and* the multiplier, not the 10x multiplier alone:
+  145.3 × 10 would be ~1450. REST usage endpoints report raw minutes and exclude
+  both the round-up and the multiplier, so they understate quota consumption.)
 - The `Host tests and benchmark gate` job dominates: ~1550 of ~1780 quota-minutes
   (~87%). The `Cross-target compile` job is ~230. At least 12 runs were triggered
   by docs-only commits.
