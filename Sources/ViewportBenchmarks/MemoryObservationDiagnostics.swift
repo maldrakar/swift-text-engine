@@ -1,4 +1,8 @@
+#if canImport(Darwin)
 import Darwin
+#elseif os(Linux)
+import Glibc
+#endif
 import TextEngineCore
 
 struct MemoryObservationRSSSnapshot {
@@ -30,6 +34,17 @@ struct MemoryObservationSummary {
 }
 
 func currentRSSSnapshot() -> MemoryObservationRSSSnapshot? {
+#if canImport(Darwin)
+    return currentDarwinRSSSnapshot()
+#elseif os(Linux)
+    return currentLinuxRSSSnapshot()
+#else
+    return nil
+#endif
+}
+
+#if canImport(Darwin)
+func currentDarwinRSSSnapshot() -> MemoryObservationRSSSnapshot? {
     let pageSize = Int(getpagesize())
     if pageSize <= 0 {
         return nil
@@ -62,6 +77,75 @@ func currentRSSSnapshot() -> MemoryObservationRSSSnapshot? {
         pageSizeBytes: pageSize
     )
 }
+#endif
+
+#if os(Linux)
+func currentLinuxRSSSnapshot() -> MemoryObservationRSSSnapshot? {
+    let pageSize = Int(sysconf(Int32(_SC_PAGESIZE)))
+    guard pageSize > 0,
+          let statmLine = readLinuxStatmLine(),
+          let residentPages = linuxResidentPages(fromStatmLine: statmLine),
+          residentPages > 0,
+          residentPages <= Int.max / pageSize else {
+        return nil
+    }
+
+    return MemoryObservationRSSSnapshot(
+        bytes: residentPages * pageSize,
+        pageSizeBytes: pageSize
+    )
+}
+
+func readLinuxStatmLine() -> String? {
+    guard let file = fopen("/proc/self/statm", "r") else {
+        return nil
+    }
+    defer { fclose(file) }
+
+    var buffer = [CChar](repeating: 0, count: 256)
+    guard fgets(&buffer, Int32(buffer.count), file) != nil else {
+        return nil
+    }
+
+    let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+    return String(decoding: bytes, as: UTF8.self)
+}
+
+func linuxResidentPages(fromStatmLine line: String) -> Int? {
+    // /proc/self/statm fields: size resident shared text lib data dt
+    var fieldIndex = 0
+    var currentValue = 0
+    var hasDigit = false
+
+    for byte in line.utf8 {
+        if byte >= 48 && byte <= 57 {
+            hasDigit = true
+            let digit = Int(byte - 48)
+            if currentValue > (Int.max - digit) / 10 {
+                return nil
+            }
+            currentValue = currentValue * 10 + digit
+        } else if byte == 32 || byte == 9 || byte == 10 {
+            if hasDigit {
+                if fieldIndex == 1 {
+                    return currentValue
+                }
+                fieldIndex += 1
+                currentValue = 0
+                hasDigit = false
+            }
+        } else {
+            return nil
+        }
+    }
+
+    if hasDigit && fieldIndex == 1 {
+        return currentValue
+    }
+
+    return nil
+}
+#endif
 
 func memoryObservationScenarios() -> [MemoryShapeScenario] {
     memoryShapeScenarios()
