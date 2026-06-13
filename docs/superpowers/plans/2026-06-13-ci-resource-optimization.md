@@ -35,7 +35,7 @@ This plan covers one slice: CI resource optimization. It intentionally does not 
 - Read: `Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift`
 - Read: `AGENTS.md`
 
-- [ ] **Step 1: Confirm branch and clean state**
+- [x] **Step 1: Confirm branch and clean state**
 
 Run:
 
@@ -52,7 +52,7 @@ Expected:
 
 No modified or untracked files should be present before implementation. Do not require a specific commit SHA in the expected output, because this plan may be revised before implementation.
 
-- [ ] **Step 2: Confirm the pre-change workflow still has the known macOS-only issues**
+- [x] **Step 2: Confirm the pre-change workflow still has the known macOS-only issues**
 
 Run:
 
@@ -62,7 +62,7 @@ rg -n "runs-on: macos-latest|xcodebuild -version|machdep.cpu.brand_string|run: \
 
 Expected: matches for the host job on `macos-latest`, `xcodebuild -version` in both metadata locations, `machdep.cpu.brand_string` in the PR observation step, and the unsplit cross-target helper invocation.
 
-- [ ] **Step 3: Confirm `--targets` is not implemented yet**
+- [x] **Step 3: Confirm `--targets` is not implemented yet**
 
 Run:
 
@@ -79,7 +79,7 @@ rg -n "Usage:" /tmp/slice-16-pre-targets.out
 
 Expected: status `2` and usage text. This is the failing pre-change proof for the helper target-selection task.
 
-- [ ] **Step 4: Confirm Linux container availability before Linux-specific implementation**
+- [x] **Step 4: Confirm Linux container availability before Linux-specific implementation**
 
 Run:
 
@@ -91,7 +91,7 @@ docker run --rm swift:6.2.1-bookworm bash -lc 'swift --version && git --version 
 
 Expected when Docker is available: Docker info exits `0`, the container prints Swift 6.2.1, Git version, Linux architecture, and Debian Bookworm OS metadata. If Docker daemon is unavailable, stop execution and report that Slice 16 implementation is blocked on required local Linux-container verification.
 
-- [ ] **Step 5: Confirm Linux build currently fails because of Darwin-only benchmark imports**
+- [x] **Step 5: Confirm Linux build currently fails because of Darwin-only benchmark imports**
 
 Run:
 
@@ -111,7 +111,7 @@ Expected: nonzero status and a compile error caused by the benchmark executable 
 **Files:**
 - Modify: `.github/scripts/cross-target-compile.sh`
 
-- [ ] **Step 1: Add failing self-test expectations for target selection**
+- [x] **Step 1: Add failing self-test expectations for target selection**
 
 Edit `.github/scripts/cross-target-compile.sh` inside `run_self_test()` after the existing `summary_ios_fail` assertion and before the WASM SDK resolver assertions:
 
@@ -156,7 +156,7 @@ assert_command_failure() {
 }
 ```
 
-- [ ] **Step 2: Run the self-test and verify it fails**
+- [x] **Step 2: Run the self-test and verify it fails**
 
 Run:
 
@@ -172,7 +172,7 @@ test "$status" -ne 0
 
 Expected: nonzero status because `parse_target_selection`, `target_requested`, `mark_not_requested`, or `LAST_BLOCKING` is not implemented yet.
 
-- [ ] **Step 3: Implement target selection and not-requested target output**
+- [x] **Step 3: Implement target selection and not-requested target output**
 
 Patch `.github/scripts/cross-target-compile.sh` with these concrete changes.
 
@@ -363,7 +363,7 @@ fi
 main
 ```
 
-- [ ] **Step 4: Run helper self-test and usage checks**
+- [x] **Step 4: Run helper self-test and usage checks**
 
 Run:
 
@@ -389,7 +389,7 @@ rg -n -- '--scratch-path.*--swift-sdk|swiftpm-\$\{target_name\}' .github/scripts
 
 Expected: matches in `compile_wasm_target()`.
 
-- [ ] **Step 5: Verify `--targets wasm` does not run iOS and exits 0**
+- [x] **Step 5: Verify `--targets wasm` does not run iOS and exits 0**
 
 Run:
 
@@ -405,7 +405,7 @@ if rg -n "xcodebuild build" /tmp/slice-16-targets-wasm.out; then exit 1; fi
 
 Expected: iOS targets are `not_requested blocking=false`, selected WASM targets are reported, summary has `exit=0`, and no `xcodebuild build` command appears.
 
-- [ ] **Step 6: Verify `--targets ios` does not run WASM**
+- [x] **Step 6: Verify `--targets ios` does not run WASM**
 
 Run:
 
@@ -421,7 +421,7 @@ if rg -n "swift build --swift-sdk" /tmp/slice-16-targets-ios.out; then exit 1; f
 
 Expected: iOS targets pass and are blocking, WASM targets are `not_requested blocking=false`, summary has `exit=0`, and no WASM build command appears.
 
-- [ ] **Step 7: Commit cross-target helper changes**
+- [x] **Step 7: Commit cross-target helper changes**
 
 Run:
 
@@ -438,7 +438,7 @@ Expected: one commit containing only `.github/scripts/cross-target-compile.sh`.
 - Modify: `Sources/ViewportBenchmarks/main.swift`
 - Modify: `Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift`
 
-- [ ] **Step 1: Verify local Darwin observation still passes before editing**
+- [x] **Step 1: Verify local Darwin observation still passes before editing**
 
 Run:
 
@@ -450,7 +450,7 @@ rg -n "rss_page_size_bytes=" /tmp/slice-16-memory-observation-darwin-before.out
 
 Expected: every row has `observation=pass` and RSS fields are present.
 
-- [ ] **Step 2: Verify Linux build fails before benchmark portability fix**
+- [x] **Step 2: Verify Linux build fails before benchmark portability fix**
 
 Run:
 
@@ -465,7 +465,7 @@ rg -n "no such module 'Darwin'|cannot find.*Darwin" /tmp/slice-16-linux-build-rs
 
 Expected: nonzero status from unconditional Darwin imports in the benchmark executable.
 
-- [ ] **Step 3: Implement conditional benchmark entry point and RSS collection**
+- [x] **Step 3: Implement conditional benchmark entry point and RSS collection**
 
 In `Sources/ViewportBenchmarks/main.swift`, replace the whole file with portable imports and an unqualified `exit(exitCode)`. The `#available(macOS 13.0, *)` condition evaluates through the `*` arm on Linux, so the Linux build uses the main branch and never reaches the macOS-only fallback:
 
@@ -619,7 +619,7 @@ If Swift Linux reports a type mismatch for `_SC_PAGESIZE`, adjust only the `sysc
 let pageSize = Int(sysconf(_SC_PAGESIZE))
 ```
 
-- [ ] **Step 4: Verify Darwin still passes**
+- [x] **Step 4: Verify Darwin still passes**
 
 Run:
 
@@ -631,7 +631,7 @@ rg -n "rss_page_size_bytes=" /tmp/slice-16-memory-observation-darwin-after.out
 
 Expected: every row passes and RSS fields remain present.
 
-- [ ] **Step 5: Verify Linux build and memory observation in the Swift container**
+- [x] **Step 5: Verify Linux build and memory observation in the Swift container**
 
 Run:
 
@@ -650,7 +650,7 @@ docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.2.1-bookworm bash -lc
 
 Expected: release build passes; `--memory-observation` prints passing rows with `rss_page_size_bytes`.
 
-- [ ] **Step 6: Verify source encodes Linux statm resident field, not size field**
+- [x] **Step 6: Verify source encodes Linux statm resident field, not size field**
 
 Run:
 
@@ -661,7 +661,7 @@ rg -n "canImport\\(Darwin\\)|os\\(Linux\\)|import Glibc|exit\\(exitCode\\)" Sour
 
 Expected: matches show the Linux parser selects field index `1`, the second field `resident`, and reads `/proc/self/statm`; `main.swift` has conditional Darwin/Glibc imports and uses unqualified `exit(exitCode)`.
 
-- [ ] **Step 7: Commit Linux RSS support**
+- [x] **Step 7: Commit Linux RSS support**
 
 Run:
 
@@ -677,7 +677,7 @@ Expected: one commit containing only `Sources/ViewportBenchmarks/main.swift` and
 **Files:**
 - Modify: `.github/workflows/swift-ci.yml`
 
-- [ ] **Step 1: Add failing workflow topology scans before editing**
+- [x] **Step 1: Add failing workflow topology scans before editing**
 
 Run:
 
@@ -698,7 +698,7 @@ test "$wasm_status" -ne 0
 
 Expected: all three scans fail before workflow changes.
 
-- [ ] **Step 2: Rewrite workflow triggers and host job**
+- [x] **Step 2: Rewrite workflow triggers and host job**
 
 In `.github/workflows/swift-ci.yml`, replace the trigger block with:
 
@@ -777,7 +777,7 @@ Before the existing `git fetch`, add Git's safe-directory marker for the checked
 
 Keep the existing `git fetch`, `git worktree add`, and `realistic-relative-observation.sh` commands unchanged after that safe-directory line.
 
-- [ ] **Step 3: Split cross-target jobs**
+- [x] **Step 3: Split cross-target jobs**
 
 Replace the current `cross-target-compile` job with two jobs:
 
@@ -825,7 +825,7 @@ Replace the current `cross-target-compile` job with two jobs:
         run: ./.github/scripts/cross-target-compile.sh --targets wasm
 ```
 
-- [ ] **Step 4: Verify workflow scans**
+- [x] **Step 4: Verify workflow scans**
 
 Run:
 
@@ -840,7 +840,7 @@ rg -n "timeout-minutes: 20" .github/workflows/swift-ci.yml
 
 Expected: path filters are present, `concurrency.cancel-in-progress` remains present, host and WASM jobs use Linux Swift container, Linux jobs print Git version, the host PR observation step marks the workspace safe before Git operations, host Swift commands use `/tmp/text-engine-host-build`, iOS job invokes only `--targets ios`, WASM job invokes only `--targets wasm`, and all three jobs have `timeout-minutes: 20`.
 
-- [ ] **Step 5: Verify Linux host and PR observation contain no macOS-only commands**
+- [x] **Step 5: Verify Linux host and PR observation contain no macOS-only commands**
 
 Run:
 
@@ -863,7 +863,7 @@ PY
 
 Expected: prints `host_job_linux_metadata=pass`.
 
-- [ ] **Step 6: Commit workflow topology changes**
+- [x] **Step 6: Commit workflow topology changes**
 
 Run:
 
@@ -879,7 +879,7 @@ Expected: one commit containing only `.github/workflows/swift-ci.yml`.
 **Files:**
 - Modify: `AGENTS.md`
 
-- [ ] **Step 1: Confirm AGENTS.md still describes old CI topology**
+- [x] **Step 1: Confirm AGENTS.md still describes old CI topology**
 
 Run:
 
@@ -889,7 +889,7 @@ rg -n 'Two parallel jobs on `macos-latest`|Cross-target compile|WASM \+|cross-ta
 
 Expected: matches for the old two-macOS-job wording.
 
-- [ ] **Step 2: Update commands section**
+- [x] **Step 2: Update commands section**
 
 In the command block, replace:
 
@@ -905,7 +905,7 @@ with:
 ./.github/scripts/cross-target-compile.sh --targets wasm     # WASM-only observational path
 ```
 
-- [ ] **Step 3: Update CI section**
+- [x] **Step 3: Update CI section**
 
 Replace the current CI job list with:
 
@@ -935,7 +935,7 @@ Docs-only changes are ignored by Swift CI via `paths-ignore` for `docs/**` and
 
 Keep the private-repo caveat unchanged.
 
-- [ ] **Step 4: Verify AGENTS.md wording**
+- [x] **Step 4: Verify AGENTS.md wording**
 
 Run:
 
@@ -947,7 +947,7 @@ if rg -n 'Two parallel jobs on `macos-latest`|WASM \+ embedded WASM are \*\*obse
 
 Expected: new wording is present, the host scratch path is documented, and old topology wording is absent.
 
-- [ ] **Step 5: Commit AGENTS.md update**
+- [x] **Step 5: Commit AGENTS.md update**
 
 Run:
 
@@ -964,7 +964,7 @@ Expected: one commit containing only `AGENTS.md`.
 - Read: all changed files
 - Capture outputs under: `/tmp/slice-16-*.out`
 
-- [ ] **Step 1: Run host verification on local macOS**
+- [x] **Step 1: Run host verification on local macOS**
 
 Run:
 
@@ -979,7 +979,7 @@ swift run -c release ViewportBenchmarks -- --memory-observation | tee /tmp/slice
 
 Expected: `swift test` reports 67 XCTest tests, 0 failures; release build exits `0`; synthetic and variable gates print `gate=pass`; memory-shape rows print `invariant=pass`; memory-observation rows print `observation=pass`.
 
-- [ ] **Step 2: Run cross-target helper verification locally**
+- [x] **Step 2: Run cross-target helper verification locally**
 
 Run:
 
@@ -991,7 +991,7 @@ Run:
 
 Expected: self-test prints `self_test=pass`; iOS run passes iOS device/simulator and marks WASM not requested; WASM run marks iOS not requested and exits `0`.
 
-- [ ] **Step 3: Run Linux container host verification**
+- [x] **Step 3: Run Linux container host verification**
 
 Run:
 
@@ -1026,7 +1026,7 @@ docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.2.1-bookworm bash -lc
 
 Expected: all commands exit `0`; both benchmark gates print `gate=pass`; memory diagnostics pass; SwiftPM artifacts stay under `/tmp/slice-16-linux-host-build`. If a gate fails, the script still runs memory-shape and memory-observation before exiting nonzero, prints the gate statuses, and preserves the full output. If gates fail only on local arm64 timing, do not retune from this local result; record the output and wait for hosted Linux x86_64 evidence.
 
-- [ ] **Step 4: Run Linux container WASM helper verification**
+- [x] **Step 4: Run Linux container WASM helper verification**
 
 Run:
 
@@ -1047,7 +1047,7 @@ rg -n "blocking_failures=0 exit=0" /tmp/slice-16-linux-wasm-helper.out
 
 Expected: self-test passes; iOS targets are `not_requested blocking=false`; WASM targets pass or skip nonblocking; summary exits `0`. If a WASM SDK is available and the helper builds, it uses the helper's temporary `--scratch-path` rather than workspace `.build`.
 
-- [ ] **Step 5: Run source and workflow scans**
+- [x] **Step 5: Run source and workflow scans**
 
 Run:
 
@@ -1081,7 +1081,7 @@ Expected: Foundation scan has no output; required source/workflow/helper/AGENTS 
 **Files:**
 - Create: `docs/superpowers/verification/2026-06-13-ci-resource-optimization.md`
 
-- [ ] **Step 1: Create verification document with local evidence**
+- [x] **Step 1: Create verification document with local evidence**
 
 Create `docs/superpowers/verification/2026-06-13-ci-resource-optimization.md` with this structure:
 
@@ -1149,7 +1149,7 @@ Before committing, convert every instruction-only bullet in this document into
 the actual command, exit status, and relevant output snippet captured during
 Task 6.
 
-- [ ] **Step 2: Commit verification document before PR**
+- [x] **Step 2: Commit verification document before PR**
 
 Run:
 
@@ -1173,7 +1173,7 @@ git commit -m "docs: record ci resource optimization verification"
 
 Expected: marker scan prints `verification_doc_markers=pass`; one docs commit.
 
-- [ ] **Step 3: Push branch and open PR**
+- [x] **Step 3: Push branch and open PR**
 
 Run:
 
@@ -1187,7 +1187,7 @@ gh pr create \
 
 Expected: branch pushes successfully and `gh pr create` returns a PR URL.
 
-- [ ] **Step 4: Capture hosted PR evidence**
+- [x] **Step 4: Capture hosted PR evidence**
 
 Run:
 
@@ -1205,7 +1205,7 @@ gh run view <run-id> --log > /tmp/slice-16-hosted-pr-run.log
 
 Expected if runners start: host job runs on Linux container and passes, iOS job runs on macOS and passes, WASM job runs on Linux container and passes or skips nonblocking, realistic observation reaches `realistic-relative-observation.sh`. If runners do not start, record the exact billing/spending-limit annotation.
 
-- [ ] **Step 5: Update verification doc with hosted PR evidence**
+- [x] **Step 5: Update verification doc with hosted PR evidence**
 
 Edit `docs/superpowers/verification/2026-06-13-ci-resource-optimization.md` with PR run facts:
 
