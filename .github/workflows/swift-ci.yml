@@ -2,9 +2,15 @@ name: Swift CI
 
 on:
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   push:
     branches:
       - main
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
 
 permissions:
   contents: read
@@ -16,7 +22,8 @@ concurrency:
 jobs:
   host-tests-and-benchmark-gate:
     name: Host tests and benchmark gate
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
+    container: swift:6.2.1-bookworm
     timeout-minutes: 20
 
     steps:
@@ -28,23 +35,25 @@ jobs:
       - name: Show toolchain
         run: |
           swift --version
-          xcodebuild -version
+          git --version
           uname -a
+          cat /etc/os-release
+          lscpu || true
 
       - name: Run host tests
-        run: swift test
+        run: swift test --scratch-path /tmp/text-engine-host-build
 
       - name: Run synthetic benchmark gate
-        run: swift run -c release ViewportBenchmarks -- --gate
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --gate
 
       - name: Run variable-height benchmark gate
-        run: swift run -c release ViewportBenchmarks -- --variable-height --gate
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height --gate
 
       - name: Run memory shape diagnostic
-        run: swift run -c release ViewportBenchmarks -- --memory-shape
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-shape
 
       - name: Run RSS memory observation diagnostic
-        run: swift run -c release ViewportBenchmarks -- --memory-observation
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-observation
 
       - name: Observe realistic provider relative performance
         if: github.event_name == 'pull_request'
@@ -57,11 +66,13 @@ jobs:
           set -euo pipefail
           echo "observation_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "runner_image=${ImageOS:-unknown}"
-          echo "cpu_model=$(sysctl -n machdep.cpu.brand_string)"
           swift --version 2>&1 | sed -n '1p' || true
-          xcodebuild -version
+          git --version
           uname -a
+          cat /etc/os-release || true
+          lscpu || true
 
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*'
           git cat-file -e "${BASE_SHA}^{commit}"
           git cat-file -e "${HEAD_SHA}^{commit}"
@@ -81,8 +92,8 @@ jobs:
 
           echo "observation_finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  cross-target-compile:
-    name: Cross-target compile
+  ios-cross-target-compile:
+    name: iOS cross-target compile
     runs-on: macos-latest
     timeout-minutes: 20
 
@@ -99,5 +110,26 @@ jobs:
           xcodebuild -version
           uname -a
 
-      - name: Compile TextEngineCore for non-host targets
-        run: ./.github/scripts/cross-target-compile.sh
+      - name: Compile TextEngineCore for iOS targets
+        run: ./.github/scripts/cross-target-compile.sh --targets ios
+
+  wasm-cross-target-observation:
+    name: WASM cross-target observation
+    runs-on: ubuntu-latest
+    container: swift:6.2.1-bookworm
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          git --version
+          uname -a
+          cat /etc/os-release
+          lscpu || true
+
+      - name: Observe TextEngineCore for WASM targets
+        run: ./.github/scripts/cross-target-compile.sh --targets wasm
