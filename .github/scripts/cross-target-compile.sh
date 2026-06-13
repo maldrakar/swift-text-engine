@@ -11,11 +11,13 @@ set -uo pipefail
 SCHEME="TextEngineCore"
 PACKAGE_TARGET="TextEngineCore"
 TAIL_LINES="${CROSS_TARGET_LOG_TAIL:-40}"
+SELECTED_TARGETS="all"
 
 usage() {
   cat <<'EOF'
 Usage:
   cross-target-compile.sh
+  cross-target-compile.sh --targets all|ios|wasm
   cross-target-compile.sh --self-test
 EOF
 }
@@ -52,6 +54,34 @@ count_blocking_failures() {
 build_summary() {
   # ios_device ios_simulator wasm wasm_embedded blocking_failures exit_code
   echo "mode=cross_target_compile_summary ios_device=$1 ios_simulator=$2 wasm=$3 wasm_embedded=$4 blocking_failures=$5 exit=$6"
+}
+
+parse_target_selection() {
+  case "$1" in
+    all|ios|wasm)
+      SELECTED_TARGETS="$1"
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+target_requested() {
+  local group="$1"
+  case "$SELECTED_TARGETS" in
+    all) return 0 ;;
+    ios) [[ "$group" == "ios" ]] ;;
+    wasm) [[ "$group" == "wasm" ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+mark_not_requested() {
+  LAST_RESULT="skipped"
+  LAST_REASON="not_requested"
+  LAST_BLOCKING="false"
 }
 
 # Resolve a Swift SDK id from `swift sdk list` text on stdin, matching the
@@ -95,6 +125,24 @@ assert_equal() {
   fi
 }
 
+assert_command_success() {
+  local label="$1"
+  shift
+  if ! "$@"; then
+    echo "self_test=fail label=$label expected=success actual=failure"
+    exit 1
+  fi
+}
+
+assert_command_failure() {
+  local label="$1"
+  shift
+  if "$@"; then
+    echo "self_test=fail label=$label expected=failure actual=success"
+    exit 1
+  fi
+}
+
 assert_resolver_missing() {
   local list="$1" version="$2" kind="$3" label="$4"
   if printf '%s\n' "$list" | resolve_wasm_sdk_id_from_list "$version" "$kind" >/dev/null; then
@@ -128,6 +176,22 @@ some descriptive header with spaces"
     "$(build_summary pass pass skipped skipped 0 0)" "summary_clean"
   assert_equal "mode=cross_target_compile_summary ios_device=fail ios_simulator=pass wasm=fail wasm_embedded=skipped blocking_failures=1 exit=1" \
     "$(build_summary fail pass fail skipped 1 1)" "summary_ios_fail"
+  SELECTED_TARGETS="all"
+  parse_target_selection all
+  assert_command_success "all_selects_ios" target_requested ios
+  assert_command_success "all_selects_wasm" target_requested wasm
+  parse_target_selection ios
+  assert_command_success "ios_selects_ios" target_requested ios
+  assert_command_failure "ios_skips_wasm" target_requested wasm
+  parse_target_selection wasm
+  assert_command_failure "wasm_skips_ios" target_requested ios
+  assert_command_success "wasm_selects_wasm" target_requested wasm
+  assert_command_failure "invalid_target_selection" parse_target_selection ios,wasm
+  mark_not_requested ios_device
+  assert_equal "skipped" "$LAST_RESULT" "not_requested_result"
+  assert_equal "not_requested" "$LAST_REASON" "not_requested_reason"
+  assert_equal "false" "$LAST_BLOCKING" "not_requested_blocking"
+  assert_equal "0" "$(count_blocking_failures skipped:false)" "not_requested_not_blocking"
   assert_equal "swift-6.1.2-RELEASE_wasm" \
     "$(printf '%s\n' "$clean_list" | resolve_wasm_sdk_id_from_list 6.1.2 wasm)" "resolve_clean_wasm"
   assert_equal "swift-6.1.2-RELEASE_wasm-embedded" \
@@ -148,6 +212,7 @@ some descriptive header with spaces"
 
 LAST_RESULT=""
 LAST_REASON=""
+LAST_BLOCKING=""
 IOS_SCHEME_STATUS=""
 
 # Print the tail of a log file with clear delimiters, so failures are visible in
@@ -190,6 +255,7 @@ resolve_ios_scheme() {
 
 compile_ios_target() {
   local target_name="$1" destination="$2" logfile="$3"
+  LAST_BLOCKING="true"
   echo "cross_target_command target=${target_name} cmd=\"xcodebuild build -scheme ${SCHEME} -destination '${destination}'\""
   if [[ -n "$IOS_SCHEME_STATUS" ]]; then
     LAST_RESULT="fail"
@@ -220,6 +286,7 @@ resolve_wasm_sdk_id() {
 
 compile_wasm_target() {
   local kind="$1" target_name="$2" logfile="$3" sdk_id url_var url
+  LAST_BLOCKING="false"
   if [[ -z "$SWIFT_VERSION" ]]; then
     LAST_RESULT="skipped"
     LAST_REASON="swift_version_unresolved"
@@ -250,9 +317,10 @@ compile_wasm_target() {
       return
     fi
   fi
+  local scratch_path="${WORK}/swiftpm-${target_name}"
   echo "cross_target_wasm_sdk_id target=${target_name} id=${sdk_id}"
-  echo "cross_target_command target=${target_name} cmd=\"swift build --swift-sdk ${sdk_id} --target ${PACKAGE_TARGET}\""
-  if swift build --swift-sdk "$sdk_id" --target "$PACKAGE_TARGET" >"$logfile" 2>&1; then
+  echo "cross_target_command target=${target_name} cmd=\"swift build --scratch-path ${scratch_path} --swift-sdk ${sdk_id} --target ${PACKAGE_TARGET}\""
+  if swift build --scratch-path "$scratch_path" --swift-sdk "$sdk_id" --target "$PACKAGE_TARGET" >"$logfile" 2>&1; then
     LAST_RESULT="pass"
     LAST_REASON="none"
   else
@@ -268,31 +336,59 @@ main() {
   SWIFT_VERSION="$(swift_version_key "$(swift --version 2>&1 | head -n 1)")"
   echo "cross_target_swift_version=${SWIFT_VERSION:-unknown}"
 
-  print_ios_toolchain_metadata
-  resolve_ios_scheme "$WORK/xcodebuild-list.log"
+  if target_requested ios; then
+    print_ios_toolchain_metadata
+    resolve_ios_scheme "$WORK/xcodebuild-list.log"
 
-  compile_ios_target ios_device 'generic/platform=iOS' "$WORK/ios_device.log"
-  ios_device_result="$LAST_RESULT"
-  emit_target_line ios_device "$LAST_RESULT" "$LAST_REASON" true
+    compile_ios_target ios_device 'generic/platform=iOS' "$WORK/ios_device.log"
+    ios_device_result="$LAST_RESULT"
+    ios_device_blocking="$LAST_BLOCKING"
+    emit_target_line ios_device "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
 
-  compile_ios_target ios_simulator 'generic/platform=iOS Simulator' "$WORK/ios_simulator.log"
-  ios_simulator_result="$LAST_RESULT"
-  emit_target_line ios_simulator "$LAST_RESULT" "$LAST_REASON" true
+    compile_ios_target ios_simulator 'generic/platform=iOS Simulator' "$WORK/ios_simulator.log"
+    ios_simulator_result="$LAST_RESULT"
+    ios_simulator_blocking="$LAST_BLOCKING"
+    emit_target_line ios_simulator "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+  else
+    mark_not_requested ios_device
+    ios_device_result="$LAST_RESULT"
+    ios_device_blocking="$LAST_BLOCKING"
+    emit_target_line ios_device "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
 
-  compile_wasm_target wasm wasm "$WORK/wasm.log"
-  wasm_result="$LAST_RESULT"
-  emit_target_line wasm "$LAST_RESULT" "$LAST_REASON" false
+    mark_not_requested ios_simulator
+    ios_simulator_result="$LAST_RESULT"
+    ios_simulator_blocking="$LAST_BLOCKING"
+    emit_target_line ios_simulator "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+  fi
 
-  compile_wasm_target wasm_embedded wasm_embedded "$WORK/wasm_embedded.log"
-  wasm_embedded_result="$LAST_RESULT"
-  emit_target_line wasm_embedded "$LAST_RESULT" "$LAST_REASON" false
+  if target_requested wasm; then
+    compile_wasm_target wasm wasm "$WORK/wasm.log"
+    wasm_result="$LAST_RESULT"
+    wasm_blocking="$LAST_BLOCKING"
+    emit_target_line wasm "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+
+    compile_wasm_target wasm_embedded wasm_embedded "$WORK/wasm_embedded.log"
+    wasm_embedded_result="$LAST_RESULT"
+    wasm_embedded_blocking="$LAST_BLOCKING"
+    emit_target_line wasm_embedded "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+  else
+    mark_not_requested wasm
+    wasm_result="$LAST_RESULT"
+    wasm_blocking="$LAST_BLOCKING"
+    emit_target_line wasm "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+
+    mark_not_requested wasm_embedded
+    wasm_embedded_result="$LAST_RESULT"
+    wasm_embedded_blocking="$LAST_BLOCKING"
+    emit_target_line wasm_embedded "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+  fi
 
   local blocking_failures exit_code
   blocking_failures="$(count_blocking_failures \
-    "${ios_device_result}:true" \
-    "${ios_simulator_result}:true" \
-    "${wasm_result}:false" \
-    "${wasm_embedded_result}:false")"
+    "${ios_device_result}:${ios_device_blocking}" \
+    "${ios_simulator_result}:${ios_simulator_blocking}" \
+    "${wasm_result}:${wasm_blocking}" \
+    "${wasm_embedded_result}:${wasm_embedded_blocking}")"
   if [[ "$blocking_failures" -gt 0 ]]; then
     exit_code=1
   else
@@ -309,6 +405,13 @@ fi
 if [[ "${1:-}" == "--help" ]]; then
   usage
   exit 0
+fi
+if [[ "${1:-}" == "--targets" ]]; then
+  if [[ $# -ne 2 ]] || ! parse_target_selection "$2"; then
+    usage
+    exit 2
+  fi
+  shift 2
 fi
 if [[ $# -gt 0 ]]; then
   usage
