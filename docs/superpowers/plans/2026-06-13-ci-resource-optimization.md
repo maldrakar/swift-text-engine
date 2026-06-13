@@ -4,7 +4,7 @@
 
 **Goal:** Move avoidable Swift CI work off macOS while preserving host gates, iOS blocking checks, WASM observation, Linux RSS observation, and verification evidence.
 
-**Architecture:** Keep `TextEngineCore` untouched. Split platform-specific CI responsibilities by actual runner need: Linux Swift container for host/benchmark/WASM work, macOS only for iOS `xcodebuild`. Add target selection to the existing cross-target helper rather than creating two unrelated scripts, and make `MemoryObservationDiagnostics.swift` host-conditional inside the benchmark executable.
+**Architecture:** Keep `TextEngineCore` untouched. Split platform-specific CI responsibilities by actual runner need: Linux Swift container for host/benchmark/WASM work, macOS only for iOS `xcodebuild`. Add target selection to the existing cross-target helper rather than creating two unrelated scripts, make benchmark executable Darwin/Glibc entry points host-conditional, and keep Linux SwiftPM artifacts out of the checked-out workspace with explicit scratch paths.
 
 **Tech Stack:** Swift Package Manager, XCTest, Swift 6.2.1, Bash, GitHub Actions, Docker `swift:6.2.1-bookworm`, Darwin Mach RSS, Linux `/proc/self/statm`.
 
@@ -12,7 +12,8 @@
 
 ## File Structure
 
-- Modify `.github/scripts/cross-target-compile.sh`: add `--targets all|ios|wasm`, keep default `all`, make not-requested targets explicit and nonblocking, extend self-tests.
+- Modify `.github/scripts/cross-target-compile.sh`: add `--targets all|ios|wasm`, keep default `all`, make not-requested targets explicit and nonblocking, extend self-tests, and put WASM SwiftPM build artifacts under a temporary scratch path.
+- Modify `Sources/ViewportBenchmarks/main.swift`: replace the Darwin-only import and qualified `Darwin.exit` call with portable Darwin/Glibc imports and unqualified `exit`.
 - Modify `Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift`: replace unconditional `import Darwin` with conditional Darwin/Linux imports and Linux RSS collection.
 - Modify `.github/workflows/swift-ci.yml`: add docs-only path filters, move host job to Linux Swift container, split cross-target CI into macOS iOS-only and Linux WASM-only jobs.
 - Modify `AGENTS.md`: update commands and CI topology documentation.
@@ -30,6 +31,7 @@ This plan covers one slice: CI resource optimization. It intentionally does not 
 - Read: `docs/superpowers/specs/2026-06-13-ci-resource-optimization-design.md`
 - Read: `.github/workflows/swift-ci.yml`
 - Read: `.github/scripts/cross-target-compile.sh`
+- Read: `Sources/ViewportBenchmarks/main.swift`
 - Read: `Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift`
 - Read: `AGENTS.md`
 
@@ -46,10 +48,9 @@ Expected:
 
 ```text
 ## slice-16-ci-resource-optimization
-74a7269 (HEAD -> slice-16-ci-resource-optimization) docs: design ci resource optimization
 ```
 
-No modified or untracked files should be present before implementation.
+No modified or untracked files should be present before implementation. Do not require a specific commit SHA in the expected output, because this plan may be revised before implementation.
 
 - [ ] **Step 2: Confirm the pre-change workflow still has the known macOS-only issues**
 
@@ -85,25 +86,25 @@ Run:
 ```bash
 docker info >/tmp/slice-16-docker-info.out 2>&1
 cat /tmp/slice-16-docker-info.out | sed -n '1,20p'
-docker run --rm swift:6.2.1-bookworm bash -lc 'swift --version && uname -m && cat /etc/os-release | sed -n "1,4p"'
+docker run --rm swift:6.2.1-bookworm bash -lc 'swift --version && git --version && uname -m && cat /etc/os-release | sed -n "1,4p"'
 ```
 
-Expected when Docker is available: Docker info exits `0`, the container prints Swift 6.2.1, Linux architecture, and Debian Bookworm OS metadata. If Docker daemon is unavailable, stop execution and report that Slice 16 implementation is blocked on required local Linux-container verification.
+Expected when Docker is available: Docker info exits `0`, the container prints Swift 6.2.1, Git version, Linux architecture, and Debian Bookworm OS metadata. If Docker daemon is unavailable, stop execution and report that Slice 16 implementation is blocked on required local Linux-container verification.
 
-- [ ] **Step 5: Confirm Linux build currently fails because of Darwin RSS import**
+- [ ] **Step 5: Confirm Linux build currently fails because of Darwin-only benchmark imports**
 
 Run:
 
 ```bash
-docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.2.1-bookworm bash -lc 'swift build -c release' >/tmp/slice-16-linux-build-before.out 2>&1
+docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.2.1-bookworm bash -lc 'swift build -c release --scratch-path /tmp/slice-16-linux-build-before' >/tmp/slice-16-linux-build-before.out 2>&1
 status=$?
 cat /tmp/slice-16-linux-build-before.out | tail -40
 echo "status=${status}"
 test "$status" -ne 0
-rg -n "no such module 'Darwin'|cannot find.*Darwin|error:" /tmp/slice-16-linux-build-before.out
+rg -n "no such module 'Darwin'|cannot find.*Darwin" /tmp/slice-16-linux-build-before.out
 ```
 
-Expected: nonzero status and a compile error caused by `Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift` importing Darwin on Linux. This is the failing pre-change proof for the Linux RSS task.
+Expected: nonzero status and a compile error caused by the benchmark executable importing Darwin-only APIs on Linux (`Sources/ViewportBenchmarks/main.swift` and/or `Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift`). This is the failing pre-change proof for the Linux benchmark portability task.
 
 ### Task 2: Add Cross-Target Helper Target Selection
 
@@ -192,7 +193,6 @@ Add globals after `TAIL_LINES=...`:
 
 ```bash
 SELECTED_TARGETS="all"
-LAST_BLOCKING=""
 ```
 
 Add pure helpers after `build_summary()`:
@@ -257,7 +257,7 @@ compile_wasm_target() {
 }
 ```
 
-Replace the body of `main()` after the `cross_target_swift_version` echo with selected-target branches:
+Replace the body of `main()` after the `cross_target_swift_version` echo with the complete selected-target branch, summary, and exit handling. Keep the final `build_summary` and `exit "$exit_code"` lines; dropping them would make CI lose the stable summary row and the blocking-failure exit status.
 
 ```bash
   if target_requested ios; then
@@ -313,6 +313,29 @@ Replace the body of `main()` after the `cross_target_swift_version` echo with se
     "${ios_simulator_result}:${ios_simulator_blocking}" \
     "${wasm_result}:${wasm_blocking}" \
     "${wasm_embedded_result}:${wasm_embedded_blocking}")"
+  if [[ "$blocking_failures" -gt 0 ]]; then
+    exit_code=1
+  else
+    exit_code=0
+  fi
+  build_summary "$ios_device_result" "$ios_simulator_result" "$wasm_result" "$wasm_embedded_result" "$blocking_failures" "$exit_code"
+  exit "$exit_code"
+```
+
+In `compile_wasm_target()`, put SwiftPM build artifacts under a temporary scratch path derived from `WORK`, not under workspace `.build`:
+
+```bash
+  local scratch_path="${WORK}/swiftpm-${target_name}"
+  echo "cross_target_wasm_sdk_id target=${target_name} id=${sdk_id}"
+  echo "cross_target_command target=${target_name} cmd=\"swift build --scratch-path ${scratch_path} --swift-sdk ${sdk_id} --target ${PACKAGE_TARGET}\""
+  if swift build --scratch-path "$scratch_path" --swift-sdk "$sdk_id" --target "$PACKAGE_TARGET" >"$logfile" 2>&1; then
+    LAST_RESULT="pass"
+    LAST_REASON="none"
+  else
+    LAST_RESULT="fail"
+    LAST_REASON="compile_failed"
+    print_log_tail "${target_name}-build" "$logfile"
+  fi
 ```
 
 Replace argument parsing at the end:
@@ -358,6 +381,14 @@ test "$status" -eq 2
 
 Expected: self-test prints `self_test=pass`; help shows `--targets all|ios|wasm`; invalid combined target exits `2`.
 
+Also verify the helper contains the temporary SwiftPM scratch path for WASM builds:
+
+```bash
+rg -n -- '--scratch-path.*--swift-sdk|swiftpm-\$\{target_name\}' .github/scripts/cross-target-compile.sh
+```
+
+Expected: matches in `compile_wasm_target()`.
+
 - [ ] **Step 5: Verify `--targets wasm` does not run iOS and exits 0**
 
 Run:
@@ -401,9 +432,10 @@ git commit -m "ci: add cross-target target selection"
 
 Expected: one commit containing only `.github/scripts/cross-target-compile.sh`.
 
-### Task 3: Add Linux RSS Support To Memory Observation
+### Task 3: Add Linux Benchmark And RSS Support To Memory Observation
 
 **Files:**
+- Modify: `Sources/ViewportBenchmarks/main.swift`
 - Modify: `Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift`
 
 - [ ] **Step 1: Verify local Darwin observation still passes before editing**
@@ -418,22 +450,41 @@ rg -n "rss_page_size_bytes=" /tmp/slice-16-memory-observation-darwin-before.out
 
 Expected: every row has `observation=pass` and RSS fields are present.
 
-- [ ] **Step 2: Verify Linux build fails before RSS portability fix**
+- [ ] **Step 2: Verify Linux build fails before benchmark portability fix**
 
 Run:
 
 ```bash
-docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.2.1-bookworm bash -lc 'swift build -c release' >/tmp/slice-16-linux-build-rss-red.out 2>&1
+docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.2.1-bookworm bash -lc 'swift build -c release --scratch-path /tmp/slice-16-linux-build-rss-red' >/tmp/slice-16-linux-build-rss-red.out 2>&1
 status=$?
 cat /tmp/slice-16-linux-build-rss-red.out | tail -40
 echo "status=${status}"
 test "$status" -ne 0
-rg -n "no such module 'Darwin'|cannot find.*Darwin|error:" /tmp/slice-16-linux-build-rss-red.out
+rg -n "no such module 'Darwin'|cannot find.*Darwin" /tmp/slice-16-linux-build-rss-red.out
 ```
 
-Expected: nonzero status from the unconditional Darwin import.
+Expected: nonzero status from unconditional Darwin imports in the benchmark executable.
 
-- [ ] **Step 3: Implement conditional RSS collection**
+- [ ] **Step 3: Implement conditional benchmark entry point and RSS collection**
+
+In `Sources/ViewportBenchmarks/main.swift`, replace the whole file with portable imports and an unqualified `exit(exitCode)`. The `#available(macOS 13.0, *)` condition evaluates through the `*` arm on Linux, so the Linux build uses the main branch and never reaches the macOS-only fallback:
+
+```swift
+#if canImport(Darwin)
+import Darwin
+#elseif os(Linux)
+import Glibc
+#endif
+
+if #available(macOS 13.0, *) {
+    let exitCode = runProgram(arguments: Array(CommandLine.arguments.dropFirst()))
+    if exitCode != 0 {
+        exit(exitCode)
+    }
+} else {
+    fatalError("ViewportBenchmarks requires macOS 13.0 or newer")
+}
+```
 
 In `Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift`, replace the top import:
 
@@ -585,12 +636,13 @@ Expected: every row passes and RSS fields remain present.
 Run:
 
 ```bash
+set -o pipefail
 docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.2.1-bookworm bash -lc '
   set -euo pipefail
   swift --version
   uname -m
-  swift build -c release
-  swift run -c release ViewportBenchmarks -- --memory-observation | tee /tmp/slice-16-linux-memory-observation.out
+  swift build -c release --scratch-path /tmp/slice-16-linux-build-rss
+  swift run -c release --scratch-path /tmp/slice-16-linux-build-rss ViewportBenchmarks -- --memory-observation | tee /tmp/slice-16-linux-memory-observation.out
   grep -E "mode=memory_observation .* observation=pass" /tmp/slice-16-linux-memory-observation.out
   grep -E "rss_page_size_bytes=" /tmp/slice-16-linux-memory-observation.out
 '
@@ -604,20 +656,21 @@ Run:
 
 ```bash
 rg -n "linuxResidentPages|fieldIndex == 1|size resident shared text lib data dt|/proc/self/statm" Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift
+rg -n "canImport\\(Darwin\\)|os\\(Linux\\)|import Glibc|exit\\(exitCode\\)" Sources/ViewportBenchmarks/main.swift
 ```
 
-Expected: matches show the Linux parser selects field index `1`, the second field `resident`, and reads `/proc/self/statm`.
+Expected: matches show the Linux parser selects field index `1`, the second field `resident`, and reads `/proc/self/statm`; `main.swift` has conditional Darwin/Glibc imports and uses unqualified `exit(exitCode)`.
 
 - [ ] **Step 7: Commit Linux RSS support**
 
 Run:
 
 ```bash
-git add Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift
-git commit -m "feat: support linux rss memory observation"
+git add Sources/ViewportBenchmarks/main.swift Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift
+git commit -m "feat: support linux benchmark memory observation"
 ```
 
-Expected: one commit containing only `Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift`.
+Expected: one commit containing only `Sources/ViewportBenchmarks/main.swift` and `Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift`.
 
 ### Task 4: Move CI Topology To Linux Host, macOS iOS, Linux WASM
 
@@ -679,9 +732,29 @@ Replace that job's `Show toolchain` step with:
       - name: Show toolchain
         run: |
           swift --version
+          git --version
           uname -a
           cat /etc/os-release
           lscpu || true
+```
+
+Replace the host job Swift commands with scratch-path variants so the Linux container does not write root-owned artifacts under workspace `.build`:
+
+```yaml
+      - name: Run host tests
+        run: swift test --scratch-path /tmp/text-engine-host-build
+
+      - name: Run synthetic benchmark gate
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --gate
+
+      - name: Run variable-height benchmark gate
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height --gate
+
+      - name: Run memory shape diagnostic
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-shape
+
+      - name: Run RSS memory observation diagnostic
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-observation
 ```
 
 Replace the metadata block inside `Observe realistic provider relative performance` with:
@@ -690,12 +763,19 @@ Replace the metadata block inside `Observe realistic provider relative performan
           echo "observation_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "runner_image=${ImageOS:-unknown}"
           swift --version 2>&1 | sed -n '1p' || true
+          git --version
           uname -a
           cat /etc/os-release || true
           lscpu || true
 ```
 
-Keep the existing `git fetch`, `git worktree add`, and `realistic-relative-observation.sh` commands unchanged.
+Before the existing `git fetch`, add Git's safe-directory marker for the checked-out workspace:
+
+```yaml
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+```
+
+Keep the existing `git fetch`, `git worktree add`, and `realistic-relative-observation.sh` commands unchanged after that safe-directory line.
 
 - [ ] **Step 3: Split cross-target jobs**
 
@@ -736,6 +816,7 @@ Replace the current `cross-target-compile` job with two jobs:
       - name: Show toolchain
         run: |
           swift --version
+          git --version
           uname -a
           cat /etc/os-release
           lscpu || true
@@ -750,13 +831,14 @@ Run:
 
 ```bash
 rg -n "paths-ignore|docs/\*\*|\*\*/\*\.md" .github/workflows/swift-ci.yml
-rg -n "host-tests-and-benchmark-gate:|runs-on: ubuntu-latest|container: swift:6\.2\.1-bookworm" .github/workflows/swift-ci.yml
+rg -n "^concurrency:|cancel-in-progress: true" .github/workflows/swift-ci.yml
+rg -n "host-tests-and-benchmark-gate:|runs-on: ubuntu-latest|container: swift:6\.2\.1-bookworm|git --version|safe.directory|--scratch-path /tmp/text-engine-host-build" .github/workflows/swift-ci.yml
 rg -n "ios-cross-target-compile:|run: \./\.github/scripts/cross-target-compile\.sh --targets ios" .github/workflows/swift-ci.yml
 rg -n "wasm-cross-target-observation:|run: \./\.github/scripts/cross-target-compile\.sh --targets wasm" .github/workflows/swift-ci.yml
 rg -n "timeout-minutes: 20" .github/workflows/swift-ci.yml
 ```
 
-Expected: path filters are present, host and WASM jobs use Linux Swift container, iOS job invokes only `--targets ios`, WASM job invokes only `--targets wasm`, and all three jobs have `timeout-minutes: 20`.
+Expected: path filters are present, `concurrency.cancel-in-progress` remains present, host and WASM jobs use Linux Swift container, Linux jobs print Git version, the host PR observation step marks the workspace safe before Git operations, host Swift commands use `/tmp/text-engine-host-build`, iOS job invokes only `--targets ios`, WASM job invokes only `--targets wasm`, and all three jobs have `timeout-minutes: 20`.
 
 - [ ] **Step 5: Verify Linux host and PR observation contain no macOS-only commands**
 
@@ -770,7 +852,10 @@ host = text.split("  host-tests-and-benchmark-gate:", 1)[1].split("  ios-cross-t
 assert "xcodebuild" not in host
 assert "machdep.cpu.brand_string" not in host
 assert "realistic-relative-observation.sh" in host
+assert "git --version" in host
+assert 'git config --global --add safe.directory "$GITHUB_WORKSPACE"' in host
 assert "git worktree add" in host
+assert "--scratch-path /tmp/text-engine-host-build" in host
 assert "lscpu || true" in host
 print("host_job_linux_metadata=pass")
 PY
@@ -799,7 +884,7 @@ Expected: one commit containing only `.github/workflows/swift-ci.yml`.
 Run:
 
 ```bash
-rg -n "Two parallel jobs on `macos-latest`|Cross-target compile|WASM \\+|cross-target-compile\.sh                    # local iOS/WASM cross-compile" AGENTS.md
+rg -n 'Two parallel jobs on `macos-latest`|Cross-target compile|WASM \+|cross-target-compile\.sh                    # local iOS/WASM cross-compile' AGENTS.md
 ```
 
 Expected: matches for the old two-macOS-job wording.
@@ -833,7 +918,8 @@ Three jobs:
   → `--memory-observation` → realistic relative observation (PR-only,
   `continue-on-error`). The synthetic and variable-height gates **fail the job
   on perf regression**. Benchmark budgets are still macOS-calibrated unless
-  hosted Linux x86_64 evidence explicitly justifies a retune.
+  hosted Linux x86_64 evidence explicitly justifies a retune. SwiftPM build
+  artifacts use `/tmp/text-engine-host-build`, not workspace `.build`.
 - **iOS cross-target compile** on `macos-latest`: iOS device + simulator are
   **blocking**, via `./.github/scripts/cross-target-compile.sh --targets ios`.
   This is the only hosted macOS job.
@@ -855,10 +941,11 @@ Run:
 
 ```bash
 rg -n "Three jobs|swift:6\.2\.1-bookworm|--targets ios|--targets wasm|only hosted macOS job|Docs-only changes are ignored" AGENTS.md
-if rg -n "Two parallel jobs on `macos-latest`|WASM \\+ embedded WASM are \\*\\*observational\\*\\*: the helper compiles them" AGENTS.md; then exit 1; fi
+rg -n "/tmp/text-engine-host-build" AGENTS.md
+if rg -n 'Two parallel jobs on `macos-latest`|WASM \+ embedded WASM are \*\*observational\*\*: the helper compiles them' AGENTS.md; then exit 1; fi
 ```
 
-Expected: new wording is present and old topology wording is absent.
+Expected: new wording is present, the host scratch path is documented, and old topology wording is absent.
 
 - [ ] **Step 5: Commit AGENTS.md update**
 
@@ -909,29 +996,45 @@ Expected: self-test prints `self_test=pass`; iOS run passes iOS device/simulator
 Run:
 
 ```bash
+set -o pipefail
 docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.2.1-bookworm bash -lc '
-  set -euo pipefail
+  set -uo pipefail
+  overall_status=0
   swift --version
+  git --version
   uname -m
   cat /etc/os-release
-  swift test
-  swift build -c release
-  swift run -c release ViewportBenchmarks -- --gate
-  swift run -c release ViewportBenchmarks -- --variable-height --gate
-  swift run -c release ViewportBenchmarks -- --memory-shape
-  swift run -c release ViewportBenchmarks -- --memory-observation
+  swift test --scratch-path /tmp/slice-16-linux-host-build || overall_status=$?
+  swift build -c release --scratch-path /tmp/slice-16-linux-host-build || overall_status=$?
+  swift run -c release --scratch-path /tmp/slice-16-linux-host-build ViewportBenchmarks -- --gate
+  synthetic_gate_status=$?
+  swift run -c release --scratch-path /tmp/slice-16-linux-host-build ViewportBenchmarks -- --variable-height --gate
+  variable_gate_status=$?
+  swift run -c release --scratch-path /tmp/slice-16-linux-host-build ViewportBenchmarks -- --memory-shape || overall_status=$?
+  swift run -c release --scratch-path /tmp/slice-16-linux-host-build ViewportBenchmarks -- --memory-observation || overall_status=$?
+  echo "linux_synthetic_gate_status=${synthetic_gate_status}"
+  echo "linux_variable_gate_status=${variable_gate_status}"
+  if [[ "$synthetic_gate_status" -ne 0 || "$variable_gate_status" -ne 0 ]]; then
+    overall_status=1
+    echo "linux_gate_failure_recorded=true"
+  else
+    echo "linux_gate_failure_recorded=false"
+  fi
+  exit "$overall_status"
 ' | tee /tmp/slice-16-linux-host-verification.out
 ```
 
-Expected: all commands exit `0`; both benchmark gates print `gate=pass`; memory diagnostics pass. If gates fail only on timing, do not retune from this local arm64 Linux result; record the output and wait for hosted Linux x86_64 evidence.
+Expected: all commands exit `0`; both benchmark gates print `gate=pass`; memory diagnostics pass; SwiftPM artifacts stay under `/tmp/slice-16-linux-host-build`. If a gate fails, the script still runs memory-shape and memory-observation before exiting nonzero, prints the gate statuses, and preserves the full output. If gates fail only on local arm64 timing, do not retune from this local result; record the output and wait for hosted Linux x86_64 evidence.
 
 - [ ] **Step 4: Run Linux container WASM helper verification**
 
 Run:
 
 ```bash
+set -o pipefail
 docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.2.1-bookworm bash -lc '
   set -euo pipefail
+  git --version
   ./.github/scripts/cross-target-compile.sh --self-test
   ./.github/scripts/cross-target-compile.sh --targets wasm
 ' | tee /tmp/slice-16-linux-wasm-helper.out
@@ -942,7 +1045,7 @@ rg -n "target=wasm_embedded result=(pass|skipped) reason=" /tmp/slice-16-linux-w
 rg -n "blocking_failures=0 exit=0" /tmp/slice-16-linux-wasm-helper.out
 ```
 
-Expected: self-test passes; iOS targets are `not_requested blocking=false`; WASM targets pass or skip nonblocking; summary exits `0`.
+Expected: self-test passes; iOS targets are `not_requested blocking=false`; WASM targets pass or skip nonblocking; summary exits `0`. If a WASM SDK is available and the helper builds, it uses the helper's temporary `--scratch-path` rather than workspace `.build`.
 
 - [ ] **Step 5: Run source and workflow scans**
 
@@ -951,7 +1054,9 @@ Run:
 ```bash
 if rg -n "Foundation" Sources/TextEngineCore; then exit 1; fi
 rg -n "fieldIndex == 1|/proc/self/statm|size resident shared text lib data dt" Sources/ViewportBenchmarks/MemoryObservationDiagnostics.swift
-rg -n "paths-ignore|docs/\*\*|\*\*/\*\.md|container: swift:6\.2\.1-bookworm|--targets ios|--targets wasm|timeout-minutes: 20" .github/workflows/swift-ci.yml
+rg -n "canImport\\(Darwin\\)|os\\(Linux\\)|import Glibc|exit\\(exitCode\\)" Sources/ViewportBenchmarks/main.swift
+rg -n -- '--scratch-path.*--swift-sdk|swiftpm-\$\{target_name\}' .github/scripts/cross-target-compile.sh
+rg -n "paths-ignore|docs/\*\*|\*\*/\*\.md|container: swift:6\.2\.1-bookworm|--targets ios|--targets wasm|timeout-minutes: 20|cancel-in-progress: true|safe.directory|--scratch-path /tmp/text-engine-host-build" .github/workflows/swift-ci.yml
 python3 - <<'PY'
 from pathlib import Path
 text = Path(".github/workflows/swift-ci.yml").read_text()
@@ -959,14 +1064,17 @@ host = text.split("  host-tests-and-benchmark-gate:", 1)[1].split("  ios-cross-t
 assert "xcodebuild" not in host
 assert "machdep.cpu.brand_string" not in host
 assert "realistic-relative-observation.sh" in host
+assert "git --version" in host
+assert 'git config --global --add safe.directory "$GITHUB_WORKSPACE"' in host
 assert "git worktree add" in host
+assert "--scratch-path /tmp/text-engine-host-build" in host
 print("workflow_scan=pass")
 PY
-rg -n "Three jobs|only hosted macOS job|Docs-only changes are ignored|--targets ios|--targets wasm" AGENTS.md
+rg -n "Three jobs|only hosted macOS job|Docs-only changes are ignored|--targets ios|--targets wasm|/tmp/text-engine-host-build" AGENTS.md
 git diff --check
 ```
 
-Expected: Foundation scan has no output; required source/workflow/AGENTS markers exist; Python scan prints `workflow_scan=pass`; `git diff --check` has no output.
+Expected: Foundation scan has no output; required source/workflow/helper/AGENTS markers exist; Python scan prints `workflow_scan=pass`; `git diff --check` has no output.
 
 ### Task 7: Write Verification Record And Capture Hosted Evidence
 
@@ -1004,6 +1112,9 @@ Add the concrete command results from `/tmp/slice-16-*.out` for:
 - Linux container host verification with `swift:6.2.1-bookworm`
 - Linux container WASM helper verification with `swift:6.2.1-bookworm`
 - Foundation-free scan
+- `main.swift` portability scan
+- cross-target helper scratch-path scan
+- workflow `concurrency`, Git `safe.directory`, and host scratch-path scans
 - workflow scans
 - `git diff --check`
 
