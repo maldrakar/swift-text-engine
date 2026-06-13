@@ -288,13 +288,46 @@ Docs-only changes are ignored
 
 ## Hosted Pull Request Evidence
 
-Pending. This document was created before opening the Slice 16 pull request.
-Hosted PR evidence must record the PR number, head SHA, run IDs, job names,
-runner/container facts, benchmark gate rows, iOS target rows, WASM target rows,
-and realistic relative observation status.
+PR: #13, `https://github.com/arthurbanshchikov/swift-text-engine/pull/13`
 
-If hosted jobs do not start, record the exact GitHub Actions annotation and do
-not treat that as green hosted evidence.
+Head branch: `slice-16-ci-resource-optimization`
+
+Head SHA: `c84acfee311dcabffe1bdf1c94f924ca20b8aae6`
+
+Swift CI run: `27470851134`
+
+Run status from `gh run view 27470851134 --json databaseId,headSha,conclusion,status,jobs`:
+
+```text
+status=completed
+conclusion=failure
+headSha=c84acfee311dcabffe1bdf1c94f924ca20b8aae6
+```
+
+Jobs:
+
+```text
+iOS cross-target compile: id=81201368869 status=completed conclusion=failure steps=[]
+WASM cross-target observation: id=81201368872 status=completed conclusion=failure steps=[]
+Host tests and benchmark gate: id=81201368892 status=completed conclusion=failure steps=[]
+```
+
+`gh run view 27470851134 --log` -> exit 1:
+
+```text
+log not found: 81201368869
+```
+
+No hosted job steps started. Each job had the same check-run annotation from
+`gh api repos/arthurbanshchikov/swift-text-engine/check-runs/<job-id>/annotations`:
+
+```text
+The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings
+```
+
+This is not green hosted PR evidence. It is an external runner-start blocker.
+No hosted Linux x86_64 `swift test`, benchmark gate, iOS target, WASM target, or
+realistic relative observation output is available from this run.
 
 ## Hosted Post-Merge Evidence
 
