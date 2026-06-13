@@ -203,6 +203,35 @@ This is recorded as a local aarch64 Docker Swift-test-runner blocker, not as
 green Linux XCTest evidence. Hosted Linux x86_64 PR evidence must resolve
 whether the new CI host job passes `swift test`.
 
+#### Follow-up root cause (2026-06-13)
+
+A deeper investigation localized the hang and ruled out core/test defects:
+
+- `swift build` and `swift build --build-tests` succeed in `swift:6.2.1-bookworm`.
+- Each test passes individually. Run alone,
+  `DocumentLineCursorTests/testCursorReportsMissingIndexesWithoutClampingRange`
+  exits `0`. Invoking the `*.xctest` binary directly shows the prior test passing
+  and this one starting, then blocking.
+- The full suite / a whole class in one xctest process hangs at the transition
+  *between* sequential tests: `swift-test` sits in `rt_sigsuspend`, the
+  `*.xctest` worker sits in `poll`, 0% CPU, no further output. No `Test Case`
+  line is ever flushed via `swift test` (stdout is block-buffered).
+- The same hang reproduces under x86_64 (`docker run --platform linux/amd64`,
+  Rosetta): build succeeds, `swift test` times out (`124`) with zero `Test Case`
+  lines.
+
+On Apple Silicon both the aarch64-native and the x86_64-emulated containers share
+the one Docker Desktop Linux VM kernel (aarch64), so the guest CPU arch does not
+change the outcome. The hang is therefore an environment artifact of the local
+Docker Desktop Linux VM — not the guest arch, not `TextEngineCore`, and not the
+tests (which pass on macOS and individually on Linux). The same
+`swift:6.2.1-bookworm` image runs `swift test` across the ecosystem on hosted
+x86_64 GitHub Actions, so the new Linux host job is expected to pass there. This
+cannot be proven from this Mac: every local Linux path goes through the
+confounding Docker Desktop VM. Hosted x86_64 evidence (for example, by
+temporarily making the repo public for free Actions minutes) remains the only way
+to close this gap.
+
 ### Linux container WASM helper verification
 
 `swift:6.2.1-bookworm` container command:
@@ -328,6 +357,19 @@ Docs-only changes are ignored
 ```
 
 `git diff --check` -> exit 0.
+
+## Docs-Only Skip Behavior (Observed)
+
+`paths-ignore` on `pull_request` is evaluated against the whole PR diff, not the
+latest pushed commit. PR #13 carries code/workflow/script changes, so the four
+docs-only commits pushed to it (`c84acfe`, `bf149d3`, `8d96dde`, `e70e20a`, each
+touching only this verification record) each still triggered Swift CI (runs
+`27470851134`, `27470877668`, `27470904394`, `27471010859`). The `paths-ignore`
+skip therefore applies only to fully docs-only PRs and docs-only pushes to `main`
+(for example, a post-slice review committed directly to `main`); it does not skip
+docs-only commits appended to a PR that also changes code. This is a GitHub
+`pull_request` filter semantic, not a workflow defect, and is reflected in the
+corrected `AGENTS.md` CI note.
 
 ## Hosted Pull Request Evidence
 

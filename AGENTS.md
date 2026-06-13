@@ -106,8 +106,13 @@ Three jobs:
   **observational**: the helper compiles them when a matching Swift SDK is
   installed/provisioned, otherwise records a non-blocking skip.
 
-Docs-only changes are ignored by Swift CI via `paths-ignore` for `docs/**` and
-`**/*.md`; code, workflow, script, package, and test changes still run CI.
+Docs-only changes skip Swift CI via `paths-ignore` (`docs/**`, `**/*.md`) **only
+when the entire trigger is docs-only**: a push to `main` touching only docs, or a
+PR whose full diff is docs-only. `paths-ignore` on `pull_request` is evaluated
+against the whole PR diff, not the latest commit, so docs-only commits appended to
+a PR that also touches code, workflow, scripts, package metadata, or tests still
+run CI (observed in PR #13: docs-only verification-record commits each
+re-triggered the workflow).
 
 Caveat: this is a private repo without branch protection / required checks
 (GitHub Pro / public-repo feature). A red check blocks the **status**, not the
