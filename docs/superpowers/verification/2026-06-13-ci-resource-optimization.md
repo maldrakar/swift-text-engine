@@ -329,6 +329,25 @@ This is not green hosted PR evidence. It is an external runner-start blocker.
 No hosted Linux x86_64 `swift test`, benchmark gate, iOS target, WASM target, or
 realistic relative observation output is available from this run.
 
+After committing this PR evidence, the branch head became
+`bf149d330c08c781b0c53fe0179a046e405e00ac`, which triggered Swift CI run
+`27470877668`. That run also completed as failure before any job steps started:
+
+```text
+status=completed
+conclusion=failure
+headSha=bf149d330c08c781b0c53fe0179a046e405e00ac
+Host tests and benchmark gate: id=81201438680 status=completed conclusion=failure steps=[]
+iOS cross-target compile: id=81201438684 status=completed conclusion=failure steps=[]
+WASM cross-target observation: id=81201438686 status=completed conclusion=failure steps=[]
+```
+
+The check-run annotation for all three jobs was the same:
+
+```text
+The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings
+```
+
 ## Hosted Post-Merge Evidence
 
 Pending until the PR is merged to `main`.
