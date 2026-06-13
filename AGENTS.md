@@ -71,6 +71,8 @@ swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS
 swift run -c release ViewportBenchmarks -- --help            # all flags
 ./.github/scripts/cross-target-compile.sh --self-test        # shell logic self-test (no toolchain)
 ./.github/scripts/cross-target-compile.sh                    # local iOS/WASM cross-compile
+./.github/scripts/cross-target-compile.sh --targets ios      # iOS-only compile path
+./.github/scripts/cross-target-compile.sh --targets wasm     # WASM-only observational path
 ```
 
 Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
@@ -85,17 +87,27 @@ Local WASM build (needs a matching Swift SDK installed):
 
 ## CI (`.github/workflows/swift-ci.yml`)
 
-Two parallel jobs on `macos-latest`:
+Three jobs:
 
-- **Host tests and benchmark gate**: `swift test` → synthetic `--gate` (blocking)
+- **Host tests and benchmark gate** on `ubuntu-latest` with
+  `swift:6.2.1-bookworm`: `swift test` → synthetic `--gate` (blocking)
   → `--variable-height --gate` (blocking) → `--memory-shape`
   → `--memory-observation` → realistic relative observation (PR-only,
   `continue-on-error`). The synthetic and variable-height gates **fail the job
-  on perf regression**.
-- **Cross-target compile**: iOS device + simulator are **blocking**. WASM +
-  embedded WASM are **observational**: the helper compiles them when a matching
-  Swift SDK is installed/provisioned, otherwise records a non-blocking skip
-  (today the hosted runner records a skip; WASM is proven locally).
+  on perf regression**. Benchmark budgets are still macOS-calibrated unless
+  hosted Linux x86_64 evidence explicitly justifies a retune. SwiftPM build
+  artifacts use `/tmp/text-engine-host-build`, not workspace `.build`.
+- **iOS cross-target compile** on `macos-latest`: iOS device + simulator are
+  **blocking**, via `./.github/scripts/cross-target-compile.sh --targets ios`.
+  This is the only hosted macOS job.
+- **WASM cross-target observation** on `ubuntu-latest` with
+  `swift:6.2.1-bookworm`: WASM + embedded WASM run via
+  `./.github/scripts/cross-target-compile.sh --targets wasm`. They remain
+  **observational**: the helper compiles them when a matching Swift SDK is
+  installed/provisioned, otherwise records a non-blocking skip.
+
+Docs-only changes are ignored by Swift CI via `paths-ignore` for `docs/**` and
+`**/*.md`; code, workflow, script, package, and test changes still run CI.
 
 Caveat: this is a private repo without branch protection / required checks
 (GitHub Pro / public-repo feature). A red check blocks the **status**, not the
