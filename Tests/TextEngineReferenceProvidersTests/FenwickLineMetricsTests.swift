@@ -90,6 +90,30 @@ final class FenwickLineMetricsTests: XCTestCase {
         XCTAssertEqual(fenwick.setHeight(ofLine: 7, to: 10.0), 1)
     }
 
+    func testPrefixQueryWalkBoundIsLogarithmic() {
+        // offset(ofLine: index) reads exactly popcount(index) BIT cells (one per
+        // set bit; see FenwickLineMetrics.offset). Over the index domain
+        // 0...lineCount that never exceeds floor(log2 N) + 1, including the
+        // max-popcount (all-ones) index. We also confirm those long-walk indices
+        // produce correct offsets.
+        for n in [1_000, 100_000, 1_000_000] {
+            let bound = floorLog2(n) + 1
+            let heights = sampleHeights(n)
+            let fenwick = FenwickLineMetrics(heights: heights)
+            let oracle = PrefixSumLineMetrics(heights: heights)
+            let allOnes = (1 << floorLog2(n)) - 1   // largest 2^k - 1 <= n
+
+            for index in [0, 1, n / 2, n - 1, n, allOnes] {
+                XCTAssertLessThanOrEqual(index.nonzeroBitCount, bound, "index=\(index) n=\(n)")
+                XCTAssertEqual(
+                    fenwick.offset(ofLine: index),
+                    oracle.offset(ofLine: index),
+                    "offset mismatch at long-walk index \(index) for n=\(n)"
+                )
+            }
+        }
+    }
+
     func testOffsetsStrictlyIncreasingAfterMutation() {
         let heights = sampleHeights(300)
         var fenwick = FenwickLineMetrics(heights: heights)
