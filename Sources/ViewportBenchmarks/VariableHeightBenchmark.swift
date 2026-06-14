@@ -1,23 +1,5 @@
 import TextEngineCore
-
-struct PrefixSumLineMetrics: LineMetricsSource {
-    let prefix: [Double]
-
-    init(heights: [Double]) {
-        var sums: [Double] = [0.0]
-        sums.reserveCapacity(heights.count + 1)
-        var running = 0.0
-        for height in heights {
-            running += height
-            sums.append(running)
-        }
-        self.prefix = sums
-    }
-
-    var lineCount: Int { prefix.count - 1 }
-
-    func offset(ofLine index: Int) -> Double { prefix[index] }
-}
+import TextEngineReferenceProviders
 
 struct VariableHeightScenario {
     let name: String
