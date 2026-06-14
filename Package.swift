@@ -21,6 +21,10 @@ let package = Package(
         .testTarget(
             name: "TextEngineCoreTests",
             dependencies: ["TextEngineCore"]
+        ),
+        .testTarget(
+            name: "TextEngineReferenceProvidersTests",
+            dependencies: ["TextEngineReferenceProviders", "TextEngineCore"]
         )
     ]
 )
