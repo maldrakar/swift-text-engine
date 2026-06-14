@@ -34,4 +34,29 @@ final class FenwickLineMetricsTests: XCTestCase {
             )
         }
     }
+
+    func testMutationKeepsOffsetsEqualToFreshOracle() {
+        let heights = sampleHeights(500)
+        var fenwick = FenwickLineMetrics(heights: heights)
+        var mutated = heights
+
+        // First line, last line, an interior line, then the same interior line
+        // again (repeated edit). All values integer-valued and positive.
+        let edits: [(index: Int, height: Double)] = [
+            (0, 40.0), (heights.count - 1, 12.0), (250, 28.0), (250, 50.0)
+        ]
+
+        for edit in edits {
+            fenwick.setHeight(ofLine: edit.index, to: edit.height)
+            mutated[edit.index] = edit.height
+            let oracle = PrefixSumLineMetrics(heights: mutated)
+            for i in 0...heights.count {
+                XCTAssertEqual(
+                    fenwick.offset(ofLine: i),
+                    oracle.offset(ofLine: i),
+                    "mismatch at \(i) after editing line \(edit.index)"
+                )
+            }
+        }
+    }
 }
