@@ -1,5 +1,22 @@
 import XCTest
 import TextEngineReferenceProviders
+import TextEngineCore
+
+private final class QueryCounter {
+    var count = 0
+}
+
+private struct CountingMetrics<Base: LineMetricsSource>: LineMetricsSource {
+    let base: Base
+    let counter: QueryCounter
+
+    var lineCount: Int { base.lineCount }
+
+    func offset(ofLine index: Int) -> Double {
+        counter.count += 1
+        return base.offset(ofLine: index)
+    }
+}
 
 final class FenwickLineMetricsTests: XCTestCase {
     // Deterministic, integer-valued, strictly-positive non-uniform heights in
@@ -24,6 +41,35 @@ final class FenwickLineMetricsTests: XCTestCase {
     private func floorLog2(_ value: Int) -> Int {
         precondition(value >= 1)
         return Int.bitWidth - 1 - value.leadingZeroBitCount
+    }
+
+    private func ceilLog2(_ value: Int) -> Int {
+        if value <= 1 { return 0 }
+        var power = 0
+        var capacity = 1
+        while capacity < value {
+            capacity <<= 1
+            power += 1
+        }
+        return power
+    }
+
+    private func expectSuccess(
+        _ computation: ViewportComputation,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> VirtualRange {
+        switch computation {
+        case let .success(range):
+            return range
+        case let .failure(error):
+            XCTFail("expected success, got \(error)", file: file, line: line)
+            return VirtualRange(
+                visibleStart: 0, visibleEndExclusive: 0,
+                bufferStart: 0, bufferEndExclusive: 0,
+                isAtTop: true, isAtBottom: true
+            )
+        }
     }
 
     func testOffsetMatchesPrefixSumOracleOnBuild() {
@@ -128,5 +174,67 @@ final class FenwickLineMetricsTests: XCTestCase {
                 "offsets not strictly increasing at line \(i)"
             )
         }
+    }
+
+    func testReLayoutAfterMutationMatchesFreshOracle() {
+        let heights = sampleHeights(10_000)
+        var fenwick = FenwickLineMetrics(heights: heights)
+        var mutated = heights
+        let editIndex = 4_321
+        let newHeight = 48.0
+        fenwick.setHeight(ofLine: editIndex, to: newHeight)
+        mutated[editIndex] = newHeight
+        let oracle = PrefixSumLineMetrics(heights: mutated)
+
+        let input = VariableViewportInput(
+            scrollOffsetY: oracle.offset(ofLine: editIndex) - 100.0,
+            viewportHeight: 80.0 * 16.0,
+            overscanLinesBefore: 5,
+            overscanLinesAfter: 5
+        )
+
+        let fenwickRange = expectSuccess(ViewportVirtualizer.compute(input, metrics: fenwick))
+        let oracleRange = expectSuccess(ViewportVirtualizer.compute(input, metrics: oracle))
+        XCTAssertEqual(fenwickRange, oracleRange)
+
+        var fenwickCursor = ViewportVirtualizer.geometry(for: fenwickRange, metrics: fenwick)
+        var oracleCursor = ViewportVirtualizer.geometry(for: oracleRange, metrics: oracle)
+        var emitted = 0
+        while true {
+            let fenwickLine = fenwickCursor.next()
+            let oracleLine = oracleCursor.next()
+            XCTAssertEqual(fenwickLine, oracleLine, "geometry mismatch at emitted index \(emitted)")
+            if fenwickLine == nil && oracleLine == nil { break }
+            emitted += 1
+            if emitted >= 1_000 {
+                XCTFail("geometry cursor did not terminate")
+                return
+            }
+        }
+        XCTAssertGreaterThan(emitted, 0)
+    }
+
+    func testReLayoutAfterMutationUsesLogarithmicCoreQueries() {
+        let n = 1_000_000
+        var fenwick = FenwickLineMetrics(heights: sampleHeights(n))
+        fenwick.setHeight(ofLine: n / 3, to: 50.0)
+
+        let counter = QueryCounter()
+        let counting = CountingMetrics(base: fenwick, counter: counter)
+        let input = VariableViewportInput(
+            scrollOffsetY: fenwick.offset(ofLine: n / 2),
+            viewportHeight: 80.0 * 16.0,
+            overscanLinesBefore: 5,
+            overscanLinesAfter: 5
+        )
+
+        _ = expectSuccess(ViewportVirtualizer.compute(input, metrics: counting))
+
+        // Two O(1) contract queries (offset 0 and total height) plus two binary
+        // searches over the line count. A linear scan would be hundreds of
+        // thousands of queries.
+        let expectedMax = 2 + (ceilLog2(n) + 1) * 2
+        XCTAssertLessThanOrEqual(counter.count, expectedMax)
+        XCTAssertLessThan(counter.count, 100)
     }
 }
