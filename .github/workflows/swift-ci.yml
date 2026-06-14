@@ -49,6 +49,10 @@ jobs:
       - name: Run variable-height benchmark gate
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height --gate
 
+      - name: Observe variable-height mutation benchmark
+        continue-on-error: true
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height-mutation
+
       - name: Run memory shape diagnostic
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-shape
 

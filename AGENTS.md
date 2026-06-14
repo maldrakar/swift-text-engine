@@ -51,9 +51,10 @@ O(buffer). The variable path provably equals the fixed path for uniform metrics
 ## Package layout
 
 - `Sources/TextEngineCore` — the library. Pure, headless, Foundation-free.
-- `Sources/ViewportBenchmarks` — executable. Benchmarks, gates, diagnostics, and
-  reference provider implementations (e.g. `PrefixSumLineMetrics`) live here, NOT
-  in the core.
+- `Sources/TextEngineReferenceProviders` — Foundation-free reference provider
+  library. Reference providers live outside the core.
+- `Sources/ViewportBenchmarks` — executable. Benchmarks, gates, and diagnostics
+  live here, NOT in the core.
 - `Tests/TextEngineCoreTests` — XCTest only. (`swift test` also prints a
   "0 tests in 0 suites" line for the empty Swift Testing harness — not a failure.)
 - `Package.swift` — `swift-tools-version: 6.0`. No `platforms:` declared, so iOS
@@ -66,6 +67,7 @@ swift test                                                   # host unit tests
 swift build -c release                                       # release build
 swift run -c release ViewportBenchmarks -- --gate            # synthetic gate (blocking); expect gate=pass
 swift run -c release ViewportBenchmarks -- --variable-height --gate   # variable-height local gate
+swift run -c release ViewportBenchmarks -- --variable-height-mutation --gate   # mutate+recompute local gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --help            # all flags
@@ -76,10 +78,11 @@ swift run -c release ViewportBenchmarks -- --help            # all flags
 ```
 
 Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
-`--memory-shape`, `--memory-observation`, `--gate`. Only one mode flag at a time.
-`--gate` is valid with the default pipeline, `--realistic-provider`, and
-`--variable-height` modes; it is **rejected** with `--range-only`,
-`--memory-shape`, `--memory-observation`.
+`--variable-height-mutation`, `--memory-shape`, `--memory-observation`, `--gate`.
+Only one mode flag at a time. `--gate` is valid with the default pipeline,
+`--realistic-provider`, `--variable-height`, and `--variable-height-mutation`
+modes; it is **rejected** with `--range-only`, `--memory-shape`,
+`--memory-observation`.
 
 Local WASM build (needs a matching Swift SDK installed):
 `swift build --swift-sdk <id> --target TextEngineCore` for both `wasm` and
@@ -91,12 +94,13 @@ Three jobs:
 
 - **Host tests and benchmark gate** on `ubuntu-latest` with
   `swift:6.2.1-bookworm`: `swift test` → synthetic `--gate` (blocking)
-  → `--variable-height --gate` (blocking) → `--memory-shape`
-  → `--memory-observation` → realistic relative observation (PR-only,
-  `continue-on-error`). The synthetic and variable-height gates **fail the job
-  on perf regression**. Benchmark budgets are still macOS-calibrated unless
-  hosted Linux x86_64 evidence explicitly justifies a retune. SwiftPM build
-  artifacts use `/tmp/text-engine-host-build`, not workspace `.build`.
+  → `--variable-height --gate` (blocking) → `--variable-height-mutation`
+  (observational) → `--memory-shape` → `--memory-observation` → realistic
+  relative observation (PR-only, `continue-on-error`). The synthetic and
+  variable-height gates **fail the job on perf regression**. Benchmark budgets
+  are still macOS-calibrated unless hosted Linux x86_64 evidence explicitly
+  justifies a retune. SwiftPM build artifacts use `/tmp/text-engine-host-build`,
+  not workspace `.build`.
 - **iOS cross-target compile** on `macos-latest`: iOS device + simulator are
   **blocking**, via `./.github/scripts/cross-target-compile.sh --targets ios`.
   This is the only hosted macOS job.
