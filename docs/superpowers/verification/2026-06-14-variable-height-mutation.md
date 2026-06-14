@@ -194,7 +194,21 @@ Exit: 0, no output.
 
 ## Hosted Evidence
 
-PR run: TODO after PR is opened.
+PR run: `27515131320` for PR #16 on commit
+`34ec6e5b608dfabc9de43e2d6a60db72fff9b2f7` completed successfully.
+
+```text
+WASM cross-target observation: success (job 81322314662)
+iOS cross-target compile: success (job 81322314681)
+Host tests and benchmark gate: success (job 81322314709)
+  Run host tests: success
+  Run synthetic benchmark gate: success
+  Run variable-height benchmark gate: success
+  Observe variable-height mutation benchmark: success
+  Run memory shape diagnostic: success
+  Run RSS memory observation diagnostic: success
+  Observe realistic provider relative performance: success
+```
 
 Post-merge push run on `main`: TODO after merge. Per AGENTS.md, final merged
 code proof should be anchored on this post-merge push run.
