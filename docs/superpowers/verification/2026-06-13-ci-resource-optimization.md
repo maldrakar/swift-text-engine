@@ -458,10 +458,41 @@ mode=variable_height provider=prefix_sum scenario=1m_lines_200_visible_overscan_
 
 Memory-shape (`invariant=pass` for all five rows) and memory-observation
 (`observation=pass` for all three rows, `rss_page_size_bytes=4096`, i.e. the
-Linux `/proc/self/statm` RSS path) both passed on the Linux host. The PR-only
-`Observe realistic provider relative performance` step reached
-`realistic-relative-observation.sh` (threshold `1.221556`) and completed
-`success` (`continue-on-error`).
+Linux `/proc/self/statm` RSS path) both passed on the Linux host.
+
+**Correction (2026-06-14):** an earlier version of this record stated the PR-only
+`Observe realistic provider relative performance` step "reached
+`realistic-relative-observation.sh` ... and completed success." That was wrong.
+In the container the step runs under `sh`, and its `set -euo pipefail` first line
+is a bashism, so the step exits at line 1 and never runs the script:
+
+```text
+/__w/_temp/<id>.sh: 1: set: Illegal option -o pipefail
+##[error]Process completed with exit code 2
+```
+
+`continue-on-error: true` keeps the job green, which is why the job-level
+conclusion is `success` while the observation produced no data. This regression
+(Slice 16 moved the host job from `macos-latest`, where the default shell is
+bash, to the container) is fixed by adding `shell: bash` to the step; the
+realistic relative observation must be treated as **absent** on every earlier
+Slice 16-era run rather than passing. The threshold `1.221556` seen in those logs
+is only the env value echoed in the step's `##[group]Run` header, not script
+output.
+
+**Fix verified (PR #15, run `27497860966`, head `e89cdb0`):** with `shell: bash`
+the step runs under `bash --noprofile --norc -e -o pipefail {0}`, prepares the
+base/head worktrees, and actually executes `realistic-relative-observation.sh`:
+
+```text
+mode=realistic_relative_observation base_sha=4aa42c6 head_sha=e89cdb0 \
+  base_median_p95_ns=12992.5 head_median_p95_ns=13155.0 \
+  p95_ratio=1.012507 p99_ratio=1.045687 max_ratio=1.045687 \
+  observation_threshold=1.221556 observation=clean blocking_ready=false
+```
+
+No `Illegal option -o pipefail` line appears, and the step emits real relative
+ratios (`max_ratio≈1.05` under the `1.221556` threshold, `observation=clean`).
 
 iOS job (hosted macOS):
 
