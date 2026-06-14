@@ -20,6 +20,12 @@ final class FenwickLineMetricsTests: XCTestCase {
         return heights
     }
 
+    // floor(log2(value)) for value >= 1.
+    private func floorLog2(_ value: Int) -> Int {
+        precondition(value >= 1)
+        return Int.bitWidth - 1 - value.leadingZeroBitCount
+    }
+
     func testOffsetMatchesPrefixSumOracleOnBuild() {
         let heights = sampleHeights(1_000)
         let fenwick = FenwickLineMetrics(heights: heights)
@@ -58,6 +64,30 @@ final class FenwickLineMetricsTests: XCTestCase {
                 )
             }
         }
+    }
+
+    func testUpdateWriteCountIsLogarithmicAcrossSizes() {
+        // Updating line 0 (BIT position 1) writes to positions 1,2,4,...,<=N,
+        // i.e. exactly floor(log2 N) + 1 cells. A 1000x size jump adds ~10
+        // writes, not 1000x - the localized O(log N) update proof.
+        let cases: [(n: Int, expected: Int)] = [
+            (1_000, 10), (100_000, 17), (1_000_000, 20)
+        ]
+        for testCase in cases {
+            var fenwick = FenwickLineMetrics(heights: sampleHeights(testCase.n))
+            let writes = fenwick.setHeight(ofLine: 0, to: 17.0)
+            XCTAssertEqual(writes, testCase.expected, "n=\(testCase.n)")
+            XCTAssertEqual(writes, floorLog2(testCase.n) + 1, "n=\(testCase.n)")
+            XCTAssertEqual(fenwick.lastUpdateWriteCount, testCase.expected, "n=\(testCase.n)")
+        }
+    }
+
+    func testUpdateWriteCountExactForKnownSmallCases() {
+        var fenwick = FenwickLineMetrics(heights: sampleHeights(8))
+        // line 0 -> BIT position 1 -> writes 1,2,4,8
+        XCTAssertEqual(fenwick.setHeight(ofLine: 0, to: 10.0), 4)
+        // line 7 -> BIT position 8 -> writes 8 only
+        XCTAssertEqual(fenwick.setHeight(ofLine: 7, to: 10.0), 1)
     }
 
     func testOffsetsStrictlyIncreasingAfterMutation() {
