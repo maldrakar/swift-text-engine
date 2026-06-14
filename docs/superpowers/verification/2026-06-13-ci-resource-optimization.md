@@ -458,10 +458,26 @@ mode=variable_height provider=prefix_sum scenario=1m_lines_200_visible_overscan_
 
 Memory-shape (`invariant=pass` for all five rows) and memory-observation
 (`observation=pass` for all three rows, `rss_page_size_bytes=4096`, i.e. the
-Linux `/proc/self/statm` RSS path) both passed on the Linux host. The PR-only
-`Observe realistic provider relative performance` step reached
-`realistic-relative-observation.sh` (threshold `1.221556`) and completed
-`success` (`continue-on-error`).
+Linux `/proc/self/statm` RSS path) both passed on the Linux host.
+
+**Correction (2026-06-14):** an earlier version of this record stated the PR-only
+`Observe realistic provider relative performance` step "reached
+`realistic-relative-observation.sh` ... and completed success." That was wrong.
+In the container the step runs under `sh`, and its `set -euo pipefail` first line
+is a bashism, so the step exits at line 1 and never runs the script:
+
+```text
+/__w/_temp/<id>.sh: 1: set: Illegal option -o pipefail
+##[error]Process completed with exit code 2
+```
+
+`continue-on-error: true` keeps the job green, which is why the job-level
+conclusion is `success` while the observation produced no data. This regression
+(Slice 16 moved the host job from `macos-latest`, where the default shell is
+bash, to the container) is fixed separately by adding `shell: bash` to the step;
+the realistic relative observation must be treated as **absent** on every Slice
+16-era run rather than passing. The threshold `1.221556` seen in logs is only the
+env value echoed in the step's `##[group]Run` header, not script output.
 
 iOS job (hosted macOS):
 
