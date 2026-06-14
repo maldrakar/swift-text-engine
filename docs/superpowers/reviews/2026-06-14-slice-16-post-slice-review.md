@@ -258,11 +258,14 @@ non-blocking by design, so it does not affect the core, the blocking gates, or
 merge safety. But a silently-dead observation masked by a green check is a real
 regression introduced by this slice.
 
-**Fix:** add `shell: bash` to that step (the Debian container ships bash). This
-is the only step in the workflow using `set -o pipefail`; the other multi-line
-`run: |` steps are sh-safe. The fix is tracked as a follow-up (see Risks And
-Gaps) and must be verified by a hosted PR run in which the step actually executes
-`realistic-relative-observation.sh`.
+**Fixed in PR #15** (merged to `main` as `081c6e4`): added `shell: bash` to that
+step (the Debian container ships bash; it was the only step in the workflow using
+`set -o pipefail`, the other multi-line `run: |` steps are sh-safe). Verified by
+hosted run `27497860966`, where the step ran under
+`bash --noprofile --norc -e -o pipefail {0}`, prepared the base/head worktrees,
+and executed `realistic-relative-observation.sh`:
+`p95_ratio=1.012507 p99_ratio=1.045687 max_ratio=1.045687
+observation_threshold=1.221556 observation=clean` — no `Illegal option` line.
 
 ### P3 / Minor But Valid
 
@@ -319,17 +322,17 @@ account payment. The slice's 1x-Linux move still materially cuts future macOS
 spend (the dominant ~1550 quota-minute host job moves to ~155 at 1x), so the
 optimization stands on its own merits independent of the billing event.
 
-### Realistic Observation Step Is Dead On Linux (New, Must Fix)
+### Realistic Observation Step Was Dead On Linux (Fixed in PR #15)
 
-The P2 finding above. The PR-only relative-performance observation has produced
-no data since the host job moved to the container, and the green job status hides
-it. The fix is a one-line `shell: bash` on the step, but it must ship and be
-verified by a hosted PR run that actually executes
-`realistic-relative-observation.sh`. Until then, treat the realistic relative
-observation as absent on every Slice 16-era run, not as passing. The verification
-record (`docs/superpowers/verification/2026-06-13-ci-resource-optimization.md`)
-carries the same incorrect "reached script / success" wording and must be
-corrected alongside the fix.
+The P2 finding above. The PR-only relative-performance observation produced no
+data from the moment the host job moved to the container until the fix, and the
+green job status hid it. **Resolved in PR #15** (`shell: bash`, merged as
+`081c6e4`, verified by run `27497860966` emitting `observation=clean`). The
+verification record
+(`docs/superpowers/verification/2026-06-13-ci-resource-optimization.md`) carried
+the same incorrect "reached script / success" wording and was corrected in the
+same PR. Earlier Slice 16-era runs (before `081c6e4`) still have no realistic
+observation data and should be read as absent, not passing.
 
 ### WASM Hosted CI Still Skips
 
@@ -406,11 +409,10 @@ Choose Option B alone if the priority is locking down merge governance now; choo
 Option C only if further CI-cost reduction outranks functional progress and the
 arm64 budget re-baseline is acceptable.
 
-**Independent of the Slice 17 choice**, ship the realistic-observation
-`shell: bash` fix first (P2). It is a one-line correction of a Slice 16
-regression, it restores a CI observation that is currently silently dead, and its
-hosted PR run is the evidence that closes both this review's P2 and the matching
-incorrect wording in the verification record.
+The realistic-observation `shell: bash` fix (P2) was already shipped ahead of
+Slice 17 in PR #15 (merged as `081c6e4`), so the only governance/cleanup work
+still carried into Slice 17 is Option B (require checks + correct the AGENTS.md
+caveat).
 
 ## Slice 16 Review Conclusion
 
@@ -427,9 +429,9 @@ post-merge evidence gap, the unproven Linux `swift test`, and the two Linux
 migration risks (budget transfer and host-specific RSS). It also introduced one
 regression caught in this review: **P2 — the PR-only realistic observation step
 silently stopped running on the Linux container** (`set -o pipefail` under `sh`,
-masked by `continue-on-error`). There is also one P3 (dead macOS fallback in
-`main.swift`) and an observation. The realistic-observation fix (`shell: bash`)
-is a required follow-up.
+masked by `continue-on-error`). That P2 was fixed in PR #15 (`shell: bash`,
+merged as `081c6e4`, verified `observation=clean`). There is also one P3 (dead
+macOS fallback in `main.swift`) and an observation.
 
 The material remaining gaps are policy, not code: the new `main` ruleset does not
 yet require the green checks, and the `AGENTS.md` branch-protection caveat is
