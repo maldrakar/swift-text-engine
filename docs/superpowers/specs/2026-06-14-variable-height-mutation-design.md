@@ -94,8 +94,9 @@ does not support cheap mid-array insert/delete — and are explicitly deferred.
 - No `--memory-shape` scenario for the mutation provider — the core path is
   unchanged, so core-owned memory shape is already proven by the existing
   `variable_uniform` scenario.
-- No migration of `ListLineMetrics` (the third near-copy) — left in the core test
-  target to avoid churn; consolidation is noted as future cleanup.
+- No migration of `ListLineMetrics` (the remaining test-local prefix-sum copy) —
+  left in the core test target to avoid churn; consolidation is noted as future
+  cleanup.
 
 ## Decisions
 
@@ -148,10 +149,12 @@ mirroring how the repo already pins core query counts in
 `offset(ofLine:)` honors the `LineMetricsSource` contract (domain `0...lineCount`,
 `offset(0) == 0`, strictly increasing for positive heights) and does **not**
 re-validate the core's preconditions — the same division of responsibility as
-`PrefixSumLineMetrics`. `setHeight` requires a finite, positive `newHeight` so
-offsets stay strictly increasing; a non-positive / non-finite height is a
-documented provider precondition violation (debug `assert`, no silent BIT
-corruption). No throwing/`Result` API — kept Embedded-clean and consistent with
+`PrefixSumLineMetrics`. To keep offsets strictly increasing, both `init(heights:)`
+(every height) and `setHeight` (`newHeight`) require finite, positive values, and
+`setHeight` requires `index` in `0..<lineCount`. These are enforced with
+`precondition(_:)` and **static** string messages — which fire in release as well
+as debug (so a bad height traps rather than silently corrupting the BIT) and are
+Embedded-safe. No throwing/`Result` API — kept Embedded-clean and consistent with
 the provider style.
 
 ### Decision 6 — Target restructure for testability
@@ -161,9 +164,10 @@ be unit-testable. `Tests/TextEngineCoreTests` depends only on `TextEngineCore`,
 and `ViewportBenchmarks` is an executable that uses top-level `main.swift` (so it
 cannot be cleanly `@testable import`ed). The resolution is a new Foundation-free
 `TextEngineReferenceProviders` library target depending on `TextEngineCore`,
-consumed by both `ViewportBenchmarks` and a new `TextEngineReferenceProvidersTests`
-target. `Tests/TextEngineCoreTests` is left unchanged (Core-only); `ListLineMetrics`
-stays.
+consumed by `ViewportBenchmarks` and by a new `TextEngineReferenceProvidersTests`
+target (the latter also depending directly on `TextEngineCore` for the re-layout
+types). `Tests/TextEngineCoreTests` is left unchanged (Core-only);
+`ListLineMetrics` stays.
 
 ## Component Design
 
@@ -178,13 +182,19 @@ Sources/
   ViewportBenchmarks/                (exe)  deps: TextEngineCore + TextEngineReferenceProviders
 Tests/
   TextEngineCoreTests/               (test) -> TextEngineCore             — UNCHANGED
-  TextEngineReferenceProvidersTests/ (test) -> TextEngineReferenceProviders — NEW
+  TextEngineReferenceProvidersTests/ (test) -> TextEngineReferenceProviders + TextEngineCore — NEW
 ```
 
+The new test target depends on **both** `TextEngineReferenceProviders` (for the
+providers under test) **and** `TextEngineCore` (the re-layout test imports
+`ViewportVirtualizer`, `VariableViewportInput`, and `LineGeometry` directly, and
+SwiftPM requires a direct dependency to `import` a module — transitive linking
+through the providers library is not sufficient).
+
 `Package.swift` gains: the `TextEngineReferenceProviders` target, a matching
-`.library` product, the new test target, and the dependency edge from
-`ViewportBenchmarks`. `VariableHeightBenchmark.swift` drops its local
-`PrefixSumLineMetrics` definition and imports it from the library.
+`.library` product, the new test target (depending on both libraries above), and
+the dependency edge from `ViewportBenchmarks`. `VariableHeightBenchmark.swift`
+drops its local `PrefixSumLineMetrics` definition and imports it from the library.
 
 ### `FenwickLineMetrics` API
 
@@ -233,11 +243,27 @@ sums are bit-exactly equal to the prefix-sum oracle.
 
 ### Benchmark mode (`ViewportBenchmarks`)
 
-- New `--variable-height-mutation` mode. Each operation = `setHeight` on one line
-  **then** `compute` + geometry traversal, over the deterministic
-  `{14,16,20,32}` heights, for the existing 1k / 100k / 1M scenarios. Reports
-  p95/p99 with a local `--gate`; budgets set from observed local numbers plus
-  headroom.
+- New `--variable-height-mutation` mode over the existing 1k / 100k / 1M
+  scenarios. The workload is fully deterministic so the executor measures exactly
+  the intended path:
+  - One `FenwickLineMetrics` is built once per scenario from the deterministic
+    `{14,16,20,32}` heights and **mutated in place** across all operations. The
+    `PrefixSumLineMetrics` oracle is a test-only construct and never appears in
+    the benchmark hot path — no per-operation rebuild of any structure.
+  - For operation `sample`, the mutated line index is deterministic and spread
+    across the document (e.g. `index = sample % lineCount`).
+  - The new height is chosen to **always differ from the current height** (no
+    no-op updates), e.g. toggling that line between two of the bucket values; the
+    chosen value is always finite and positive.
+  - The viewport scroll offset is the existing
+    `deterministicScrollOffset(sample:maxOffset:)`; `maxOffset` is taken once from
+    the initial total height and `compute` clamps any drift, so no extra total-
+    height query is needed per operation.
+  - Each measured operation is exactly `setHeight` **then** `compute` **then**
+    full geometry traversal; a running checksum consumes the results to prevent
+    dead-code elimination.
+- Reports p95/p99 with a local `--gate`; budgets set from observed local numbers
+  plus headroom.
 - `BenchmarkOptions`: add the mode; `--gate` is **valid** with it; it is
   **rejected** with `--range-only` / `--memory-shape` / `--memory-observation`;
   one mode flag at a time. Update `--help` and the AGENTS.md command list.
@@ -256,6 +282,9 @@ Recorded with actual commands and outputs, anchored on the post-merge push run:
 
 - `swift test` — new tests pass; total grows from 67.
 - `swift build -c release` — `Build complete!`.
+- `swift build -c release --target TextEngineReferenceProviders` — `Build
+  complete!` (explicit host-compile proof that the new library builds in
+  isolation).
 - `swift run -c release ViewportBenchmarks -- --gate` — `gate=pass`.
 - `swift run -c release ViewportBenchmarks -- --variable-height --gate` —
   `gate=pass`.
@@ -273,12 +302,15 @@ Recorded with actual commands and outputs, anchored on the post-merge push run:
 
 ## Risks And Gaps
 
-- **New library not in the blocking cross-compile.** `cross-target-compile.sh`
-  and the Foundation-free scan target `TextEngineCore` specifically. The new
-  library is Foundation-free and Embedded-friendly by construction, but this
-  slice does not add it to the blocking iOS/WASM cross-compile. Acceptable: it is
-  a host-side reference provider, not core. Adding it to cross-target coverage is
-  optional follow-up.
+- **New library is host-compiled only, not cross-compiled.** `cross-target-compile.sh`
+  (`:11-12`) and the Foundation-free scan target `TextEngineCore` specifically.
+  The new library is **Foundation-free** and is proven to compile on the host
+  (`swift build --target TextEngineReferenceProviders`), but this slice does not
+  cross-compile it for iOS/WASM, so it is *not* claimed Embedded-proven — only
+  Foundation-free and written to the same Embedded-friendly style (arrays +
+  `Int`/`Double`). This is acceptable because it is a host-side reference
+  provider, not the core. Extending the cross-target helper with a reference-
+  providers target selection (and an Embedded compile) is optional follow-up.
 - **`lastUpdateWriteCount` is observable API.** It is `private(set)` and an honest
   count, but it widens the provider's public surface for instrumentation. Scoped
   to the reference provider (not the core), so it does not affect the brief's
@@ -286,6 +318,8 @@ Recorded with actual commands and outputs, anchored on the post-merge push run:
 - **Benchmark stays observation-only in CI.** Like Slice 14's variable-height
   benchmark, the new mode is locally gated but only observed in CI this slice;
   promotion is deferred.
-- **`ListLineMetrics` duplication remains.** Three near-copies of prefix-sum
-  logic existed; this slice consolidates the benchmark copy into the library but
-  leaves the core-test copy in place to avoid churn.
+- **`ListLineMetrics` duplication remains.** Two near-copies of prefix-sum logic
+  exist today (`ViewportBenchmarks/VariableHeightBenchmark.swift:3` and
+  `Tests/TextEngineCoreTests/TestLineMetrics.swift:5`); this slice consolidates
+  the benchmark copy into the library but leaves the remaining test-local copy in
+  place to avoid churn.
