@@ -151,8 +151,9 @@ pull-request head and the merge commit:
   `rss_page_size_bytes=4096` (the Linux `/proc/self/statm` path). iOS job on
   macOS: `ios_device`/`ios_simulator` `result=pass blocking=true`. WASM job on
   Linux: `wasm`/`wasm_embedded` `result=skipped reason=sdk_unavailable`
-  (observational). The PR-only realistic observation step reached
-  `realistic-relative-observation.sh` and completed `success`.
+  (observational). The PR-only realistic observation step **did not run its
+  script** — see the P2 finding below; it failed at line 1 under the container
+  shell and was masked green by `continue-on-error`.
 - **Post-merge push run `27494701290`, merge commit `7030f86`** → `success` on
   all three jobs, same shape (`swift test` 67/0 in 0.213s, all gates `gate=pass`,
   iOS blocking pass, WASM observational). This is the merged-code anchor.
@@ -230,8 +231,38 @@ None.
 
 ### P2 / Production Readiness
 
-None in the slice's source diff. Two process/policy items are tracked under Risks
-And Gaps (stale branch-protection caveat; CI is green but not merge-gating).
+#### P2 - Slice 16 silently broke the PR-only realistic observation on Linux
+
+`swift-ci.yml` runs the `Observe realistic provider relative performance` step
+with `run: |` beginning `set -euo pipefail` and no `shell:` override. On the old
+`macos-latest` host job the default shell was bash, so this worked. Slice 16
+moved the host job into the `swift:6.2.1-bookworm` container, where GitHub runs
+`run` steps under `sh`; `sh` rejects `set -o pipefail`. Confirmed in the hosted
+logs (PR run `27493957434` and PR-head run `27494604926`):
+
+```text
+/__w/_temp/<id>.sh: 1: set: Illegal option -o pipefail
+##[error]Process completed with exit code 2
+```
+
+The step therefore dies at line 1 and **never reaches
+`realistic-relative-observation.sh`** — no base/head worktrees, no relative
+ratio, no observation output. Because the step is `continue-on-error: true`, the
+job stays green, so `gh run view --json jobs` reports `success` and the breakage
+is invisible at the job level. This review initially misread the `threshold`
+env echo in the `##[group]Run` block as script output and wrongly recorded the
+step as having succeeded; corrected above.
+
+Severity P2, not higher: the step is PR-only, observational, and
+non-blocking by design, so it does not affect the core, the blocking gates, or
+merge safety. But a silently-dead observation masked by a green check is a real
+regression introduced by this slice.
+
+**Fix:** add `shell: bash` to that step (the Debian container ships bash). This
+is the only step in the workflow using `set -o pipefail`; the other multi-line
+`run: |` steps are sh-safe. The fix is tracked as a follow-up (see Risks And
+Gaps) and must be verified by a hosted PR run in which the step actually executes
+`realistic-relative-observation.sh`.
 
 ### P3 / Minor But Valid
 
@@ -287,6 +318,18 @@ runners are never free. CI only went green after the maintainer cleared the
 account payment. The slice's 1x-Linux move still materially cuts future macOS
 spend (the dominant ~1550 quota-minute host job moves to ~155 at 1x), so the
 optimization stands on its own merits independent of the billing event.
+
+### Realistic Observation Step Is Dead On Linux (New, Must Fix)
+
+The P2 finding above. The PR-only relative-performance observation has produced
+no data since the host job moved to the container, and the green job status hides
+it. The fix is a one-line `shell: bash` on the step, but it must ship and be
+verified by a hosted PR run that actually executes
+`realistic-relative-observation.sh`. Until then, treat the realistic relative
+observation as absent on every Slice 16-era run, not as passing. The verification
+record (`docs/superpowers/verification/2026-06-13-ci-resource-optimization.md`)
+carries the same incorrect "reached script / success" wording and must be
+corrected alongside the fix.
 
 ### WASM Hosted CI Still Skips
 
@@ -363,6 +406,12 @@ Choose Option B alone if the priority is locking down merge governance now; choo
 Option C only if further CI-cost reduction outranks functional progress and the
 arm64 budget re-baseline is acceptable.
 
+**Independent of the Slice 17 choice**, ship the realistic-observation
+`shell: bash` fix first (P2). It is a one-line correction of a Slice 16
+regression, it restores a CI observation that is currently silently dead, and its
+hosted PR run is the evidence that closes both this review's P2 and the matching
+incorrect wording in the verification record.
+
 ## Slice 16 Review Conclusion
 
 Slice 16 cleanly delivers its goal: host tests, both benchmark gates, memory
@@ -375,8 +424,12 @@ anchor — the hosted post-merge push run on `main`.
 
 It resolves the three items the Slice 15 review left open: the billing-blocked
 post-merge evidence gap, the unproven Linux `swift test`, and the two Linux
-migration risks (budget transfer and host-specific RSS). There are no P0/P1/P2
-code findings; one P3 (dead macOS fallback in `main.swift`) and an observation.
+migration risks (budget transfer and host-specific RSS). It also introduced one
+regression caught in this review: **P2 — the PR-only realistic observation step
+silently stopped running on the Linux container** (`set -o pipefail` under `sh`,
+masked by `continue-on-error`). There is also one P3 (dead macOS fallback in
+`main.swift`) and an observation. The realistic-observation fix (`shell: bash`)
+is a required follow-up.
 
 The material remaining gaps are policy, not code: the new `main` ruleset does not
 yet require the green checks, and the `AGENTS.md` branch-protection caveat is
