@@ -1043,8 +1043,10 @@ single-line `run:` with no `set -o pipefail`, so it is sh-safe and needs no
 
 - [ ] **Step 2: Validate the workflow YAML**
 
-Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/swift-ci.yml'))" && echo yaml_ok`
-Expected: `yaml_ok`.
+Run (macOS ships Ruby; Python's `yaml` module is not installed on this host):
+`ruby -ryaml -e "YAML.load_file('.github/workflows/swift-ci.yml'); puts 'yaml_ok'"`
+Expected: `yaml_ok`. (If `ruby` is unavailable, use any installed YAML linter,
+e.g. `yq '.' .github/workflows/swift-ci.yml >/dev/null && echo yaml_ok`.)
 
 - [ ] **Step 3: Update the AGENTS.md command list and flag matrix**
 
