@@ -59,4 +59,20 @@ final class FenwickLineMetricsTests: XCTestCase {
             }
         }
     }
+
+    func testOffsetsStrictlyIncreasingAfterMutation() {
+        let heights = sampleHeights(300)
+        var fenwick = FenwickLineMetrics(heights: heights)
+        fenwick.setHeight(ofLine: 0, to: 64.0)
+        fenwick.setHeight(ofLine: 299, to: 2.0)
+        fenwick.setHeight(ofLine: 150, to: 5.0)
+
+        for i in 0..<fenwick.lineCount {
+            XCTAssertLessThan(
+                fenwick.offset(ofLine: i),
+                fenwick.offset(ofLine: i + 1),
+                "offsets not strictly increasing at line \(i)"
+            )
+        }
+    }
 }
