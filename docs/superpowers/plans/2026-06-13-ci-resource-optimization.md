@@ -1234,7 +1234,7 @@ Expected: verification doc includes real hosted PR evidence or a precise externa
 **Files:**
 - Modify after merge: `docs/superpowers/verification/2026-06-13-ci-resource-optimization.md`
 
-- [ ] **Step 1: After PR merge, sync `main`**
+- [x] **Step 1: After PR merge, sync `main`**
 
 Run after the PR is merged:
 
@@ -1246,7 +1246,7 @@ git log --oneline --decorate -5
 
 Expected: local `main` includes the Slice 16 merge commit.
 
-- [ ] **Step 2: Capture post-merge push run**
+- [x] **Step 2: Capture post-merge push run**
 
 Run:
 
@@ -1263,7 +1263,7 @@ gh run view <post-merge-run-id> --log > /tmp/slice-16-hosted-post-merge-run.log
 
 Expected if runners start: post-merge host, iOS, and WASM jobs reach the same conclusions as the PR run. If runners do not start, record the exact billing/spending-limit annotation.
 
-- [ ] **Step 3: Update verification doc with post-merge evidence**
+- [x] **Step 3: Update verification doc with post-merge evidence**
 
 Edit `docs/superpowers/verification/2026-06-13-ci-resource-optimization.md` and add:
 

@@ -489,7 +489,46 @@ anchor is the post-merge `push` run on `main` recorded below.
 
 ## Hosted Post-Merge Evidence
 
-Pending until the PR is merged to `main`.
+PR #13 was merged to `main` via merge commit
+`7030f8698d812b084929452b8016bf59c1992494`
+(`Merge pull request #13 from maldrakar/slice-16-ci-resource-optimization`). The
+merge required admin bypass because the `main` ruleset (created 2026-06-14)
+enforces a pull-request flow; the ruleset has no required status checks, so the
+green PR run was advisory, and this post-merge `push` run is the merged-code
+anchor.
+
+Post-merge Swift CI `push` run: `27494701290`, head
+`7030f8698d812b084929452b8016bf59c1992494` -> `status=completed
+conclusion=success`.
+
+Jobs:
+
+```text
+Host tests and benchmark gate: conclusion=success
+iOS cross-target compile:      conclusion=success
+WASM cross-target observation: conclusion=success
+```
+
+Host job (hosted Linux x86_64, `Target: x86_64-unknown-linux-gnu`):
+
+```text
+Executed 67 tests, with 0 failures (0 unexpected) in 0.213 (0.213) seconds
+mode=pipeline scenario=1k_lines_20_visible_overscan_0   p95_ns=2493  p99_ns=2712  gate=pass
+mode=pipeline scenario=100k_lines_80_visible_overscan_5 p95_ns=10406 p99_ns=10627 gate=pass
+mode=pipeline scenario=1m_lines_200_visible_overscan_50 p95_ns=34026 p99_ns=34761 gate=pass
+mode=variable_height provider=prefix_sum scenario=1k_lines_20_visible_overscan_0   p95_ns=503  p99_ns=681  gate=pass
+mode=variable_height provider=prefix_sum scenario=100k_lines_80_visible_overscan_5 p95_ns=1730 p99_ns=1830 gate=pass
+mode=variable_height provider=prefix_sum scenario=1m_lines_200_visible_overscan_50 p95_ns=5436 p99_ns=5541 gate=pass
+```
+
+iOS job (hosted macOS): `target=ios_device result=pass blocking=true`,
+`target=ios_simulator result=pass blocking=true`. WASM job (hosted Linux
+x86_64): `target=wasm result=skipped reason=sdk_unavailable` and
+`target=wasm_embedded result=skipped reason=sdk_unavailable` (observational,
+nonblocking).
+
+This is green hosted post-merge evidence on `main`: the same three-job topology
+that passed on the PR head passes on the merge commit.
 
 ## Budget Decision
 
