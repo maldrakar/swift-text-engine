@@ -194,13 +194,17 @@ Exit: 0, no output.
 
 ## Hosted Evidence
 
-PR run: `27515131320` for PR #16 on commit
-`34ec6e5b608dfabc9de43e2d6a60db72fff9b2f7` completed successfully.
+Latest completed PR run before this evidence update: `27515293425` for PR #16
+on commit `80952b24098b37b36c358228286f45221eb81f1e` completed successfully.
+
+Note: docs-only verification-record commits appended to a PR whose full diff
+contains code still re-trigger Swift CI. Treat the live PR checks as the current
+PR-head status; the post-merge push run below is the final merged-code anchor.
 
 ```text
-WASM cross-target observation: success (job 81322314662)
-iOS cross-target compile: success (job 81322314681)
-Host tests and benchmark gate: success (job 81322314709)
+WASM cross-target observation: success (job 81322751010)
+iOS cross-target compile: success (job 81322750992)
+Host tests and benchmark gate: success (job 81322750975)
   Run host tests: success
   Run synthetic benchmark gate: success
   Run variable-height benchmark gate: success
