@@ -232,6 +232,21 @@ confounding Docker Desktop VM. Hosted x86_64 evidence (for example, by
 temporarily making the repo public for free Actions minutes) remains the only way
 to close this gap.
 
+#### Hosted resolution (2026-06-14)
+
+Resolved. After the account billing block was cleared, hosted Linux x86_64
+GitHub Actions ran the new host job and `swift test` completed normally:
+
+```text
+Target Platform: x86_64-unknown-linux-gnu
+Executed 67 tests, with 0 failures (0 unexpected) in 0.212 (0.212) seconds
+```
+
+(Run `27493957434`, head `0d0f0ca`, container `swift:6.2.1-bookworm`,
+`Target: x86_64-unknown-linux-gnu`.) This confirms the full-suite hang was an
+artifact of the local Docker Desktop Linux VM, not `TextEngineCore` or the
+tests: the same image and suite pass on hosted x86_64 in ~0.2s.
+
 ### Linux container WASM helper verification
 
 `swift:6.2.1-bookworm` container command:
@@ -373,65 +388,104 @@ corrected `AGENTS.md` CI note.
 
 ## Hosted Pull Request Evidence
 
-PR: #13, `https://github.com/arthurbanshchikov/swift-text-engine/pull/13`
+### Earlier billing-blocked attempts (historical)
+
+The first hosted attempts (PR #13, pre-rewrite head SHAs `c84acfe`, `bf149d3`,
+runs `27470851134`, `27470877668`) all completed as `failure` before any job
+step started. Every job carried the same check-run annotation:
+
+```text
+The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings
+```
+
+The blocker was an **account-level failed payment**, not repository visibility
+or a per-repo limit: making the repository public did not bypass it (the next
+run on the rewritten head, `27493957434` at `0d0f0ca`, first reproduced the same
+annotation). macOS runners are never free, and free public-repo Linux minutes
+are still suspended while an account payment is delinquent. After the account
+payment was cleared, the same runs went green (below). The branch history was
+also rewritten and the account renamed, so the canonical owner is now
+`maldrakar/swift-text-engine` and the pre-rewrite SHAs no longer exist.
+
+### Green hosted evidence
+
+PR: #13, `https://github.com/maldrakar/swift-text-engine/pull/13`
 
 Head branch: `slice-16-ci-resource-optimization`
 
-Head SHA: `c84acfee311dcabffe1bdf1c94f924ca20b8aae6`
+Head SHA: `0d0f0ca1e0e70cf6ca0a8264424509db07376757`
 
-Swift CI run: `27470851134`
+Swift CI run: `27493957434` (re-run after the billing block was cleared) ->
+`status=completed conclusion=success`.
 
-Run status from `gh run view 27470851134 --json databaseId,headSha,conclusion,status,jobs`:
-
-```text
-status=completed
-conclusion=failure
-headSha=c84acfee311dcabffe1bdf1c94f924ca20b8aae6
-```
-
-Jobs:
+Jobs (`gh run view 27493957434 --json ...`):
 
 ```text
-iOS cross-target compile: id=81201368869 status=completed conclusion=failure steps=[]
-WASM cross-target observation: id=81201368872 status=completed conclusion=failure steps=[]
-Host tests and benchmark gate: id=81201368892 status=completed conclusion=failure steps=[]
+Host tests and benchmark gate: conclusion=success
+iOS cross-target compile:      conclusion=success
+WASM cross-target observation: conclusion=success
 ```
 
-`gh run view 27470851134 --log` -> exit 1:
+Host job toolchain (hosted Linux x86_64, `swift:6.2.1-bookworm`):
 
 ```text
-log not found: 81201368869
+Swift version 6.2.1 (swift-6.2.1-RELEASE)
+Target: x86_64-unknown-linux-gnu
+Architecture: x86_64
 ```
 
-No hosted job steps started. Each job had the same check-run annotation from
-`gh api repos/arthurbanshchikov/swift-text-engine/check-runs/<job-id>/annotations`:
+`swift test`:
 
 ```text
-The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings
+Executed 67 tests, with 0 failures (0 unexpected) in 0.212 (0.212) seconds
 ```
 
-This is not green hosted PR evidence. It is an external runner-start blocker.
-No hosted Linux x86_64 `swift test`, benchmark gate, iOS target, WASM target, or
-realistic relative observation output is available from this run.
-
-After committing this PR evidence, the branch head became
-`bf149d330c08c781b0c53fe0179a046e405e00ac`, which triggered Swift CI run
-`27470877668`. That run also completed as failure before any job steps started:
+Synthetic benchmark gate (all `gate=pass`, all under budget):
 
 ```text
-status=completed
-conclusion=failure
-headSha=bf149d330c08c781b0c53fe0179a046e405e00ac
-Host tests and benchmark gate: id=81201438680 status=completed conclusion=failure steps=[]
-iOS cross-target compile: id=81201438684 status=completed conclusion=failure steps=[]
-WASM cross-target observation: id=81201438686 status=completed conclusion=failure steps=[]
+mode=pipeline scenario=1k_lines_20_visible_overscan_0   p95_ns=2531  p99_ns=2648  budget_p95_ns=20000  budget_p99_ns=50000  gate=pass
+mode=pipeline scenario=100k_lines_80_visible_overscan_5 p95_ns=10524 p99_ns=10963 budget_p95_ns=50000  budget_p99_ns=100000 gate=pass
+mode=pipeline scenario=1m_lines_200_visible_overscan_50 p95_ns=34245 p99_ns=35082 budget_p95_ns=100000 budget_p99_ns=200000 gate=pass
 ```
 
-The check-run annotation for all three jobs was the same:
+Variable-height benchmark gate (all `gate=pass`):
 
 ```text
-The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings
+mode=variable_height provider=prefix_sum scenario=1k_lines_20_visible_overscan_0   p95_ns=499  p99_ns=514  gate=pass
+mode=variable_height provider=prefix_sum scenario=100k_lines_80_visible_overscan_5 p95_ns=1757 p99_ns=1860 gate=pass
+mode=variable_height provider=prefix_sum scenario=1m_lines_200_visible_overscan_50 p95_ns=5843 p99_ns=6001 gate=pass
 ```
+
+Memory-shape (`invariant=pass` for all five rows) and memory-observation
+(`observation=pass` for all three rows, `rss_page_size_bytes=4096`, i.e. the
+Linux `/proc/self/statm` RSS path) both passed on the Linux host. The PR-only
+`Observe realistic provider relative performance` step reached
+`realistic-relative-observation.sh` (threshold `1.221556`) and completed
+`success` (`continue-on-error`).
+
+iOS job (hosted macOS):
+
+```text
+mode=cross_target_compile target=ios_device    result=pass    reason=none          blocking=true
+mode=cross_target_compile target=ios_simulator result=pass    reason=none          blocking=true
+mode=cross_target_compile target=wasm          result=skipped reason=not_requested blocking=false
+mode=cross_target_compile target=wasm_embedded result=skipped reason=not_requested blocking=false
+```
+
+WASM observation job (hosted Linux x86_64; observational, nonblocking):
+
+```text
+mode=cross_target_compile target=ios_device    result=skipped reason=not_requested  blocking=false
+mode=cross_target_compile target=ios_simulator result=skipped reason=not_requested  blocking=false
+mode=cross_target_compile target=wasm          result=skipped reason=sdk_unavailable blocking=false
+mode=cross_target_compile target=wasm_embedded result=skipped reason=sdk_unavailable blocking=false
+```
+
+This is green hosted PR evidence on the canonical head `0d0f0ca`: the Linux host
+job runs `swift test` + both blocking gates + memory diagnostics, the macOS job
+blocks only on iOS, and the Linux WASM job is observational. The verification
+doc commit that records this evidence moves the branch head, so the merged-code
+anchor is the post-merge `push` run on `main` recorded below.
 
 ## Hosted Post-Merge Evidence
 
@@ -439,15 +493,20 @@ Pending until the PR is merged to `main`.
 
 ## Budget Decision
 
-No benchmark budgets changed in the local implementation. Local macOS and local
-Linux aarch64 benchmark gates passed with the existing budgets. Hosted Linux
-x86_64 evidence is still required before using hosted timing as a retune signal.
+No benchmark budgets changed. Hosted Linux x86_64 timing is now available
+(run `27493957434`) and every gate row stayed comfortably under budget — the
+worst case is the synthetic `1m_lines_200_visible_overscan_50` scenario at
+`p95_ns=34245` / `p99_ns=35082` against a `100000` / `200000` budget (~34% / 18%
+of budget). No hosted Linux x86_64 evidence required a retune.
 
 ## Conclusion
 
 Local macOS verification passed. Local cross-target helper verification passed,
 including iOS device/simulator and local WASM SDK builds. Linux container
 release build, benchmark gates, memory-shape, memory-observation, and WASM
-helper behavior passed. Full Linux container `swift test` remains pending due to
-the local aarch64 Docker timeout described above; hosted Linux x86_64 PR
-evidence is required before claiming complete hosted host-job proof.
+helper behavior passed. The previously-pending full-suite `swift test` question
+is resolved: hosted Linux x86_64 (run `27493957434`, head `0d0f0ca`) ran
+`swift test` to `Executed 67 tests, with 0 failures` in ~0.2s, confirming the
+local aarch64 Docker hang was an environment artifact. Hosted PR evidence is
+green across all three jobs. Post-merge `push` evidence on `main` is recorded
+below once the PR is merged.
