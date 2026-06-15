@@ -117,6 +117,8 @@ func runScenario(
                 preconditionFailure("realistic provider mode uses runRealisticProviderScenario")
             case .variableHeight:
                 preconditionFailure("variable height mode uses runVariableHeightScenario")
+            case .variableHeightMutation:
+                preconditionFailure("variable height mutation mode uses runVariableHeightMutationScenario")
             case .memoryShape:
                 preconditionFailure("memory shape mode uses runMemoryShapeDiagnostics")
             case .memoryObservation:
