@@ -194,17 +194,16 @@ Exit: 0, no output.
 
 ## Hosted Evidence
 
-Latest completed PR run before this evidence update: `27515293425` for PR #16
-on commit `80952b24098b37b36c358228286f45221eb81f1e` completed successfully.
+### Final PR-head run (PR #16)
 
-Note: docs-only verification-record commits appended to a PR whose full diff
-contains code still re-trigger Swift CI. Treat the live PR checks as the current
-PR-head status; the post-merge push run below is the final merged-code anchor.
+Run `27515537441` on the final PR head commit
+`a9e291bada4c6b2d78c7d57f4cb34aeb0e7b1ec2` completed successfully, all three
+jobs green at step level:
 
 ```text
-WASM cross-target observation: success (job 81322751010)
-iOS cross-target compile: success (job 81322750992)
-Host tests and benchmark gate: success (job 81322750975)
+WASM cross-target observation: success (job 81323418662)
+iOS cross-target compile: success (job 81323418637)
+Host tests and benchmark gate: success (job 81323418651)
   Run host tests: success
   Run synthetic benchmark gate: success
   Run variable-height benchmark gate: success
@@ -214,5 +213,30 @@ Host tests and benchmark gate: success (job 81322750975)
   Observe realistic provider relative performance: success
 ```
 
-Post-merge push run on `main`: TODO after merge. Per AGENTS.md, final merged
-code proof should be anchored on this post-merge push run.
+Note: docs-only verification-record commits appended to a PR whose full diff
+contains code still re-trigger Swift CI, so the PR ran several times (an earlier
+head, `80952b2`, ran as `27515293425`). The run above is the final PR head; the
+post-merge push run below is the merged-code anchor.
+
+### Post-merge push run on `main` (merged-code anchor)
+
+PR #16 was merged via admin bypass as merge commit
+`829845ed1b4eec7f4570834b003e6ab6e5963f7e` (2026-06-15). The resulting push run
+on `main`, `27533521987`, completed successfully:
+
+```text
+WASM cross-target observation: success (job 81377115776)
+iOS cross-target compile: success (job 81377115697)
+Host tests and benchmark gate: success (job 81377115723)
+  Run host tests: success
+  Run synthetic benchmark gate: success
+  Run variable-height benchmark gate: success
+  Observe variable-height mutation benchmark: success
+  Run memory shape diagnostic: success
+  Run RSS memory observation diagnostic: success
+  Observe realistic provider relative performance: skipped (push event; the
+    step is guarded by `if: github.event_name == 'pull_request'`)
+```
+
+Per AGENTS.md, this post-merge push run is the final merged-code proof for
+Slice 17.
