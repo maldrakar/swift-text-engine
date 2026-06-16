@@ -123,11 +123,11 @@ benchmark, iOS, and WASM proof.
 
 ### Decision 2 - Run the classifier from the base commit
 
-Each required job will use a separate checkout of the PR base commit into a
-trusted path, for example:
+Each required job will materialize the PR base commit outside the PR workspace
+with `git worktree`, for example:
 
 ```text
-$RUNNER_TEMP/trusted-ci
+git worktree add --detach "$RUNNER_TEMP/trusted-ci" "$BASE_SHA"
 ```
 
 The job will execute:
@@ -145,6 +145,12 @@ instead of:
 The detector still reads Git metadata from the PR workspace and compares
 `BASE_SHA...HEAD_SHA`, but the executable code deciding `docs_only_pr` comes
 from the base tree.
+
+This is intentionally specified as `git worktree` or an equivalent Git
+materialization outside the PR workspace. The implementation must not rely on
+`actions/checkout` with `path: $RUNNER_TEMP/trusted-ci`, because
+`actions/checkout` treats `path` as relative to `$GITHUB_WORKSPACE`, which would
+place the trusted tree under the PR workspace.
 
 This preserves the current three-job flow and avoids using `pull_request_target`
 to build or test PR code.
@@ -215,19 +221,27 @@ through the lightweight `mode=docs_only_pr ... result=success` path.
 
 ## Implementation Architecture
 
-### Trusted Checkout
+### Trusted Worktree
 
 Each required job keeps the normal PR checkout with `fetch-depth: 0` so the
 heavy path continues to test the PR merge tree.
 
-Each job also checks out the base commit into a separate trusted path. The base
-checkout must use event data controlled by GitHub:
+Each job also materializes the base commit into a separate trusted path outside
+`$GITHUB_WORKSPACE`, using Git directly from the PR workspace:
 
 ```text
-github.event.pull_request.base.sha
+git cat-file -e "${BASE_SHA}^{commit}"
+rm -rf "$RUNNER_TEMP/trusted-ci"
+git worktree add --detach "$RUNNER_TEMP/trusted-ci" "$BASE_SHA"
 ```
 
-The job must fail if the trusted checkout does not contain the detector helper.
+`BASE_SHA` must come from `github.event.pull_request.base.sha`. The job must
+fail if the base commit cannot be resolved, the worktree cannot be created, or
+the trusted worktree does not contain the detector helper.
+
+An equivalent Git materialization outside the PR workspace is acceptable, but
+`actions/checkout path:` is not acceptable for this trusted tree because the
+action resolves `path` under `$GITHUB_WORKSPACE`.
 
 ### Change-Scope Step
 
@@ -268,7 +282,7 @@ Slice 19 adds runtime empty-diff failure on the executable `--base/--head` path.
 
 - required PR jobs still emit the three Swift CI contexts;
 - docs-only PRs use a lightweight success path;
-- the classifier is executed from the base commit/trusted checkout;
+- the classifier is executed from the base commit/trusted worktree;
 - PR-owned workflow/helper changes are not docs-only and must run heavy checks;
 - docs-only pushes to `main` may still be skipped through `push.paths-ignore`;
 - bypass-capable actors can still override the ruleset.
@@ -290,8 +304,8 @@ It should also include workflow-shape checks proving:
 - no `pull_request.paths-ignore`;
 - `push.paths-ignore` remains;
 - all three jobs still have the same names;
-- all three jobs use a trusted base checkout before classification;
-- all three jobs invoke the detector from the trusted checkout path;
+- all three jobs create a trusted base worktree before classification;
+- all three jobs invoke the detector from the trusted worktree path;
 - no job invokes `./.github/scripts/detect-docs-only-pr.sh` from the PR
   workspace.
 
@@ -350,7 +364,7 @@ Each required job gains a second checkout. That is small overhead compared with
 the heavy Swift work and still cheaper than running macOS/iOS compile for every
 docs-only PR.
 
-Mitigation: keep the trusted checkout step identical across jobs and verify the
+Mitigation: keep the trusted worktree step identical across jobs and verify the
 shape with grep/structural checks.
 
 ### Workflow YAML changes remain policy-sensitive
