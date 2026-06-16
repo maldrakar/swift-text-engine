@@ -24,12 +24,11 @@ git status --short --branch
 Exit status: `0`.
 
 ```text
-## slice-18-swift-ci-required-checks
-?? docs/superpowers/plans/2026-06-16-swift-ci-required-checks.md
+## slice-18-swift-ci-required-checks...origin/slice-18-swift-ci-required-checks
 ```
 
-The untracked plan file was present before implementation and was not modified
-or committed by this slice.
+The slice plan is tracked as part of the durable paper trail and all plan
+checkboxes are marked complete.
 
 Command:
 
@@ -41,17 +40,19 @@ git diff --name-only 36df4c7..HEAD
 Exit status: `0`.
 
 ```text
- .github/scripts/detect-docs-only-pr.sh             | 190 +++++++
- .github/workflows/swift-ci.yml                     |  80 ++-
- AGENTS.md                                          |  32 +-
- .../2026-06-16-swift-ci-required-checks.md         | 553 +++++++++++++++++++++
- 4 files changed, 839 insertions(+), 16 deletions(-)
+ .github/scripts/detect-docs-only-pr.sh             |  190 ++++
+ .github/workflows/swift-ci.yml                     |   80 +-
+ AGENTS.md                                          |   32 +-
+ .../plans/2026-06-16-swift-ci-required-checks.md   | 1019 ++++++++++++++++++++
+ .../2026-06-16-swift-ci-required-checks.md         |  592 ++++++++++++
+ 5 files changed, 1897 insertions(+), 16 deletions(-)
 ```
 
 ```text
 .github/scripts/detect-docs-only-pr.sh
 .github/workflows/swift-ci.yml
 AGENTS.md
+docs/superpowers/plans/2026-06-16-swift-ci-required-checks.md
 docs/superpowers/verification/2026-06-16-swift-ci-required-checks.md
 ```
 
@@ -531,6 +532,43 @@ Exit status: `0`.
 `Detect PR change scope` steps passing, docs-only completion steps skipped for
 this non-doc PR, and the heavy host/iOS/WASM checks running to success.
 
+Final hosted run after the verification follow-up commit:
+
+```bash
+gh run view 27630327793 --json status,conclusion,url,headSha,jobs --jq '{status,conclusion,url,headSha,jobs:[.jobs[] | {name,status,conclusion}]}'
+```
+
+Exit status: `0`.
+
+```json
+{
+  "conclusion": "success",
+  "headSha": "6b8d7ec17050e42842c3128ca6cadcef1448f6c0",
+  "jobs": [
+    {
+      "conclusion": "success",
+      "name": "Host tests and benchmark gate",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "WASM cross-target observation",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "iOS cross-target compile",
+      "status": "completed"
+    }
+  ],
+  "status": "completed",
+  "url": "https://github.com/maldrakar/swift-text-engine/actions/runs/27630327793"
+}
+```
+
+`gh run watch 27630327793 --exit-status --interval 20` showed all three required
+jobs completing successfully on final head `6b8d7ec`.
+
 ## Scope Proof
 
 Command:
@@ -547,6 +585,7 @@ Tracked changes across the final slice commits are limited to:
 .github/scripts/detect-docs-only-pr.sh
 .github/workflows/swift-ci.yml
 AGENTS.md
+docs/superpowers/plans/2026-06-16-swift-ci-required-checks.md
 docs/superpowers/verification/2026-06-16-swift-ci-required-checks.md
 ```
 
