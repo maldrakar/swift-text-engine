@@ -37,13 +37,38 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          set -euo pipefail
           if [[ "$EVENT_NAME" != "pull_request" ]]; then
             echo "docs_only_pr=false" >> "$GITHUB_OUTPUT"
             echo "mode=docs_only_pr event=$EVENT_NAME result=not_pull_request docs_only_pr=false"
             exit 0
           fi
+
+          fail_scope() {
+            echo "mode=docs_only_pr result=infrastructure_failure reason=$1 docs_only_pr=false"
+            exit 2
+          }
+
+          [[ -n "${BASE_SHA}" ]] || fail_scope "missing_base_sha"
+          [[ -n "${HEAD_SHA}" ]] || fail_scope "missing_head_sha"
+          [[ -n "${RUNNER_TEMP:-}" ]] || fail_scope "missing_runner_temp"
+
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          ./.github/scripts/detect-docs-only-pr.sh --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
+          git cat-file -e "${BASE_SHA}^{commit}" || fail_scope "base_commit_unavailable"
+          git cat-file -e "${HEAD_SHA}^{commit}" || fail_scope "head_commit_unavailable"
+
+          trusted_ci_dir="${RUNNER_TEMP}/trusted-ci"
+          case "${trusted_ci_dir}/" in
+            "${GITHUB_WORKSPACE}/"*) fail_scope "trusted_worktree_inside_workspace" ;;
+          esac
+
+          git worktree remove --force "$trusted_ci_dir" 2>/dev/null || rm -rf "$trusted_ci_dir"
+          git worktree add --detach "$trusted_ci_dir" "$BASE_SHA"
+
+          trusted_detector="${trusted_ci_dir}/.github/scripts/detect-docs-only-pr.sh"
+          [[ -f "$trusted_detector" ]] || fail_scope "trusted_detector_unavailable"
+
+          bash "$trusted_detector" --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
 
       - name: Complete docs-only PR
         if: steps.change-scope.outputs.docs_only_pr == 'true'
@@ -144,13 +169,38 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          set -euo pipefail
           if [[ "$EVENT_NAME" != "pull_request" ]]; then
             echo "docs_only_pr=false" >> "$GITHUB_OUTPUT"
             echo "mode=docs_only_pr event=$EVENT_NAME result=not_pull_request docs_only_pr=false"
             exit 0
           fi
+
+          fail_scope() {
+            echo "mode=docs_only_pr result=infrastructure_failure reason=$1 docs_only_pr=false"
+            exit 2
+          }
+
+          [[ -n "${BASE_SHA}" ]] || fail_scope "missing_base_sha"
+          [[ -n "${HEAD_SHA}" ]] || fail_scope "missing_head_sha"
+          [[ -n "${RUNNER_TEMP:-}" ]] || fail_scope "missing_runner_temp"
+
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          ./.github/scripts/detect-docs-only-pr.sh --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
+          git cat-file -e "${BASE_SHA}^{commit}" || fail_scope "base_commit_unavailable"
+          git cat-file -e "${HEAD_SHA}^{commit}" || fail_scope "head_commit_unavailable"
+
+          trusted_ci_dir="${RUNNER_TEMP}/trusted-ci"
+          case "${trusted_ci_dir}/" in
+            "${GITHUB_WORKSPACE}/"*) fail_scope "trusted_worktree_inside_workspace" ;;
+          esac
+
+          git worktree remove --force "$trusted_ci_dir" 2>/dev/null || rm -rf "$trusted_ci_dir"
+          git worktree add --detach "$trusted_ci_dir" "$BASE_SHA"
+
+          trusted_detector="${trusted_ci_dir}/.github/scripts/detect-docs-only-pr.sh"
+          [[ -f "$trusted_detector" ]] || fail_scope "trusted_detector_unavailable"
+
+          bash "$trusted_detector" --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
 
       - name: Complete docs-only PR
         if: steps.change-scope.outputs.docs_only_pr == 'true'
@@ -190,13 +240,38 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          set -euo pipefail
           if [[ "$EVENT_NAME" != "pull_request" ]]; then
             echo "docs_only_pr=false" >> "$GITHUB_OUTPUT"
             echo "mode=docs_only_pr event=$EVENT_NAME result=not_pull_request docs_only_pr=false"
             exit 0
           fi
+
+          fail_scope() {
+            echo "mode=docs_only_pr result=infrastructure_failure reason=$1 docs_only_pr=false"
+            exit 2
+          }
+
+          [[ -n "${BASE_SHA}" ]] || fail_scope "missing_base_sha"
+          [[ -n "${HEAD_SHA}" ]] || fail_scope "missing_head_sha"
+          [[ -n "${RUNNER_TEMP:-}" ]] || fail_scope "missing_runner_temp"
+
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          ./.github/scripts/detect-docs-only-pr.sh --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
+          git cat-file -e "${BASE_SHA}^{commit}" || fail_scope "base_commit_unavailable"
+          git cat-file -e "${HEAD_SHA}^{commit}" || fail_scope "head_commit_unavailable"
+
+          trusted_ci_dir="${RUNNER_TEMP}/trusted-ci"
+          case "${trusted_ci_dir}/" in
+            "${GITHUB_WORKSPACE}/"*) fail_scope "trusted_worktree_inside_workspace" ;;
+          esac
+
+          git worktree remove --force "$trusted_ci_dir" 2>/dev/null || rm -rf "$trusted_ci_dir"
+          git worktree add --detach "$trusted_ci_dir" "$BASE_SHA"
+
+          trusted_detector="${trusted_ci_dir}/.github/scripts/detect-docs-only-pr.sh"
+          [[ -f "$trusted_detector" ]] || fail_scope "trusted_detector_unavailable"
+
+          bash "$trusted_detector" --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
 
       - name: Complete docs-only PR
         if: steps.change-scope.outputs.docs_only_pr == 'true'
