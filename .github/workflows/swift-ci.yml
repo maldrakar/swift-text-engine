@@ -42,6 +42,7 @@ jobs:
             echo "mode=docs_only_pr event=$EVENT_NAME result=not_pull_request docs_only_pr=false"
             exit 0
           fi
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           ./.github/scripts/detect-docs-only-pr.sh --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
 
       - name: Complete docs-only PR
@@ -148,6 +149,7 @@ jobs:
             echo "mode=docs_only_pr event=$EVENT_NAME result=not_pull_request docs_only_pr=false"
             exit 0
           fi
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           ./.github/scripts/detect-docs-only-pr.sh --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
 
       - name: Complete docs-only PR
@@ -193,6 +195,7 @@ jobs:
             echo "mode=docs_only_pr event=$EVENT_NAME result=not_pull_request docs_only_pr=false"
             exit 0
           fi
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           ./.github/scripts/detect-docs-only-pr.sh --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
 
       - name: Complete docs-only PR
