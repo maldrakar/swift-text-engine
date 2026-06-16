@@ -44,6 +44,15 @@ Live preflight on 2026-06-16 against `maldrakar/swift-text-engine` showed:
 - successful check-run names on that commit: `Host tests and benchmark gate`,
   `iOS cross-target compile`, and `WASM cross-target observation`
 
+The live workflow also has workflow-level `pull_request.paths-ignore` for
+`docs/**` and `**/*.md`. GitHub's workflow syntax documentation says that when a
+workflow is skipped by path filtering, checks associated with that workflow stay
+`Pending`, and a pull request requiring those checks is blocked. Therefore
+required Swift CI checks and workflow-level PR path filtering are incompatible
+unless the repository explicitly accepts bypass as the normal docs-only PR path.
+Reference:
+<https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore>.
+
 `AGENTS.md` is also stale: it still says the repository is private and without
 branch protection / required checks. Its practical warning that a bypass actor
 can update `main` remains true, but it must be described precisely rather than as
@@ -61,6 +70,8 @@ That weakens future slices:
 
 - benchmark gates only become merge policy when their job context is required;
 - iOS compile failures are visible but not repository-required;
+- fully docs-only PRs would hang on pending required checks if the current
+  workflow-level `pull_request.paths-ignore` remained in place;
 - `AGENTS.md` gives agents stale guidance about the repository being private;
 - future post-slice reviews must keep restating the same governance caveat.
 
@@ -69,10 +80,10 @@ That weakens future slices:
 Update repository policy and durable documentation so Swift CI checks are
 repository-required for `main`.
 
-This is an operational configuration and documentation slice. It does not change
-Swift source, public API, tests, benchmarks, package metadata, or workflow YAML
-unless preflight proves that the required check contexts cannot be used without a
-workflow correction.
+This is an operational configuration, workflow-policy, and documentation slice.
+It does not change Swift source, public API, tests, benchmarks, or package
+metadata. It does change workflow YAML narrowly enough to ensure required check
+contexts are emitted for fully docs-only PRs.
 
 ## Goals
 
@@ -83,6 +94,8 @@ workflow correction.
   - `Host tests and benchmark gate`
   - `iOS cross-target compile`
   - `WASM cross-target observation`
+- Replace the current PR path-filter strategy so fully docs-only PRs do not get
+  stuck with pending required checks and do not require bypass.
 - Preserve the existing ruleset shape that is outside this slice's ownership:
   branch condition, PR path, non-fast-forward/deletion/update/creation rules,
   empty deployment rule, allowed merge methods, zero required approvals, and
@@ -99,7 +112,9 @@ workflow correction.
 - No benchmark budget changes.
 - No promotion of `--variable-height-mutation` from observation to hosted
   blocking gate.
-- No workflow topology changes.
+- No full Swift test, benchmark, iOS compile, or WASM probe workload for fully
+  docs-only PRs.
+- No acceptance of bypass as the normal merge path for docs-only PRs.
 - No hosted WASM SDK provisioning.
 - No legacy branch protection changes.
 - No creation of a new overlapping ruleset.
@@ -174,9 +189,35 @@ describe:
 - synthetic and variable-height gates fail the host job on regression;
 - iOS device and simulator compile remain blocking inside the iOS job;
 - WASM remains target-level observational inside a required job;
-- docs-only skip behavior still means docs-only commits may have no fresh Swift
-  CI check-runs;
+- fully docs-only PRs still emit the required Swift CI job contexts and complete
+  them through a lightweight docs-only path rather than bypass;
+- docs-only pushes to `main` may still skip Swift CI because they are not the PR
+  merge gate;
 - bypass rights can still override the ruleset.
+
+### Decision 6 - Fix PR path filtering instead of requiring docs-only bypass
+
+Slice 18 chooses the workflow-correction path: docs-only PRs should stay
+mergeable without bypass while Swift CI contexts are required.
+
+The implementation should remove workflow-level `paths-ignore` from the
+`pull_request` trigger so the `Swift CI` workflow starts for every PR. It should
+keep the existing `push` docs-only skip unless implementation finds a concrete
+reason to change it, because the PR required-check policy is the merge gate.
+
+Each required job must then fail closed and choose its workload after checkout:
+
+- detect whether the current PR diff is fully docs-only (`docs/**` or `**/*.md`);
+- if not docs-only, run the existing heavy job steps unchanged;
+- if docs-only, run a lightweight success path that prints a stable
+  `mode=docs_only_pr` line and skips the heavy Swift/test/compile work;
+- if the detector cannot determine the diff, fail the job rather than silently
+  passing.
+
+This keeps the three required job contexts present for every PR. It does consume
+minimal runner startup for docs-only PRs, including the iOS job, but avoids a
+fourth required "change scope" context and avoids a detector failure being
+masked by skipped downstream required jobs.
 
 ## Implementation Architecture
 
@@ -213,11 +254,31 @@ The exact GitHub REST payload shape should be derived from the current readback
 and GitHub API contract during implementation. The plan should include a dry
 payload inspection step before the write.
 
+### PR Docs-Only Workflow Correction
+
+The workflow correction updates `.github/workflows/swift-ci.yml` so required job
+contexts are always produced on PRs:
+
+- remove `paths-ignore` from the `pull_request` trigger;
+- preserve `push.branches: [main]` and the existing push docs-only
+  `paths-ignore`;
+- add a docs-only detector to each required job, or a shared repo-owned shell
+  helper invoked by each job;
+- make detector failure fail that job;
+- gate expensive steps with the detector result;
+- add a lightweight docs-only success step in each required job so logs explain
+  why the heavy workload did not run.
+
+The detector should use the PR base/head commits, not the latest commit alone,
+matching GitHub's PR path-filter semantics that evaluate the whole PR diff.
+
 ### Documentation Update
 
-Update only `AGENTS.md` for the durable operational guide. Slice 18 verification
-docs should capture the command outputs and final readback, but the guide itself
-should not embed volatile run IDs except as "last verified" context if useful.
+Update `AGENTS.md` for the durable operational guide and keep workflow comments
+accurate if comments are needed near the trigger or docs-only detector. Slice 18
+verification docs should capture the command outputs and final readback, but the
+guide itself should not embed volatile run IDs except as "last verified" context
+if useful.
 
 ## Verification
 
@@ -227,6 +288,10 @@ Verification should record:
 - repository identity and visibility readback
 - active workflow readback
 - recent successful Swift CI run and job names
+- workflow syntax / trigger diff showing PR `paths-ignore` was removed and push
+  docs-only skip was preserved
+- docs-only detector self-test or local acceptance check, if a helper script is
+  added
 - pre-update ruleset readback
 - post-update ruleset readback proving:
   - `enforcement=active`
@@ -239,12 +304,15 @@ Verification should record:
 - `gh api repos/maldrakar/swift-text-engine/rules/branches/main` readback when
   useful to prove the active branch rules include status checks
 - `git diff --check`
-- local diff summary proving Swift source, tests, benchmark code, package
-  metadata, and workflow YAML were not changed
+- local diff summary proving Swift source, tests, benchmark code, and package
+  metadata were not changed
+- local diff summary proving workflow changes are limited to PR docs-only
+  required-check behavior
 
-Because this slice is docs/config-only, `swift test` and benchmark commands are
-not required for acceptance. Running them would not validate the GitHub ruleset.
-The verification record should state this explicitly.
+Because this slice is policy/workflow/config-only, `swift test` and benchmark
+commands are not required for acceptance. Running them would not validate the
+GitHub ruleset or the docs-only required-check issue. The verification record
+should state this explicitly.
 
 No destructive live merge-rejection test is required. The API readback is the
 source of proof.
@@ -254,9 +322,13 @@ source of proof.
 - **Check context drift:** GitHub requires exact context names. Mitigation:
   derive names from a recent successful run immediately before applying the
   ruleset and verify them after readback.
-- **Docs-only skip:** Docs-only commits can have no fresh Swift CI check-runs.
-  Mitigation: document this in `AGENTS.md` and use a code/workflow-changing run
-  as context evidence.
+- **Docs-only PR pending checks:** Workflow-level PR path filtering would leave
+  required checks pending and block docs-only PRs. Mitigation: remove
+  `pull_request.paths-ignore` and make each required job emit a lightweight
+  success path for fully docs-only PRs.
+- **Docs-only detector false positive:** A non-docs change could be skipped if
+  detection is wrong. Mitigation: match only `docs/**` and `**/*.md` against the
+  full PR diff, and fail closed if the diff cannot be computed.
 - **Bypass actor overstatement:** Required checks do not stop actors with bypass
   rights. Mitigation: preserve bypass actors and document that limitation
   plainly.
@@ -268,9 +340,11 @@ source of proof.
 
 - Active ruleset `Main` requires the three Swift CI job contexts for the default
   branch with strict required-status-check policy.
+- Fully docs-only PRs produce successful required Swift CI job contexts without
+  requiring bypass.
+- Non-docs PRs still run the existing heavy Swift CI workloads.
 - Existing ruleset behavior outside status checks is preserved.
 - `AGENTS.md` accurately describes the current repository policy and bypass
   caveat.
 - Verification record captures preflight, mutation, and final readback evidence.
-- No Swift source, tests, benchmark code, package metadata, or workflow YAML is
-  changed.
+- No Swift source, tests, benchmark code, or package metadata is changed.
