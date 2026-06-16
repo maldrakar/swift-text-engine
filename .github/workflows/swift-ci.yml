@@ -2,9 +2,6 @@ name: Swift CI
 
 on:
   pull_request:
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
   push:
     branches:
       - main
@@ -32,7 +29,28 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Detect PR change scope
+        id: change-scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            echo "docs_only_pr=false" >> "$GITHUB_OUTPUT"
+            echo "mode=docs_only_pr event=$EVENT_NAME result=not_pull_request docs_only_pr=false"
+            exit 0
+          fi
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          ./.github/scripts/detect-docs-only-pr.sh --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
+
+      - name: Complete docs-only PR
+        if: steps.change-scope.outputs.docs_only_pr == 'true'
+        run: echo "mode=docs_only_pr job=host-tests-and-benchmark-gate result=success"
+
       - name: Show toolchain
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: |
           swift --version
           git --version
@@ -41,26 +59,32 @@ jobs:
           lscpu || true
 
       - name: Run host tests
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift test --scratch-path /tmp/text-engine-host-build
 
       - name: Run synthetic benchmark gate
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --gate
 
       - name: Run variable-height benchmark gate
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height --gate
 
       - name: Observe variable-height mutation benchmark
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
         continue-on-error: true
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height-mutation
 
       - name: Run memory shape diagnostic
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-shape
 
       - name: Run RSS memory observation diagnostic
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-observation
 
       - name: Observe realistic provider relative performance
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.change-scope.outputs.docs_only_pr != 'true'
         continue-on-error: true
         # The host job runs in a container, where GitHub executes `run` steps
         # under `sh`. This step uses `set -o pipefail`, a bashism, so it must
@@ -109,8 +133,31 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect PR change scope
+        id: change-scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            echo "docs_only_pr=false" >> "$GITHUB_OUTPUT"
+            echo "mode=docs_only_pr event=$EVENT_NAME result=not_pull_request docs_only_pr=false"
+            exit 0
+          fi
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          ./.github/scripts/detect-docs-only-pr.sh --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
+
+      - name: Complete docs-only PR
+        if: steps.change-scope.outputs.docs_only_pr == 'true'
+        run: echo "mode=docs_only_pr job=ios-cross-target-compile result=success"
 
       - name: Show toolchain
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: |
           echo "developer_dir=${DEVELOPER_DIR:-unset}"
           xcode-select -p
@@ -120,6 +167,7 @@ jobs:
           uname -a
 
       - name: Compile TextEngineCore for iOS targets
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: ./.github/scripts/cross-target-compile.sh --targets ios
 
   wasm-cross-target-observation:
@@ -131,8 +179,31 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect PR change scope
+        id: change-scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            echo "docs_only_pr=false" >> "$GITHUB_OUTPUT"
+            echo "mode=docs_only_pr event=$EVENT_NAME result=not_pull_request docs_only_pr=false"
+            exit 0
+          fi
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          ./.github/scripts/detect-docs-only-pr.sh --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
+
+      - name: Complete docs-only PR
+        if: steps.change-scope.outputs.docs_only_pr == 'true'
+        run: echo "mode=docs_only_pr job=wasm-cross-target-observation result=success"
 
       - name: Show toolchain
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: |
           swift --version
           git --version
@@ -141,4 +212,5 @@ jobs:
           lscpu || true
 
       - name: Observe TextEngineCore for WASM targets
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: ./.github/scripts/cross-target-compile.sh --targets wasm

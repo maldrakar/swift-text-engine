@@ -110,18 +110,26 @@ Three jobs:
   **observational**: the helper compiles them when a matching Swift SDK is
   installed/provisioned, otherwise records a non-blocking skip.
 
-Docs-only changes skip Swift CI via `paths-ignore` (`docs/**`, `**/*.md`) **only
-when the entire trigger is docs-only**: a push to `main` touching only docs, or a
-PR whose full diff is docs-only. `paths-ignore` on `pull_request` is evaluated
-against the whole PR diff, not the latest commit, so docs-only commits appended to
-a PR that also touches code, workflow, scripts, package metadata, or tests still
-run CI (observed in PR #13: docs-only verification-record commits each
-re-triggered the workflow).
+Required-check policy: the public repository `maldrakar/swift-text-engine` has
+an active default-branch ruleset named `Main` (id `17656807`) that requires the
+three Swift CI job contexts for PRs targeting `main`: `Host tests and benchmark
+gate`, `iOS cross-target compile`, and `WASM cross-target observation`.
+Strict required-status-check policy is enabled, so PRs must be tested with the
+latest base branch state.
 
-Caveat: this is a private repo without branch protection / required checks
-(GitHub Pro / public-repo feature). A red check blocks the **status**, not the
-**merge** — don't assume CI gates merges. Last verified: 2026-06-12 via
-`gh api`; see `docs/superpowers/specs/2026-06-06-github-main-ruleset-design.md`.
+Docs-only PRs still start Swift CI so those required job contexts are emitted,
+but each required job first runs `.github/scripts/detect-docs-only-pr.sh`. If the
+full PR diff is only `docs/**` or `**/*.md`, the job prints
+`mode=docs_only_pr ... result=success` and skips the heavy Swift/test/compile
+work. If the diff cannot be determined, the detector fails closed. Docs-only
+pushes to `main` may still skip Swift CI through the `push.paths-ignore` rule
+because PR required checks are the merge gate.
+
+Bypass caveat: the ruleset preserves the existing bypass actor shape, and the
+current admin user can bypass it. Required checks are configured and enforced
+for normal PR flow, but bypass-capable actors can still override the ruleset.
+Last verified: 2026-06-16 via `gh api`; see
+`docs/superpowers/verification/2026-06-16-swift-ci-required-checks.md`.
 
 ## Development workflow ("slices")
 
