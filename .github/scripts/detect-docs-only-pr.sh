@@ -31,6 +31,37 @@ assert_equal() {
   fi
 }
 
+assert_contains() {
+  local needle="$1"
+  local actual="$2"
+  local label="$3"
+  if [[ "$actual" != *"$needle"* ]]; then
+    echo "self_test=fail label=$label expected_contains=$needle actual=$actual"
+    exit 1
+  fi
+}
+
+assert_runtime_classification() {
+  local script_path="$1"
+  local label="$2"
+  local base_sha="$3"
+  local head_sha="$4"
+  local expected_status="$5"
+  local expected_output="$6"
+  local expected_github_output="$7"
+  local output_file output status github_output
+
+  output_file="$(mktemp "${TMPDIR:-/tmp}/docs-only-runtime-output.XXXXXX")"
+  output="$(bash "$script_path" --base "$base_sha" --head "$head_sha" --github-output "$output_file" 2>&1)"
+  status=$?
+  github_output="$(cat "$output_file")"
+  rm -f "$output_file"
+
+  assert_equal "$expected_status" "$status" "${label}_status"
+  assert_contains "$expected_output" "$output" "${label}_output"
+  assert_equal "$expected_github_output" "$github_output" "${label}_github_output"
+}
+
 assert_command_success() {
   local label="$1"
   shift
@@ -124,6 +155,64 @@ EOF
   assert_equal "0" "$DOCS_ONLY_FILE_COUNT" "classify_empty_count"
   assert_equal "0" "$DOCS_ONLY_NON_DOC_COUNT" "classify_empty_non_doc_count"
 
+  local script_path runtime_repo base_sha docs_head mixed_head workflow_head helper_head missing_sha
+  case "${BASH_SOURCE[0]}" in
+    /*) script_path="${BASH_SOURCE[0]}" ;;
+    *) script_path="$(pwd)/${BASH_SOURCE[0]}" ;;
+  esac
+
+  runtime_repo="$(mktemp -d "${TMPDIR:-/tmp}/docs-only-runtime.XXXXXX")"
+  (
+    cd "$runtime_repo" || exit 1
+    git init -q
+    git config user.name "Docs Only Test"
+    git config user.email "docs-only@example.invalid"
+
+    mkdir -p docs
+    printf 'base\n' > docs/guide.md
+    git add docs/guide.md
+    git commit -q -m base
+    base_sha="$(git rev-parse HEAD)"
+
+    git checkout -q -B docs-only "$base_sha"
+    printf 'docs\n' >> docs/guide.md
+    git add docs/guide.md
+    git commit -q -m docs-only
+    docs_head="$(git rev-parse HEAD)"
+
+    git checkout -q -B mixed-source "$base_sha"
+    printf 'docs\n' >> docs/guide.md
+    mkdir -p Sources/TextEngineCore
+    printf 'source\n' > Sources/TextEngineCore/Example.swift
+    git add docs/guide.md Sources/TextEngineCore/Example.swift
+    git commit -q -m mixed-source
+    mixed_head="$(git rev-parse HEAD)"
+
+    git checkout -q -B workflow-change "$base_sha"
+    mkdir -p .github/workflows
+    printf 'name: Swift CI\n' > .github/workflows/swift-ci.yml
+    git add .github/workflows/swift-ci.yml
+    git commit -q -m workflow-change
+    workflow_head="$(git rev-parse HEAD)"
+
+    git checkout -q -B helper-change "$base_sha"
+    mkdir -p .github/scripts
+    printf '#!/usr/bin/env bash\n' > .github/scripts/detect-docs-only-pr.sh
+    git add .github/scripts/detect-docs-only-pr.sh
+    git commit -q -m helper-change
+    helper_head="$(git rev-parse HEAD)"
+
+    missing_sha="0000000000000000000000000000000000000000"
+
+    assert_runtime_classification "$script_path" "runtime_docs_only" "$base_sha" "$docs_head" "0" "docs_only_pr=true" "docs_only_pr=true"
+    assert_runtime_classification "$script_path" "runtime_mixed_source" "$base_sha" "$mixed_head" "0" "docs_only_pr=false" "docs_only_pr=false"
+    assert_runtime_classification "$script_path" "runtime_workflow_change" "$base_sha" "$workflow_head" "0" "docs_only_pr=false" "docs_only_pr=false"
+    assert_runtime_classification "$script_path" "runtime_helper_change" "$base_sha" "$helper_head" "0" "docs_only_pr=false" "docs_only_pr=false"
+    assert_runtime_classification "$script_path" "runtime_missing_base" "$missing_sha" "$docs_head" "2" "reason=base_commit_unavailable" ""
+    assert_runtime_classification "$script_path" "runtime_empty_diff" "$base_sha" "$base_sha" "2" "reason=empty_diff" ""
+  ) || exit 1
+  rm -rf "$runtime_repo"
+
   local output_file
   output_file="$(mktemp "${TMPDIR:-/tmp}/docs-only-output.XXXXXX")"
   GITHUB_OUTPUT_FILE="$output_file"
@@ -184,6 +273,10 @@ git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null || fail "head_commit_unavaila
 
 if ! changed_paths="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>/dev/null)"; then
   fail "diff_unavailable"
+fi
+
+if [[ -z "$changed_paths" ]]; then
+  fail "empty_diff"
 fi
 
 classify_paths <<< "$changed_paths"
