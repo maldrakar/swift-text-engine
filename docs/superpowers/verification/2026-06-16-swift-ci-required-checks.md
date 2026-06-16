@@ -532,7 +532,7 @@ Exit status: `0`.
 `Detect PR change scope` steps passing, docs-only completion steps skipped for
 this non-doc PR, and the heavy host/iOS/WASM checks running to success.
 
-Final hosted run after the verification follow-up commit:
+Hosted run after the verification follow-up commit:
 
 ```bash
 gh run view 27630327793 --json status,conclusion,url,headSha,jobs --jq '{status,conclusion,url,headSha,jobs:[.jobs[] | {name,status,conclusion}]}'
@@ -567,7 +567,44 @@ Exit status: `0`.
 ```
 
 `gh run watch 27630327793 --exit-status --interval 20` showed all three required
-jobs completing successfully on final head `6b8d7ec`.
+jobs completing successfully on head `6b8d7ec`.
+
+Final hosted run after the plan-tracking commit on the current branch head:
+
+```bash
+gh run view 27631262670 --json status,conclusion,url,headSha,jobs --jq '{status,conclusion,url,headSha,jobs:[.jobs[] | {name,status,conclusion}]}'
+```
+
+Exit status: `0`.
+
+```json
+{
+  "conclusion": "success",
+  "headSha": "e0e1d6d8fc042c31b81319b0bb0f0b45a00676f5",
+  "jobs": [
+    {
+      "conclusion": "success",
+      "name": "Host tests and benchmark gate",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "iOS cross-target compile",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "WASM cross-target observation",
+      "status": "completed"
+    }
+  ],
+  "status": "completed",
+  "url": "https://github.com/maldrakar/swift-text-engine/actions/runs/27631262670"
+}
+```
+
+The hosted Swift CI run on current head `e0e1d6d` completed all three required
+job contexts successfully.
 
 ## Scope Proof
 
@@ -579,13 +616,20 @@ git diff --name-only 36df4c7..HEAD -- Sources Tests Package.swift
 
 Exit status: `0`; no output.
 
-Tracked changes across the final slice commits are limited to:
+Tracked changes across the full branch diff are limited to:
+
+```bash
+git diff --name-only origin/main...HEAD
+```
+
+Exit status: `0`.
 
 ```text
 .github/scripts/detect-docs-only-pr.sh
 .github/workflows/swift-ci.yml
 AGENTS.md
 docs/superpowers/plans/2026-06-16-swift-ci-required-checks.md
+docs/superpowers/specs/2026-06-16-swift-ci-required-checks-design.md
 docs/superpowers/verification/2026-06-16-swift-ci-required-checks.md
 ```
 
