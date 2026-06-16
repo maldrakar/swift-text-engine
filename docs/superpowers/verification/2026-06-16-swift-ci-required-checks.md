@@ -34,18 +34,18 @@ or committed by this slice.
 Command:
 
 ```bash
-git diff --stat HEAD~4..HEAD
-git diff --name-only HEAD~4..HEAD
+git diff --stat 36df4c7..HEAD
+git diff --name-only 36df4c7..HEAD
 ```
 
 Exit status: `0`.
 
 ```text
- .github/scripts/detect-docs-only-pr.sh             | 190 +++++++++
- .github/workflows/swift-ci.yml                     |  77 +++-
+ .github/scripts/detect-docs-only-pr.sh             | 190 +++++++
+ .github/workflows/swift-ci.yml                     |  80 ++-
  AGENTS.md                                          |  32 +-
- .../2026-06-16-swift-ci-required-checks.md         | 433 +++++++++++++++++++++
- 4 files changed, 716 insertions(+), 16 deletions(-)
+ .../2026-06-16-swift-ci-required-checks.md         | 553 +++++++++++++++++++++
+ 4 files changed, 839 insertions(+), 16 deletions(-)
 ```
 
 ```text
@@ -102,6 +102,46 @@ self_test=pass
 ```
 
 `bash -n` and `git diff --check` produced no output.
+
+Hosted follow-up root-cause reproduction:
+
+```bash
+GIT_TEST_ASSUME_DIFFERENT_OWNER=1 ./.github/scripts/detect-docs-only-pr.sh \
+  --base 641755dc2336ff49c19829c39f37abb6854b0974 \
+  --head d0051f95318837e1b514fa6982caa1fb33a9951b
+```
+
+Exit status: `2`.
+
+```text
+mode=docs_only_pr result=infrastructure_failure reason=base_commit_unavailable docs_only_pr=false
+```
+
+The hosted Linux container jobs reproduced this shape because
+`actions/checkout` wrote `safe.directory` under the action's temporary HOME, but
+later container `run` steps used a different HOME. `git cat-file` therefore
+failed before the detector could read the fetched base commit.
+
+Fix validation:
+
+```bash
+tmp_config=$(mktemp /private/tmp/slice-18-gitconfig.XXXXXX)
+GIT_CONFIG_GLOBAL="$tmp_config" git config --global --add safe.directory "$PWD"
+GIT_CONFIG_GLOBAL="$tmp_config" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 \
+  ./.github/scripts/detect-docs-only-pr.sh \
+  --base 641755dc2336ff49c19829c39f37abb6854b0974 \
+  --head d0051f95318837e1b514fa6982caa1fb33a9951b
+rm -f "$tmp_config"
+```
+
+Exit status: `0`.
+
+```text
+mode=docs_only_pr result=not_docs_only docs_only_pr=false file_count=5 non_doc_count=2
+```
+
+Commit `47baa8a` adds `git config --global --add safe.directory
+"$GITHUB_WORKSPACE"` immediately before the detector call in each required job.
 
 Command:
 
@@ -411,12 +451,92 @@ Independent Task 5 review confirmed the saved evidence and read-only live
 readbacks: one repository ruleset, one required status checks rule, strict
 policy enabled, expected contexts, and unchanged bypass actor shape.
 
+## Hosted PR CI
+
+Initial hosted run after PR creation:
+
+```bash
+gh run view 27629429143 --json status,conclusion,url,headSha,jobs --jq '{status,conclusion,url,headSha,jobs:[.jobs[] | {name,status,conclusion}]}'
+```
+
+Exit status: `0`.
+
+```json
+{
+  "conclusion": "failure",
+  "headSha": "d0051f95318837e1b514fa6982caa1fb33a9951b",
+  "jobs": [
+    {
+      "conclusion": "failure",
+      "name": "Host tests and benchmark gate",
+      "status": "completed"
+    },
+    {
+      "conclusion": "failure",
+      "name": "WASM cross-target observation",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "iOS cross-target compile",
+      "status": "completed"
+    }
+  ],
+  "status": "completed",
+  "url": "https://github.com/maldrakar/swift-text-engine/actions/runs/27629429143"
+}
+```
+
+The failed Linux jobs printed:
+
+```text
+mode=docs_only_pr result=infrastructure_failure reason=base_commit_unavailable docs_only_pr=false
+```
+
+Hosted run after the safe-directory fix:
+
+```bash
+gh run view 27629804191 --json status,conclusion,url,headSha,jobs --jq '{status,conclusion,url,headSha,jobs:[.jobs[] | {name,status,conclusion}]}'
+```
+
+Exit status: `0`.
+
+```json
+{
+  "conclusion": "success",
+  "headSha": "47baa8a9775ac0f76c74fd8e9892b1d6bf3c0011",
+  "jobs": [
+    {
+      "conclusion": "success",
+      "name": "iOS cross-target compile",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Host tests and benchmark gate",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "WASM cross-target observation",
+      "status": "completed"
+    }
+  ],
+  "status": "completed",
+  "url": "https://github.com/maldrakar/swift-text-engine/actions/runs/27629804191"
+}
+```
+
+`gh run watch 27629804191 --exit-status --interval 20` showed all three
+`Detect PR change scope` steps passing, docs-only completion steps skipped for
+this non-doc PR, and the heavy host/iOS/WASM checks running to success.
+
 ## Scope Proof
 
 Command:
 
 ```bash
-git diff --name-only HEAD~4..HEAD -- Sources Tests Package.swift
+git diff --name-only 36df4c7..HEAD -- Sources Tests Package.swift
 ```
 
 Exit status: `0`; no output.
