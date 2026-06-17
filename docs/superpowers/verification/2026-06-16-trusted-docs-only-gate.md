@@ -414,19 +414,180 @@ The PR-head run is intentionally non-doc and must not take the docs-only shortcu
 
 ## Post-Merge Push Proof
 
-Post-merge push proof is not available before the branch is merged to `main`
-and the default-branch push Swift CI run completes.
+PR #20 was merged to `main` with merge commit
+`f84651f2d1d5e664d8d420607448d8756a278b5a`.
 
-Expected proof after merge: the post-merge `push` run records the trusted gate
-changes on `main` and confirms the required Swift CI job topology still emits
-the expected contexts.
+Command:
+
+```bash
+merge_sha="f84651f2d1d5e664d8d420607448d8756a278b5a"
+gh run list --workflow "Swift CI" --branch main --limit 10 \
+  --json databaseId,headSha,status,conclusion,url \
+  > /private/tmp/slice-19-main-runs.json
+cat /private/tmp/slice-19-main-runs.json
+jq -r --arg sha "$merge_sha" \
+  '.[] | select(.headSha == $sha) | .databaseId' \
+  /private/tmp/slice-19-main-runs.json \
+  | sed -n '1p' \
+  > /private/tmp/slice-19-main-run-id.txt
+cat /private/tmp/slice-19-main-run-id.txt
+test -s /private/tmp/slice-19-main-run-id.txt
+main_run_id="$(cat /private/tmp/slice-19-main-run-id.txt)"
+gh run view "$main_run_id" --json jobs \
+  --jq '[.jobs[] | {name,status,conclusion}]' \
+  > /private/tmp/slice-19-main-jobs.json
+cat /private/tmp/slice-19-main-jobs.json
+jq -e '
+  ([.[].name] | sort) == ([
+    "Host tests and benchmark gate",
+    "iOS cross-target compile",
+    "WASM cross-target observation"
+  ] | sort)
+  and all(.[]; .status == "completed" and .conclusion == "success")
+' /private/tmp/slice-19-main-jobs.json
+```
+
+Exit status: 0
+
+Run evidence:
+
+```text
+run_id=27652542887
+url=https://github.com/maldrakar/swift-text-engine/actions/runs/27652542887
+head_sha=f84651f2d1d5e664d8d420607448d8756a278b5a
+jobs=[{"conclusion":"success","name":"iOS cross-target compile","status":"completed"},{"conclusion":"success","name":"Host tests and benchmark gate","status":"completed"},{"conclusion":"success","name":"WASM cross-target observation","status":"completed"}]
+```
+
+The post-merge `push` run records the trusted gate changes on `main` and
+confirms the required Swift CI job topology still emits the expected contexts.
+
+Final ruleset readback after merge:
+
+```bash
+gh api repos/maldrakar/swift-text-engine/rulesets/17656807 \
+  --jq '{id,name,target,enforcement,conditions,bypass_actors,rules}' \
+  > /private/tmp/slice-19-ruleset-post-merge.json
+jq -e '
+  .id == 17656807
+  and .name == "Main"
+  and .target == "branch"
+  and .enforcement == "active"
+  and ([.rules[] | select(.type == "required_status_checks")] | length == 1)
+  and ([.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | sort) == ([
+    "Host tests and benchmark gate",
+    "iOS cross-target compile",
+    "WASM cross-target observation"
+  ] | sort)
+  and (.rules[] | select(.type == "required_status_checks") | .parameters.strict_required_status_checks_policy) == true
+' /private/tmp/slice-19-ruleset-post-merge.json
+```
+
+Exit status: 0
+
+Ruleset summary:
+
+```text
+id=17656807
+name=Main
+target=branch
+enforcement=active
+strict_required_status_checks_policy=true
+required_status_checks:
+- Host tests and benchmark gate
+- iOS cross-target compile
+- WASM cross-target observation
+```
 
 ## Hosted Docs-Only PR Proof
 
-Hosted docs-only PR proof is not available before a docs-only PR run completes
-with the trusted base detector path.
+Docs-only proof PR: #21
+`https://github.com/maldrakar/swift-text-engine/pull/21`
 
-Expected proof after push/PR: a docs-only PR run prints
-`mode=docs_only_pr ... result=success`, executes the detector from the trusted
-base worktree, and emits the same required job contexts without running the
-heavy Swift/test/compile work.
+Proof branch/head:
+
+```text
+branch=slice-19-docs-only-proof
+head_sha=105d7562eb488649fb6f4bfa7af2a62180bd7a14
+```
+
+The proof commit changed only:
+
+```text
+docs/superpowers/verification/2026-06-16-trusted-docs-only-gate-docs-only-proof.md
+```
+
+Command:
+
+```bash
+gh pr view 21 --json number,url,headRefName,headRefOid \
+  > /private/tmp/slice-19-docs-proof-pr.json
+cat /private/tmp/slice-19-docs-proof-pr.json
+proof_head_sha="$(jq -r '.headRefOid' /private/tmp/slice-19-docs-proof-pr.json)"
+gh run list --workflow "Swift CI" --branch slice-19-docs-only-proof --limit 10 \
+  --json databaseId,headSha,status,conclusion,url \
+  > /private/tmp/slice-19-docs-proof-runs.json
+cat /private/tmp/slice-19-docs-proof-runs.json
+jq -r --arg sha "$proof_head_sha" \
+  '.[] | select(.headSha == $sha) | .databaseId' \
+  /private/tmp/slice-19-docs-proof-runs.json \
+  | sed -n '1p' \
+  > /private/tmp/slice-19-docs-proof-run-id.txt
+cat /private/tmp/slice-19-docs-proof-run-id.txt
+test -s /private/tmp/slice-19-docs-proof-run-id.txt
+proof_run_id="$(cat /private/tmp/slice-19-docs-proof-run-id.txt)"
+gh run view "$proof_run_id" --json jobs \
+  --jq '[.jobs[] | {name,status,conclusion}]' \
+  > /private/tmp/slice-19-docs-proof-jobs.json
+cat /private/tmp/slice-19-docs-proof-jobs.json
+jq -e '
+  ([.[].name] | sort) == ([
+    "Host tests and benchmark gate",
+    "iOS cross-target compile",
+    "WASM cross-target observation"
+  ] | sort)
+  and all(.[]; .status == "completed" and .conclusion == "success")
+' /private/tmp/slice-19-docs-proof-jobs.json
+gh run view "$proof_run_id" --log \
+  > /private/tmp/slice-19-docs-proof-run.log
+rg -n "mode=docs_only_pr job=host-tests-and-benchmark-gate result=success|mode=docs_only_pr job=ios-cross-target-compile result=success|mode=docs_only_pr job=wasm-cross-target-observation result=success" \
+  /private/tmp/slice-19-docs-proof-run.log
+set +e
+rg -n "Run host tests|Run synthetic benchmark gate|Compile TextEngineCore for iOS targets|Observe TextEngineCore for WASM targets" \
+  /private/tmp/slice-19-docs-proof-run.log \
+  > /private/tmp/slice-19-docs-proof-heavy-lines.txt
+heavy_status=$?
+set -e
+cat /private/tmp/slice-19-docs-proof-heavy-lines.txt
+echo "heavy_status=${heavy_status}"
+test "$heavy_status" -eq 1
+```
+
+Exit status: 0
+
+Run evidence:
+
+```text
+run_id=27652778010
+url=https://github.com/maldrakar/swift-text-engine/actions/runs/27652778010
+head_sha=105d7562eb488649fb6f4bfa7af2a62180bd7a14
+jobs=[{"conclusion":"success","name":"Host tests and benchmark gate","status":"completed"},{"conclusion":"success","name":"iOS cross-target compile","status":"completed"},{"conclusion":"success","name":"WASM cross-target observation","status":"completed"}]
+```
+
+Docs-only success log lines:
+
+```text
+242:Host tests and benchmark gate	Complete docs-only PR	2026-06-16T22:39:02.3131870Z mode=docs_only_pr job=host-tests-and-benchmark-gate result=success
+436:iOS cross-target compile	Complete docs-only PR	2026-06-16T22:38:35.7013380Z mode=docs_only_pr job=ios-cross-target-compile result=success
+694:WASM cross-target observation	Complete docs-only PR	2026-06-16T22:39:04.2162676Z mode=docs_only_pr job=wasm-cross-target-observation result=success
+```
+
+Heavy Swift/test/compile proof:
+
+```text
+/private/tmp/slice-19-docs-proof-heavy-lines.txt: 0 bytes
+heavy_status=1
+```
+
+The docs-only PR run printed all three `mode=docs_only_pr ... result=success`
+markers, emitted the same required job contexts, and did not run the heavy
+Swift/test/compile steps.
