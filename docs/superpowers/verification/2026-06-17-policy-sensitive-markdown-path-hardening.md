@@ -777,3 +777,224 @@ docs_only_shortcut_status=1
 Note: committing hosted evidence changes the PR head and retriggers Swift CI.
 Do not chase another verification-file update for that evidence-only commit;
 Task 7 will anchor final merged-code proof in the post-merge `push` run.
+
+### Post-Merge Required-Check Proof
+
+Merged PR: #23
+Merge SHA: `ba4a77c1a8733e1996313df7552ab1b8437aafc0`
+Post-merge run: `27705132073`
+
+Command:
+
+```bash
+merge_sha="$(git rev-parse HEAD)"
+run_id="$(gh run list --workflow "Swift CI" --branch main --limit 20 --json databaseId,headSha,event,status,conclusion --jq '[.[] | select(.headSha == "'"$merge_sha"'" and .event == "push")][0].databaseId')"
+echo "post_merge_run_id=${run_id}"
+gh run view "$run_id" --json name,event,status,conclusion,headSha,jobs > /private/tmp/slice-20-post-merge-run.json
+jq -r '.name,.event,.status,.conclusion,.headSha,([.jobs[] | "\(.name)=\(.conclusion)"] | join("\n"))' /private/tmp/slice-20-post-merge-run.json
+```
+
+Output:
+
+```text
+post_merge_run_id=27705132073
+Swift CI
+push
+completed
+success
+ba4a77c1a8733e1996313df7552ab1b8437aafc0
+Host tests and benchmark gate=success
+iOS cross-target compile=success
+WASM cross-target observation=success
+```
+
+Status: `0`
+
+### Live Ruleset Readback
+
+Command:
+
+```bash
+gh api repos/maldrakar/swift-text-engine/rulesets/17656807 --jq '{
+  id,
+  name,
+  target,
+  enforcement,
+  conditions,
+  bypass_actors,
+  required_status_checks: ([.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context]),
+  strict_required_status_checks_policy: (.rules[] | select(.type == "required_status_checks") | .parameters.strict_required_status_checks_policy)
+}' > /private/tmp/slice-20-ruleset-readback.json
+cat /private/tmp/slice-20-ruleset-readback.json
+jq -e '
+  .id == 17656807
+  and .name == "Main"
+  and .target == "branch"
+  and .enforcement == "active"
+  and (.required_status_checks | sort) == ([
+    "Host tests and benchmark gate",
+    "iOS cross-target compile",
+    "WASM cross-target observation"
+  ] | sort)
+  and .strict_required_status_checks_policy == true
+' /private/tmp/slice-20-ruleset-readback.json
+```
+
+Output:
+
+```json
+{
+  "bypass_actors": [
+    {
+      "actor_id": 5,
+      "actor_type": "RepositoryRole",
+      "bypass_mode": "always"
+    }
+  ],
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "~DEFAULT_BRANCH"
+      ]
+    }
+  },
+  "enforcement": "active",
+  "id": 17656807,
+  "name": "Main",
+  "required_status_checks": [
+    "Host tests and benchmark gate",
+    "iOS cross-target compile",
+    "WASM cross-target observation"
+  ],
+  "strict_required_status_checks_policy": true,
+  "target": "branch"
+}
+true
+```
+
+Status: `0`
+
+### Policy-Sensitive Markdown Proof PR
+
+PR: #25, <https://github.com/maldrakar/swift-text-engine/pull/25>
+Head SHA: `79a1b410895cee9d9b8887d27a9de97db176fca2`
+Run: `27706101669`
+
+Changed-file proof:
+
+```bash
+gh pr view 25 --json files --jq '.files[].path'
+```
+
+Output:
+
+```text
+.github/scripts/README.md
+.github/workflows/README.md
+```
+
+Status: `0`
+
+Run summary:
+
+```text
+Swift CI
+pull_request
+completed
+success
+79a1b410895cee9d9b8887d27a9de97db176fca2
+Host tests and benchmark gate=success
+WASM cross-target observation=success
+iOS cross-target compile=success
+```
+
+Hosted log proof command:
+
+```bash
+gh run view 27706101669 --log > /private/tmp/slice-20-policy-proof-run.log
+rg -n "##\[group\]Run swift test --scratch-path|##\[group\]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --gate|##\[group\]Run \./\.github/scripts/cross-target-compile\.sh --targets wasm|##\[group\]Run \./\.github/scripts/cross-target-compile\.sh --targets ios" /private/tmp/slice-20-policy-proof-run.log
+set +e
+rg -n "Z mode=docs_only_pr job=.*result=success" /private/tmp/slice-20-policy-proof-run.log > /private/tmp/slice-20-policy-proof-shortcut-lines.out 2>&1
+shortcut_status=$?
+set -e
+cat /private/tmp/slice-20-policy-proof-shortcut-lines.out
+echo "policy_sensitive_docs_only_shortcut_status=${shortcut_status}"
+test "$shortcut_status" -eq 1
+```
+
+Output:
+
+```text
+306:Host tests and benchmark gate	Run host tests	2026-06-17T17:04:52.0430575Z ##[group]Run swift test --scratch-path /tmp/text-engine-host-build
+567:Host tests and benchmark gate	Run synthetic benchmark gate	2026-06-17T17:05:04.7648448Z ##[group]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --gate
+1058:WASM cross-target observation	Observe TextEngineCore for WASM targets	2026-06-17T17:04:58.5573531Z ##[group]Run ./.github/scripts/cross-target-compile.sh --targets wasm
+1298:iOS cross-target compile	Compile TextEngineCore for iOS targets	2026-06-17T17:04:25.6579560Z ##[group]Run ./.github/scripts/cross-target-compile.sh --targets ios
+policy_sensitive_docs_only_shortcut_status=1
+```
+
+Status: `0`
+
+Proof PR disposition: closed unmerged at `2026-06-17T17:15:20Z`
+(`mergedAt=null`).
+
+### True Docs-Only Proof PR
+
+PR: #26, <https://github.com/maldrakar/swift-text-engine/pull/26>
+Head SHA: `4a720e6ab0f04f4dac1537b2be99280b0ef169ab`
+Run: `27706623092`
+
+Changed-file proof:
+
+```bash
+gh pr view 26 --json files --jq '.files[].path'
+```
+
+Output:
+
+```text
+docs/superpowers/verification/2026-06-17-policy-sensitive-markdown-path-hardening-docs-only-proof.md
+```
+
+Status: `0`
+
+Run summary:
+
+```text
+Swift CI
+pull_request
+completed
+success
+4a720e6ab0f04f4dac1537b2be99280b0ef169ab
+Host tests and benchmark gate=success
+WASM cross-target observation=success
+iOS cross-target compile=success
+```
+
+Hosted log proof command:
+
+```bash
+gh run view 27706623092 --log > /private/tmp/slice-20-docs-proof-run.log
+rg -n "Z mode=docs_only_pr job=(host-tests-and-benchmark-gate|ios-cross-target-compile|wasm-cross-target-observation) result=success" /private/tmp/slice-20-docs-proof-run.log
+set +e
+rg -n "##\[group\]Run swift test --scratch-path|##\[group\]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --gate|##\[group\]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height --gate|##\[group\]Run \./\.github/scripts/cross-target-compile\.sh --targets wasm|##\[group\]Run \./\.github/scripts/cross-target-compile\.sh --targets ios" /private/tmp/slice-20-docs-proof-run.log > /private/tmp/slice-20-docs-proof-heavy-lines.out 2>&1
+heavy_status=$?
+set -e
+cat /private/tmp/slice-20-docs-proof-heavy-lines.out
+echo "docs_only_heavy_marker_status=${heavy_status}"
+test "$heavy_status" -eq 1
+```
+
+Output:
+
+```text
+246:Host tests and benchmark gate	Complete docs-only PR	2026-06-17T17:14:05.8342788Z mode=docs_only_pr job=host-tests-and-benchmark-gate result=success
+517:WASM cross-target observation	Complete docs-only PR	2026-06-17T17:14:03.3768240Z mode=docs_only_pr job=wasm-cross-target-observation result=success
+716:iOS cross-target compile	Complete docs-only PR	2026-06-17T17:13:36.2450950Z mode=docs_only_pr job=ios-cross-target-compile result=success
+docs_only_heavy_marker_status=1
+```
+
+Status: `0`
+
+Proof PR disposition: closed unmerged at `2026-06-17T17:15:35Z`
+(`mergedAt=null`).
