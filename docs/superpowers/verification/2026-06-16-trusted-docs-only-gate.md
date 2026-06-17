@@ -420,7 +420,7 @@ PR #20 was merged to `main` with merge commit
 Command:
 
 ```bash
-merge_sha="$(git rev-parse HEAD)"
+merge_sha="f84651f2d1d5e664d8d420607448d8756a278b5a"
 gh run list --workflow "Swift CI" --branch main --limit 10 \
   --json databaseId,headSha,status,conclusion,url \
   > /private/tmp/slice-19-main-runs.json
@@ -519,7 +519,7 @@ docs/superpowers/verification/2026-06-16-trusted-docs-only-gate-docs-only-proof.
 Command:
 
 ```bash
-gh pr view --json number,url,headRefName,headRefOid \
+gh pr view 21 --json number,url,headRefName,headRefOid \
   > /private/tmp/slice-19-docs-proof-pr.json
 cat /private/tmp/slice-19-docs-proof-pr.json
 proof_head_sha="$(jq -r '.headRefOid' /private/tmp/slice-19-docs-proof-pr.json)"
