@@ -738,3 +738,42 @@ Docs-only shortcut marker search:
 ```text
 docs_only_shortcut_status=1
 ```
+
+### PR-Head Evidence Recursion Boundary
+
+PR: #23
+Head SHA: `09a6af8c325769385961115b3c22c1952e21f827`
+Run: `27703735830`
+
+Run summary:
+
+```text
+Swift CI
+pull_request
+completed
+success
+09a6af8c325769385961115b3c22c1952e21f827
+Host tests and benchmark gate=success
+iOS cross-target compile=success
+WASM cross-target observation=success
+```
+
+Heavy path markers found in hosted logs:
+
+```text
+303:Host tests and benchmark gate	Run host tests	﻿2026-06-17T16:24:23.7764678Z ##[group]Run swift test --scratch-path /tmp/text-engine-host-build
+564:Host tests and benchmark gate	Run synthetic benchmark gate	﻿2026-06-17T16:24:37.0851779Z ##[group]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --gate
+580:Host tests and benchmark gate	Run variable-height benchmark gate	﻿2026-06-17T16:26:41.8586438Z ##[group]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height --gate
+953:iOS cross-target compile	Compile TextEngineCore for iOS targets	﻿2026-06-17T16:23:50.8422320Z ##[group]Run ./.github/scripts/cross-target-compile.sh --targets ios
+1293:WASM cross-target observation	Observe TextEngineCore for WASM targets	﻿2026-06-17T16:24:21.0575276Z ##[group]Run ./.github/scripts/cross-target-compile.sh --targets wasm
+```
+
+Docs-only shortcut marker search:
+
+```text
+docs_only_shortcut_status=1
+```
+
+Note: committing hosted evidence changes the PR head and retriggers Swift CI.
+Do not chase another verification-file update for that evidence-only commit;
+Task 7 will anchor final merged-code proof in the post-merge `push` run.
