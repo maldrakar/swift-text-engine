@@ -123,14 +123,16 @@ but each required job materializes the PR base commit into
 `.github/scripts/detect-docs-only-pr.sh` from that trusted base tree. The
 detector reads Git metadata from the PR workspace and compares the full
 `BASE_SHA...HEAD_SHA` diff, but the code that decides `docs_only_pr` is not
-loaded from the PR checkout. If the full PR diff is only `docs/**` or `**/*.md`,
-the job prints `mode=docs_only_pr ... result=success` and skips the heavy
-Swift/test/compile work. Missing commits, diff failures, and empty runtime diffs
-fail closed. PR-owned workflow/helper changes under `.github/workflows/**` or
-`.github/scripts/**`, Swift source, tests, package metadata, and all other
-non-doc paths are not docs-only and must run the heavy path. Docs-only pushes to
-`main` may still skip Swift CI through the `push.paths-ignore` rule because PR
-required checks are the merge gate.
+loaded from the PR checkout. The detector rejects `.github/workflows/**` and
+`.github/scripts/**` before applying the Markdown allow rule, so files in those
+policy-sensitive directories are not docs-only regardless of extension. If the
+full PR diff is only `docs/**` or Markdown files outside those policy-sensitive
+directories, the job prints `mode=docs_only_pr ... result=success` and skips the
+heavy Swift/test/compile work. Missing commits, diff failures, and empty runtime
+diffs fail closed. Swift source, tests, package metadata, and all other non-doc
+paths are not docs-only and must run the heavy path. Docs-only pushes to `main`
+may still skip Swift CI through the `push.paths-ignore` rule because PR required
+checks are the merge gate.
 
 Bypass caveat: the ruleset preserves the existing bypass actor shape, and the
 current admin user can bypass it. Required checks are configured and enforced

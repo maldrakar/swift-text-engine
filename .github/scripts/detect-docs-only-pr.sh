@@ -83,6 +83,7 @@ assert_command_failure() {
 is_docs_only_path() {
   local path="$1"
   case "$path" in
+    .github/workflows/*|.github/scripts/*) return 1 ;;
     docs/*|*.md) return 0 ;;
     *) return 1 ;;
   esac
@@ -130,6 +131,8 @@ run_self_test() {
   assert_command_success "nested_markdown" is_docs_only_path docs/superpowers/specs/design.md
   assert_command_failure "swift_source" is_docs_only_path Sources/TextEngineCore/ViewportVirtualizer.swift
   assert_command_failure "workflow_yaml" is_docs_only_path .github/workflows/swift-ci.yml
+  assert_command_failure "workflow_markdown_is_policy_sensitive" is_docs_only_path .github/workflows/README.md
+  assert_command_failure "helper_markdown_is_policy_sensitive" is_docs_only_path .github/scripts/README.md
   assert_command_failure "uppercase_markdown_is_not_configured_pattern" is_docs_only_path Notes.MD
 
   classify_paths <<'EOF'
@@ -155,7 +158,7 @@ EOF
   assert_equal "0" "$DOCS_ONLY_FILE_COUNT" "classify_empty_count"
   assert_equal "0" "$DOCS_ONLY_NON_DOC_COUNT" "classify_empty_non_doc_count"
 
-  local script_path runtime_repo base_sha docs_head mixed_head workflow_head helper_head missing_sha
+  local script_path runtime_repo base_sha docs_head mixed_head workflow_head helper_head workflow_markdown_head helper_markdown_head missing_sha
   case "${BASH_SOURCE[0]}" in
     /*) script_path="${BASH_SOURCE[0]}" ;;
     *) script_path="$(pwd)/${BASH_SOURCE[0]}" ;;
@@ -202,12 +205,28 @@ EOF
     git commit -q -m helper-change
     helper_head="$(git rev-parse HEAD)"
 
+    git checkout -q -B workflow-markdown-change "$base_sha"
+    mkdir -p .github/workflows
+    printf 'workflow docs\n' > .github/workflows/README.md
+    git add .github/workflows/README.md
+    git commit -q -m workflow-markdown-change
+    workflow_markdown_head="$(git rev-parse HEAD)"
+
+    git checkout -q -B helper-markdown-change "$base_sha"
+    mkdir -p .github/scripts
+    printf 'helper docs\n' > .github/scripts/README.md
+    git add .github/scripts/README.md
+    git commit -q -m helper-markdown-change
+    helper_markdown_head="$(git rev-parse HEAD)"
+
     missing_sha="0000000000000000000000000000000000000000"
 
     assert_runtime_classification "$script_path" "runtime_docs_only" "$base_sha" "$docs_head" "0" "docs_only_pr=true" "docs_only_pr=true"
     assert_runtime_classification "$script_path" "runtime_mixed_source" "$base_sha" "$mixed_head" "0" "docs_only_pr=false" "docs_only_pr=false"
     assert_runtime_classification "$script_path" "runtime_workflow_change" "$base_sha" "$workflow_head" "0" "docs_only_pr=false" "docs_only_pr=false"
     assert_runtime_classification "$script_path" "runtime_helper_change" "$base_sha" "$helper_head" "0" "docs_only_pr=false" "docs_only_pr=false"
+    assert_runtime_classification "$script_path" "runtime_workflow_markdown_change" "$base_sha" "$workflow_markdown_head" "0" "docs_only_pr=false" "docs_only_pr=false"
+    assert_runtime_classification "$script_path" "runtime_helper_markdown_change" "$base_sha" "$helper_markdown_head" "0" "docs_only_pr=false" "docs_only_pr=false"
     assert_runtime_classification "$script_path" "runtime_missing_base" "$missing_sha" "$docs_head" "2" "reason=base_commit_unavailable" ""
     assert_runtime_classification "$script_path" "runtime_empty_diff" "$base_sha" "$base_sha" "2" "reason=empty_diff" ""
   ) || exit 1
