@@ -777,3 +777,100 @@ docs_only_shortcut_status=1
 Note: committing hosted evidence changes the PR head and retriggers Swift CI.
 Do not chase another verification-file update for that evidence-only commit;
 Task 7 will anchor final merged-code proof in the post-merge `push` run.
+
+### Post-Merge Required-Check Proof
+
+Merged PR: #23
+Merge SHA: `ba4a77c1a8733e1996313df7552ab1b8437aafc0`
+Post-merge run: `27705132073`
+
+Command:
+
+```bash
+merge_sha="$(git rev-parse HEAD)"
+run_id="$(gh run list --workflow "Swift CI" --branch main --limit 20 --json databaseId,headSha,event,status,conclusion --jq '[.[] | select(.headSha == "'"$merge_sha"'" and .event == "push")][0].databaseId')"
+echo "post_merge_run_id=${run_id}"
+gh run view "$run_id" --json name,event,status,conclusion,headSha,jobs > /private/tmp/slice-20-post-merge-run.json
+jq -r '.name,.event,.status,.conclusion,.headSha,([.jobs[] | "\(.name)=\(.conclusion)"] | join("\n"))' /private/tmp/slice-20-post-merge-run.json
+```
+
+Output:
+
+```text
+post_merge_run_id=27705132073
+Swift CI
+push
+completed
+success
+ba4a77c1a8733e1996313df7552ab1b8437aafc0
+Host tests and benchmark gate=success
+iOS cross-target compile=success
+WASM cross-target observation=success
+```
+
+Status: `0`
+
+### Live Ruleset Readback
+
+Command:
+
+```bash
+gh api repos/maldrakar/swift-text-engine/rulesets/17656807 --jq '{
+  id,
+  name,
+  target,
+  enforcement,
+  conditions,
+  bypass_actors,
+  required_status_checks: ([.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context]),
+  strict_required_status_checks_policy: (.rules[] | select(.type == "required_status_checks") | .parameters.strict_required_status_checks_policy)
+}' > /private/tmp/slice-20-ruleset-readback.json
+cat /private/tmp/slice-20-ruleset-readback.json
+jq -e '
+  .id == 17656807
+  and .name == "Main"
+  and .target == "branch"
+  and .enforcement == "active"
+  and (.required_status_checks | sort) == ([
+    "Host tests and benchmark gate",
+    "iOS cross-target compile",
+    "WASM cross-target observation"
+  ] | sort)
+  and .strict_required_status_checks_policy == true
+' /private/tmp/slice-20-ruleset-readback.json
+```
+
+Output:
+
+```json
+{
+  "bypass_actors": [
+    {
+      "actor_id": 5,
+      "actor_type": "RepositoryRole",
+      "bypass_mode": "always"
+    }
+  ],
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "~DEFAULT_BRANCH"
+      ]
+    }
+  },
+  "enforcement": "active",
+  "id": 17656807,
+  "name": "Main",
+  "required_status_checks": [
+    "Host tests and benchmark gate",
+    "iOS cross-target compile",
+    "WASM cross-target observation"
+  ],
+  "strict_required_status_checks_policy": true,
+  "target": "branch"
+}
+true
+```
+
+Status: `0`
