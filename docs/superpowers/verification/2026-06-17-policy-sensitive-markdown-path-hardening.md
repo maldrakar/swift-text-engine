@@ -34,8 +34,38 @@ Status: `0`
 
 Command:
 
-```text
-Task 1 Step 4 reproduction script, output captured in /private/tmp/slice-20-policy-md-before.out
+```bash
+bash -lc '
+set -euo pipefail
+repo=$(mktemp -d /private/tmp/slice-20-policy-md-before.XXXXXX)
+cleanup() { rm -rf "$repo"; }
+trap cleanup EXIT
+script="$PWD/.github/scripts/detect-docs-only-pr.sh"
+cd "$repo"
+git init -q
+git config user.name "Slice 20 Test"
+git config user.email "slice20@example.invalid"
+mkdir -p docs
+printf "base\n" > docs/base.md
+git add docs/base.md
+git commit -q -m base
+base_sha=$(git rev-parse HEAD)
+git checkout -q -B policy-md "$base_sha"
+mkdir -p .github/workflows .github/scripts
+printf "workflow docs\n" > .github/workflows/README.md
+printf "script docs\n" > .github/scripts/README.md
+git add .github/workflows/README.md .github/scripts/README.md
+git commit -q -m policy-md
+head_sha=$(git rev-parse HEAD)
+set +e
+output=$(bash "$script" --base "$base_sha" --head "$head_sha" 2>&1)
+status=$?
+set -e
+printf "detector_status=%s\n%s\n" "$status" "$output"
+' > /private/tmp/slice-20-policy-md-before.out 2>&1
+cat /private/tmp/slice-20-policy-md-before.out
+rg -n "detector_status=0" /private/tmp/slice-20-policy-md-before.out
+rg -n "result=docs_only docs_only_pr=true file_count=2 non_doc_count=0" /private/tmp/slice-20-policy-md-before.out
 ```
 
 Output:
@@ -51,8 +81,19 @@ Status: `0`
 
 Command:
 
-```text
-Task 2 Step 1 runtime self-test red check, output captured in /private/tmp/slice-20-runtime-red.out
+```bash
+bash -lc '
+set +e
+./.github/scripts/detect-docs-only-pr.sh --self-test > /private/tmp/slice-20-runtime-red.out 2>&1
+status=$?
+set -e
+cat /private/tmp/slice-20-runtime-red.out
+echo "runtime_red_status=${status}"
+test "$status" -eq 1
+rg -n "self_test=fail label=runtime_workflow_markdown_change_output" /private/tmp/slice-20-runtime-red.out
+rg -n "expected_contains=docs_only_pr=false" /private/tmp/slice-20-runtime-red.out
+rg -n "docs_only_pr=true" /private/tmp/slice-20-runtime-red.out
+'
 ```
 
 Output:
@@ -75,8 +116,17 @@ Status: `1`
 
 Command:
 
-```text
-Task 2 Step 2 direct path self-test red check, output captured in /private/tmp/slice-20-direct-red.out
+```bash
+bash -lc '
+set +e
+./.github/scripts/detect-docs-only-pr.sh --self-test > /private/tmp/slice-20-direct-red.out 2>&1
+status=$?
+set -e
+cat /private/tmp/slice-20-direct-red.out
+echo "direct_red_status=${status}"
+test "$status" -eq 1
+rg -n "self_test=fail label=workflow_markdown_is_policy_sensitive expected=failure actual=success" /private/tmp/slice-20-direct-red.out
+'
 ```
 
 Output:
@@ -126,8 +176,38 @@ Status: `0`
 
 Command:
 
-```text
-Task 3 Step 5 reproduction script, output captured in /private/tmp/slice-20-policy-md-after.out
+```bash
+bash -lc '
+set -euo pipefail
+repo=$(mktemp -d /private/tmp/slice-20-policy-md-after.XXXXXX)
+cleanup() { rm -rf "$repo"; }
+trap cleanup EXIT
+script="$PWD/.github/scripts/detect-docs-only-pr.sh"
+cd "$repo"
+git init -q
+git config user.name "Slice 20 Test"
+git config user.email "slice20@example.invalid"
+mkdir -p docs
+printf "base\n" > docs/base.md
+git add docs/base.md
+git commit -q -m base
+base_sha=$(git rev-parse HEAD)
+git checkout -q -B policy-md "$base_sha"
+mkdir -p .github/workflows .github/scripts
+printf "workflow docs\n" > .github/workflows/README.md
+printf "script docs\n" > .github/scripts/README.md
+git add .github/workflows/README.md .github/scripts/README.md
+git commit -q -m policy-md
+head_sha=$(git rev-parse HEAD)
+set +e
+output=$(bash "$script" --base "$base_sha" --head "$head_sha" 2>&1)
+status=$?
+set -e
+printf "detector_status=%s\n%s\n" "$status" "$output"
+' > /private/tmp/slice-20-policy-md-after.out 2>&1
+cat /private/tmp/slice-20-policy-md-after.out
+rg -n "detector_status=0" /private/tmp/slice-20-policy-md-after.out
+rg -n "result=not_docs_only docs_only_pr=false file_count=2 non_doc_count=2" /private/tmp/slice-20-policy-md-after.out
 ```
 
 Output:
@@ -143,8 +223,38 @@ Status: `0`
 
 Command:
 
-```text
-Task 3 Step 6 reproduction script, output captured in /private/tmp/slice-20-docs-md-after.out
+```bash
+bash -lc '
+set -euo pipefail
+repo=$(mktemp -d /private/tmp/slice-20-docs-md-after.XXXXXX)
+cleanup() { rm -rf "$repo"; }
+trap cleanup EXIT
+script="$PWD/.github/scripts/detect-docs-only-pr.sh"
+cd "$repo"
+git init -q
+git config user.name "Slice 20 Test"
+git config user.email "slice20@example.invalid"
+mkdir -p docs
+printf "base\n" > docs/base.md
+git add docs/base.md
+git commit -q -m base
+base_sha=$(git rev-parse HEAD)
+git checkout -q -B docs-only "$base_sha"
+printf "root docs\n" > README.md
+mkdir -p docs/assets
+printf "diagram\n" > docs/assets/diagram.png
+git add README.md docs/assets/diagram.png
+git commit -q -m docs-only
+head_sha=$(git rev-parse HEAD)
+set +e
+output=$(bash "$script" --base "$base_sha" --head "$head_sha" 2>&1)
+status=$?
+set -e
+printf "detector_status=%s\n%s\n" "$status" "$output"
+' > /private/tmp/slice-20-docs-md-after.out 2>&1
+cat /private/tmp/slice-20-docs-md-after.out
+rg -n "detector_status=0" /private/tmp/slice-20-docs-md-after.out
+rg -n "result=docs_only docs_only_pr=true file_count=2 non_doc_count=0" /private/tmp/slice-20-docs-md-after.out
 ```
 
 Output:
