@@ -32,15 +32,21 @@ Status: `0`
 
 ### Pre-Change Runtime Policy-Sensitive Markdown Bug
 
+Captured state: before Task 3 classifier fix, from the branch state before
+commit `e9f5b8954cdf33a0b454ef728ca254e2bbccc26a`.
+
 Command:
 
 ```bash
 bash -lc '
 set -euo pipefail
+repo_root="$PWD"
 repo=$(mktemp -d /private/tmp/slice-20-policy-md-before.XXXXXX)
 cleanup() { rm -rf "$repo"; }
 trap cleanup EXIT
-script="$PWD/.github/scripts/detect-docs-only-pr.sh"
+script="$repo/detect-docs-only-pr-before-e9f5b895.sh"
+git -C "$repo_root" show e9f5b8954cdf33a0b454ef728ca254e2bbccc26a^:.github/scripts/detect-docs-only-pr.sh > "$script"
+chmod +x "$script"
 cd "$repo"
 git init -q
 git config user.name "Slice 20 Test"
@@ -79,6 +85,10 @@ Status: `0`
 
 ### Runtime Self-Test Red
 
+Captured state: intermediate uncommitted TDD state after Task 2 runtime test
+additions and before Task 3 deny-first classifier fix. Running this command
+against current `HEAD` is expected to produce green output, not this red proof.
+
 Command:
 
 ```bash
@@ -100,6 +110,7 @@ Output:
 
 ```text
 self_test=fail label=runtime_workflow_markdown_change_output expected_contains=docs_only_pr=false actual=mode=docs_only_pr result=docs_only docs_only_pr=true file_count=1 non_doc_count=0
+runtime_red_status=1
 ```
 
 Reviewed red substrings:
@@ -110,9 +121,16 @@ expected_contains=docs_only_pr=false
 docs_only_pr=true
 ```
 
-Status: `1`
+Detector self-test status: `1`
+
+Verification wrapper status: `0`
 
 ### Direct Path Self-Test Red
+
+Captured state: intermediate uncommitted TDD state after adding direct path
+assertions and before applying the deny-first classifier fix. Running this
+command against current `HEAD` is expected to produce green output, not this red
+proof.
 
 Command:
 
@@ -133,9 +151,12 @@ Output:
 
 ```text
 self_test=fail label=workflow_markdown_is_policy_sensitive expected=failure actual=success
+direct_red_status=1
 ```
 
-Status: `1`
+Detector self-test status: `1`
+
+Verification wrapper status: `0`
 
 ## Local Green Evidence
 
