@@ -95,10 +95,9 @@ jobs:
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height --gate
 
-      - name: Observe variable-height mutation benchmark
+      - name: Run variable-height mutation benchmark gate
         if: steps.change-scope.outputs.docs_only_pr != 'true'
-        continue-on-error: true
-        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height-mutation
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height-mutation --gate
 
       - name: Run memory shape diagnostic
         if: steps.change-scope.outputs.docs_only_pr != 'true'
