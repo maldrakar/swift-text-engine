@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# Cross-target compile helper for TextEngineCore (Slice 13).
-# Compiles TextEngineCore for non-host targets and prints stable key-value lines.
+# Cross-target compile helper for TextEngineCore and TextEngineReferenceProviders.
+# Compiles both packages for non-host targets and prints stable key-value lines
+# carrying a package= field (core | providers).
 #   iOS device + simulator: blocking, through the Swift package graph (xcodebuild).
 #   WASM + embedded WASM: observational, via a Swift SDK matched to the runner
 #   toolchain; skipped-with-record when no matching SDK can be provisioned.
-# The exit code reflects only the blocking iOS results.
+# The exit code reflects only the blocking iOS results, across both packages.
 
 TAIL_LINES="${CROSS_TARGET_LOG_TAIL:-40}"
 SELECTED_TARGETS="all"
