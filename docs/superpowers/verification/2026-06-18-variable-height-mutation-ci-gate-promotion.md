@@ -177,9 +177,9 @@ PR #28
 
 URL: https://github.com/maldrakar/swift-text-engine/pull/28
 
-head SHA: `b4714977e12d9a58098d157ba7724b30ef00938f`
+head SHA: `f92cdca35b4528000a953a7a3d8e640c1d1ddd6e`
 
-Swift CI run: `27740709530`
+Swift CI run: `27741054093`
 
 Run summary:
 
@@ -188,19 +188,19 @@ Swift CI
 pull_request
 completed
 success
-b4714977e12d9a58098d157ba7724b30ef00938f
-iOS cross-target compile=success
+f92cdca35b4528000a953a7a3d8e640c1d1ddd6e
 Host tests and benchmark gate=success
+iOS cross-target compile=success
 WASM cross-target observation=success
 ```
 
 Hosted host-job mutation gate log excerpt:
 
 ```text
-Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:20:53.5375029Z ##[group]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height-mutation --gate
-Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:21:10.4709954Z mode=variable_height_mutation provider=fenwick scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=782 p99_ns=813 failures=0 budget_p95_ns=5000 budget_p99_ns=10000 gate=pass checksum=196866548667
-Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:21:10.4713180Z mode=variable_height_mutation provider=fenwick scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=2788 p99_ns=2852 failures=0 budget_p95_ns=20000 budget_p99_ns=25000 gate=pass checksum=88324286099072
-Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:21:10.4716778Z mode=variable_height_mutation provider=fenwick scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=9966 p99_ns=10135 failures=0 budget_p95_ns=60000 budget_p99_ns=75000 gate=pass checksum=3571078666132451
+Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:29:55.8110611Z ##[group]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height-mutation --gate
+Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:30:13.8306812Z mode=variable_height_mutation provider=fenwick scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=831 p99_ns=868 failures=0 budget_p95_ns=5000 budget_p99_ns=10000 gate=pass checksum=196866548667
+Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:30:13.8309024Z mode=variable_height_mutation provider=fenwick scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=3123 p99_ns=3208 failures=0 budget_p95_ns=20000 budget_p99_ns=25000 gate=pass checksum=88324286099072
+Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:30:13.8311909Z mode=variable_height_mutation provider=fenwick scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=10490 p99_ns=10666 failures=0 budget_p95_ns=60000 budget_p99_ns=75000 gate=pass checksum=3571078666132451
 ```
 
 Committed PR-head workflow proof:
