@@ -213,10 +213,32 @@ This proves the PR-head workflow has no `continue-on-error` on the mutation gate
 
 ## Post-Merge Push Evidence
 
-This section must be completed after the Slice 21 PR is merged and the default-branch push run exists. Required future evidence:
+PR #28 merged at `2026-06-18T06:39:53Z` by `maldrakar`.
 
-- Merge commit SHA.
-- Push run ID.
-- All three required jobs report `success`: `Host tests and benchmark gate`, `iOS cross-target compile`, and `WASM cross-target observation`.
-- The host job mutation gate step reports `success`.
-- Hosted mutation rows include `gate=pass` and the budget fields.
+merge commit: `c646645ba1f0fc097951d40ad30144a61b078ab3`
+
+push run: `27741616147`
+
+Run summary:
+
+```text
+Swift CI
+push
+completed
+success
+c646645ba1f0fc097951d40ad30144a61b078ab3
+Host tests and benchmark gate=success
+WASM cross-target observation=success
+iOS cross-target compile=success
+```
+
+Hosted host-job mutation gate log excerpt:
+
+```text
+Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:43:00.7380641Z ##[group]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --variable-height-mutation --gate
+Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:43:18.2811312Z mode=variable_height_mutation provider=fenwick scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=811 p99_ns=1180 failures=0 budget_p95_ns=5000 budget_p99_ns=10000 gate=pass checksum=196866548667
+Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:43:18.2815744Z mode=variable_height_mutation provider=fenwick scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=2830 p99_ns=2909 failures=0 budget_p95_ns=20000 budget_p99_ns=25000 gate=pass checksum=88324286099072
+Host tests and benchmark gate	Run variable-height mutation benchmark gate	2026-06-18T06:43:18.2822438Z mode=variable_height_mutation provider=fenwick scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=10376 p99_ns=10572 failures=0 budget_p95_ns=60000 budget_p99_ns=75000 gate=pass checksum=3571078666132451
+```
+
+This anchors the merged default-branch workflow behavior: the required host job ran the promoted mutation gate on `main`, and the three mutation scenarios passed with budget fields.
