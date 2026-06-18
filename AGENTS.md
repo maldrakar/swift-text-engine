@@ -94,10 +94,11 @@ Three jobs:
 
 - **Host tests and benchmark gate** on `ubuntu-latest` with
   `swift:6.2.1-bookworm`: `swift test` → synthetic `--gate` (blocking)
-  → `--variable-height --gate` (blocking) → `--variable-height-mutation`
-  (observational) → `--memory-shape` → `--memory-observation` → realistic
-  relative observation (PR-only, `continue-on-error`). The synthetic and
-  variable-height gates **fail the job on perf regression**. Benchmark budgets
+  → `--variable-height --gate` (blocking) → `--variable-height-mutation --gate`
+  (blocking) → `--memory-shape` → `--memory-observation` → realistic
+  relative observation (PR-only, `continue-on-error`). The synthetic, static
+  variable-height, and mutation variable-height gates **fail the job on perf
+  regression**. Benchmark budgets
   are still macOS-calibrated unless hosted Linux x86_64 evidence explicitly
   justifies a retune. SwiftPM build artifacts use `/tmp/text-engine-host-build`,
   not workspace `.build`.
