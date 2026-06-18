@@ -159,23 +159,61 @@ swift-6.1.2-RELEASE_wasm-embedded"
   swift-6.1.2-RELEASE_wasm-embedded
   6.0.3-RELEASE-ubuntu24.04_aarch64
 some descriptive header with spaces"
+  local scheme_list="Information about workspace \"SwiftTextEngine\":
+    Schemes:
+        TextEngineCore
+        TextEngineReferenceProviders
+        ViewportBenchmarks"
   assert_equal "6.1.2" \
     "$(swift_version_key 'Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)')" \
     "swift_version_key_apple"
   assert_equal "6.2.1" \
     "$(swift_version_key 'Swift version 6.2.1 (swift-6.2.1-RELEASE)')" \
     "swift_version_key_oss"
-  assert_equal "0" "$(count_blocking_failures pass:true pass:true skipped:false)" "no_blocking_failures"
-  assert_equal "1" "$(count_blocking_failures fail:true pass:false fail:false skipped:false)" "one_blocking_failure"
-  assert_equal "2" "$(count_blocking_failures fail:true fail:true)" "two_blocking_failures"
-  assert_equal "mode=cross_target_compile target=ios_device result=pass reason=none blocking=true" \
-    "$(emit_target_line ios_device pass none true)" "emit_line"
-  assert_equal "mode=cross_target_compile target=wasm result=skipped reason=sdk_unavailable blocking=false" \
-    "$(emit_target_line wasm skipped sdk_unavailable false)" "emit_skip_line"
-  assert_equal "mode=cross_target_compile_summary ios_device=pass ios_simulator=pass wasm=skipped wasm_embedded=skipped blocking_failures=0 exit=0" \
-    "$(build_summary pass pass skipped skipped 0 0)" "summary_clean"
-  assert_equal "mode=cross_target_compile_summary ios_device=fail ios_simulator=pass wasm=fail wasm_embedded=skipped blocking_failures=1 exit=1" \
-    "$(build_summary fail pass fail skipped 1 1)" "summary_ios_fail"
+
+  # package -> scheme/target name mapping
+  assert_equal "TextEngineCore" "$(scheme_for_package core)" "scheme_for_package_core"
+  assert_equal "TextEngineReferenceProviders" "$(scheme_for_package providers)" "scheme_for_package_providers"
+  assert_command_failure "scheme_for_package_unknown" scheme_for_package bogus
+
+  # scheme membership in an xcodebuild -list block (stdin filter -> yes/no)
+  assert_equal "yes" \
+    "$(printf '%s\n' "$scheme_list" | scheme_in_list TextEngineCore && echo yes || echo no)" \
+    "scheme_in_list_core"
+  assert_equal "yes" \
+    "$(printf '%s\n' "$scheme_list" | scheme_in_list TextEngineReferenceProviders && echo yes || echo no)" \
+    "scheme_in_list_providers"
+  assert_equal "no" \
+    "$(printf '%s\n' "$scheme_list" | scheme_in_list NopeScheme && echo yes || echo no)" \
+    "scheme_in_list_missing"
+
+  # blocking-failure count over the full two-package pair set
+  assert_equal "0" \
+    "$(count_blocking_failures pass:true pass:true skipped:false skipped:false pass:true pass:true skipped:false skipped:false)" \
+    "two_package_clean"
+  assert_equal "1" \
+    "$(count_blocking_failures pass:true pass:true skipped:false skipped:false fail:true pass:true skipped:false skipped:false)" \
+    "two_package_providers_ios_fail"
+  assert_equal "2" \
+    "$(count_blocking_failures fail:true pass:true skipped:false skipped:false fail:true pass:true skipped:false skipped:false)" \
+    "two_package_both_ios_device_fail"
+
+  # per-target lines now carry package=
+  assert_equal "mode=cross_target_compile target=ios_device package=core result=pass reason=none blocking=true" \
+    "$(emit_target_line ios_device core pass none true)" "emit_line"
+  assert_equal "mode=cross_target_compile target=wasm package=providers result=skipped reason=sdk_unavailable blocking=false" \
+    "$(emit_target_line wasm providers skipped sdk_unavailable false)" "emit_skip_line"
+
+  # per-package summary + overall aggregate
+  assert_equal "mode=cross_target_compile_summary package=core ios_device=pass ios_simulator=pass wasm=skipped wasm_embedded=skipped" \
+    "$(build_package_summary core pass pass skipped skipped)" "summary_core"
+  assert_equal "mode=cross_target_compile_summary package=providers ios_device=fail ios_simulator=pass wasm=skipped wasm_embedded=skipped" \
+    "$(build_package_summary providers fail pass skipped skipped)" "summary_providers_fail"
+  assert_equal "mode=cross_target_compile_overall blocking_failures=0 exit=0" \
+    "$(build_overall_summary 0 0)" "overall_clean"
+  assert_equal "mode=cross_target_compile_overall blocking_failures=1 exit=1" \
+    "$(build_overall_summary 1 1)" "overall_fail"
+
   SELECTED_TARGETS="all"
   parse_target_selection all
   assert_command_success "all_selects_ios" target_requested ios
@@ -187,7 +225,7 @@ some descriptive header with spaces"
   assert_command_failure "wasm_skips_ios" target_requested ios
   assert_command_success "wasm_selects_wasm" target_requested wasm
   assert_command_failure "invalid_target_selection" parse_target_selection ios,wasm
-  mark_not_requested ios_device
+  mark_not_requested
   assert_equal "skipped" "$LAST_RESULT" "not_requested_result"
   assert_equal "not_requested" "$LAST_REASON" "not_requested_reason"
   assert_equal "false" "$LAST_BLOCKING" "not_requested_blocking"
