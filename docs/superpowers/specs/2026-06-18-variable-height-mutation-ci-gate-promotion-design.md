@@ -4,7 +4,7 @@ Date: 2026-06-18
 
 ## Status
 
-Draft design direction, written for user review.
+Approved design direction, written for user review.
 
 ## Source Context
 
