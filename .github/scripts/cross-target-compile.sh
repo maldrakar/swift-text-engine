@@ -33,8 +33,24 @@ swift_version_key() {
 
 # Emit one stable per-target line.
 emit_target_line() {
-  # target result reason blocking
-  echo "mode=cross_target_compile target=$1 result=$2 reason=$3 blocking=$4"
+  # target package result reason blocking
+  echo "mode=cross_target_compile target=$1 package=$2 result=$3 reason=$4 blocking=$5"
+}
+
+# Map a package key to its SwiftPM scheme / build-target name. Pure.
+scheme_for_package() {
+  case "$1" in
+    core) printf 'TextEngineCore' ;;
+    providers) printf 'TextEngineReferenceProviders' ;;
+    *) return 1 ;;
+  esac
+}
+
+# Return success if SCHEME ($1) appears under the "Schemes:" block of an
+# `xcodebuild -list` output read on stdin. Pure.
+scheme_in_list() {
+  local scheme="$1"
+  awk 'f && NF { gsub(/^[[:space:]]+/, ""); print } /Schemes:/ { f = 1 }' | grep -qx "$scheme"
 }
 
 # Count blocking failures from "result:blocking" pairs.
@@ -50,10 +66,16 @@ count_blocking_failures() {
   printf '%s' "$n"
 }
 
-# Assemble the summary line.
-build_summary() {
-  # ios_device ios_simulator wasm wasm_embedded blocking_failures exit_code
-  echo "mode=cross_target_compile_summary ios_device=$1 ios_simulator=$2 wasm=$3 wasm_embedded=$4 blocking_failures=$5 exit=$6"
+# Assemble one per-package summary line.
+build_package_summary() {
+  # package ios_device ios_simulator wasm wasm_embedded
+  echo "mode=cross_target_compile_summary package=$1 ios_device=$2 ios_simulator=$3 wasm=$4 wasm_embedded=$5"
+}
+
+# Assemble the overall aggregate line.
+build_overall_summary() {
+  # blocking_failures exit_code
+  echo "mode=cross_target_compile_overall blocking_failures=$1 exit=$2"
 }
 
 parse_target_selection() {
