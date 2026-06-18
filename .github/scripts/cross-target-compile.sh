@@ -8,8 +8,6 @@ set -uo pipefail
 #   toolchain; skipped-with-record when no matching SDK can be provisioned.
 # The exit code reflects only the blocking iOS results.
 
-SCHEME="TextEngineCore"
-PACKAGE_TARGET="TextEngineCore"
 TAIL_LINES="${CROSS_TARGET_LOG_TAIL:-40}"
 SELECTED_TARGETS="all"
 
@@ -273,7 +271,13 @@ some descriptive header with spaces"
 LAST_RESULT=""
 LAST_REASON=""
 LAST_BLOCKING=""
-IOS_SCHEME_STATUS=""
+IOS_LIST_LOG=""
+IOS_LIST_OK=""
+WASM_SDK_ID_WASM=""
+WASM_SKIP_WASM=""
+WASM_SDK_ID_WASM_EMBEDDED=""
+WASM_SKIP_WASM_EMBEDDED=""
+PAIRS=()
 
 # Print the tail of a log file with clear delimiters, so failures are visible in
 # the hosted CI log and usable for the verification record.
@@ -296,33 +300,45 @@ print_ios_toolchain_metadata() {
   echo "cross_target_iphonesimulator_sdk_version=$(xcrun --sdk iphonesimulator --show-sdk-version 2>/dev/null || echo unknown)"
 }
 
-# Resolve the package scheme once, distinguishing an xcodebuild-list infra
-# failure from a genuinely missing scheme.
-resolve_ios_scheme() {
+# Capture `xcodebuild -list` once; record whether it succeeded so per-scheme
+# status can be derived without re-running it.
+resolve_ios_scheme_list() {
   local listlog="$1"
-  if ! xcodebuild -list >"$listlog" 2>&1; then
-    IOS_SCHEME_STATUS="xcodebuild_list_failed"
+  IOS_LIST_LOG="$listlog"
+  if xcodebuild -list >"$listlog" 2>&1; then
+    IOS_LIST_OK="true"
+  else
+    IOS_LIST_OK="false"
     print_log_tail "xcodebuild-list" "$listlog"
+  fi
+}
+
+# Per-scheme status string: "" when resolvable, otherwise a failure reason.
+# An xcodebuild-list infra failure is distinct from a missing scheme.
+ios_scheme_status() {
+  local scheme="$1"
+  if [[ "$IOS_LIST_OK" != "true" ]]; then
+    printf 'xcodebuild_list_failed'
     return
   fi
-  if ! awk 'f && NF { gsub(/^[[:space:]]+/, ""); print } /Schemes:/ { f = 1 }' "$listlog" | grep -qx "$SCHEME"; then
-    IOS_SCHEME_STATUS="scheme_unresolved"
-    print_log_tail "xcodebuild-list" "$listlog"
-    return
+  if scheme_in_list "$scheme" <"$IOS_LIST_LOG"; then
+    printf ''
+  else
+    printf 'scheme_unresolved'
   fi
-  IOS_SCHEME_STATUS=""
 }
 
 compile_ios_target() {
-  local target_name="$1" destination="$2" logfile="$3"
+  local target_name="$1" scheme="$2" destination="$3" logfile="$4" scheme_status
   LAST_BLOCKING="true"
-  echo "cross_target_command target=${target_name} cmd=\"xcodebuild build -scheme ${SCHEME} -destination '${destination}'\""
-  if [[ -n "$IOS_SCHEME_STATUS" ]]; then
+  scheme_status="$(ios_scheme_status "$scheme")"
+  echo "cross_target_command target=${target_name} scheme=${scheme} cmd=\"xcodebuild build -scheme ${scheme} -destination '${destination}'\""
+  if [[ -n "$scheme_status" ]]; then
     LAST_RESULT="fail"
-    LAST_REASON="$IOS_SCHEME_STATUS"
+    LAST_REASON="$scheme_status"
     return
   fi
-  if xcodebuild build -scheme "$SCHEME" -destination "$destination" -derivedDataPath "$DDP" >"$logfile" 2>&1; then
+  if xcodebuild build -scheme "$scheme" -destination "$destination" -derivedDataPath "$DDP" >"$logfile" 2>&1; then
     LAST_RESULT="pass"
     LAST_REASON="none"
   else
@@ -344,15 +360,14 @@ resolve_wasm_sdk_id() {
   printf '%s\n' "$list" | resolve_wasm_sdk_id_from_list "$version" "$kind"
 }
 
-compile_wasm_target() {
-  local kind="$1" target_name="$2" logfile="$3" sdk_id url_var url
-  LAST_BLOCKING="false"
+# Resolve (and if a URL is provided, install) the SDK for a kind once. Stores
+# the resolved id and a skip reason ("" on success) in per-kind globals so both
+# packages reuse the same SDK without re-installing.
+prepare_wasm_sdk() {
+  local kind="$1" logfile="$2" sdk_id="" url_var url skip=""
   if [[ -z "$SWIFT_VERSION" ]]; then
-    LAST_RESULT="skipped"
-    LAST_REASON="swift_version_unresolved"
-    return
-  fi
-  if ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
+    skip="swift_version_unresolved"
+  elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
     if [[ "$kind" == "wasm_embedded" ]]; then
       url_var="CROSS_TARGET_WASM_EMBEDDED_SDK_URL"
     else
@@ -360,34 +375,99 @@ compile_wasm_target() {
     fi
     url="${!url_var:-}"
     if [[ -z "$url" ]]; then
-      LAST_RESULT="skipped"
-      LAST_REASON="sdk_unavailable"
-      return
-    fi
-    echo "cross_target_command target=${target_name} cmd=\"swift sdk install ${url}\""
-    if ! swift sdk install "$url" >"${logfile}.install" 2>&1; then
-      LAST_RESULT="skipped"
-      LAST_REASON="sdk_install_failed"
-      print_log_tail "${target_name}-sdk-install" "${logfile}.install"
-      return
-    fi
-    if ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
-      LAST_RESULT="skipped"
-      LAST_REASON="sdk_unresolved_after_install"
-      return
+      skip="sdk_unavailable"
+    else
+      echo "cross_target_command target=${kind} cmd=\"swift sdk install ${url}\""
+      if ! swift sdk install "$url" >"${logfile}.install" 2>&1; then
+        skip="sdk_install_failed"
+        print_log_tail "${kind}-sdk-install" "${logfile}.install"
+      elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
+        skip="sdk_unresolved_after_install"
+      fi
     fi
   fi
-  local scratch_path="${WORK}/swiftpm-${target_name}"
-  echo "cross_target_wasm_sdk_id target=${target_name} id=${sdk_id}"
-  echo "cross_target_command target=${target_name} cmd=\"swift build --scratch-path ${scratch_path} --swift-sdk ${sdk_id} --target ${PACKAGE_TARGET}\""
-  if swift build --scratch-path "$scratch_path" --swift-sdk "$sdk_id" --target "$PACKAGE_TARGET" >"$logfile" 2>&1; then
+  case "$kind" in
+    wasm)
+      WASM_SDK_ID_WASM="${sdk_id:-}"
+      WASM_SKIP_WASM="$skip"
+      ;;
+    wasm_embedded)
+      WASM_SDK_ID_WASM_EMBEDDED="${sdk_id:-}"
+      WASM_SKIP_WASM_EMBEDDED="$skip"
+      ;;
+  esac
+}
+
+# Build one package for a WASM kind using the prepared SDK. Always non-blocking.
+compile_wasm_package_for_kind() {
+  local kind="$1" pkg="$2" package_target="$3" logfile="$4" sdk_id skip scratch_path
+  LAST_BLOCKING="false"
+  case "$kind" in
+    wasm) sdk_id="$WASM_SDK_ID_WASM"; skip="$WASM_SKIP_WASM" ;;
+    wasm_embedded) sdk_id="$WASM_SDK_ID_WASM_EMBEDDED"; skip="$WASM_SKIP_WASM_EMBEDDED" ;;
+  esac
+  if [[ -n "$skip" ]]; then
+    LAST_RESULT="skipped"
+    LAST_REASON="$skip"
+    return
+  fi
+  scratch_path="${WORK}/swiftpm-${kind}-${pkg}"
+  echo "cross_target_wasm_sdk_id target=${kind} package=${pkg} id=${sdk_id}"
+  echo "cross_target_command target=${kind} package=${pkg} cmd=\"swift build --scratch-path ${scratch_path} --swift-sdk ${sdk_id} --target ${package_target}\""
+  if swift build --scratch-path "$scratch_path" --swift-sdk "$sdk_id" --target "$package_target" >"$logfile" 2>&1; then
     LAST_RESULT="pass"
     LAST_REASON="none"
   else
     LAST_RESULT="fail"
     LAST_REASON="compile_failed"
-    print_log_tail "${target_name}-build" "$logfile"
+    print_log_tail "${kind}-${pkg}-build" "$logfile"
   fi
+}
+
+# Compile every requested target for one package, append blocking pairs to
+# PAIRS, emit per-target lines, and print the package summary line.
+process_package() {
+  local pkg="$1" scheme
+  scheme="$(scheme_for_package "$pkg")"
+  local ios_device_r ios_simulator_r wasm_r wasm_embedded_r
+
+  if target_requested ios; then
+    compile_ios_target ios_device "$scheme" 'generic/platform=iOS' "$WORK/ios_device_${pkg}.log"
+  else
+    mark_not_requested
+  fi
+  ios_device_r="$LAST_RESULT"
+  PAIRS+=("${LAST_RESULT}:${LAST_BLOCKING}")
+  emit_target_line ios_device "$pkg" "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+
+  if target_requested ios; then
+    compile_ios_target ios_simulator "$scheme" 'generic/platform=iOS Simulator' "$WORK/ios_simulator_${pkg}.log"
+  else
+    mark_not_requested
+  fi
+  ios_simulator_r="$LAST_RESULT"
+  PAIRS+=("${LAST_RESULT}:${LAST_BLOCKING}")
+  emit_target_line ios_simulator "$pkg" "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+
+  if target_requested wasm; then
+    compile_wasm_package_for_kind wasm "$pkg" "$scheme" "$WORK/wasm_${pkg}.log"
+  else
+    mark_not_requested
+  fi
+  wasm_r="$LAST_RESULT"
+  PAIRS+=("${LAST_RESULT}:${LAST_BLOCKING}")
+  emit_target_line wasm "$pkg" "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+
+  if target_requested wasm; then
+    compile_wasm_package_for_kind wasm_embedded "$pkg" "$scheme" "$WORK/wasm_embedded_${pkg}.log"
+  else
+    mark_not_requested
+  fi
+  wasm_embedded_r="$LAST_RESULT"
+  PAIRS+=("${LAST_RESULT}:${LAST_BLOCKING}")
+  emit_target_line wasm_embedded "$pkg" "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+
+  build_package_summary "$pkg" "$ios_device_r" "$ios_simulator_r" "$wasm_r" "$wasm_embedded_r"
 }
 
 main() {
@@ -398,63 +478,26 @@ main() {
 
   if target_requested ios; then
     print_ios_toolchain_metadata
-    resolve_ios_scheme "$WORK/xcodebuild-list.log"
-
-    compile_ios_target ios_device 'generic/platform=iOS' "$WORK/ios_device.log"
-    ios_device_result="$LAST_RESULT"
-    ios_device_blocking="$LAST_BLOCKING"
-    emit_target_line ios_device "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
-
-    compile_ios_target ios_simulator 'generic/platform=iOS Simulator' "$WORK/ios_simulator.log"
-    ios_simulator_result="$LAST_RESULT"
-    ios_simulator_blocking="$LAST_BLOCKING"
-    emit_target_line ios_simulator "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
-  else
-    mark_not_requested ios_device
-    ios_device_result="$LAST_RESULT"
-    ios_device_blocking="$LAST_BLOCKING"
-    emit_target_line ios_device "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
-
-    mark_not_requested ios_simulator
-    ios_simulator_result="$LAST_RESULT"
-    ios_simulator_blocking="$LAST_BLOCKING"
-    emit_target_line ios_simulator "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+    resolve_ios_scheme_list "$WORK/xcodebuild-list.log"
   fi
-
   if target_requested wasm; then
-    compile_wasm_target wasm wasm "$WORK/wasm.log"
-    wasm_result="$LAST_RESULT"
-    wasm_blocking="$LAST_BLOCKING"
-    emit_target_line wasm "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
-
-    compile_wasm_target wasm_embedded wasm_embedded "$WORK/wasm_embedded.log"
-    wasm_embedded_result="$LAST_RESULT"
-    wasm_embedded_blocking="$LAST_BLOCKING"
-    emit_target_line wasm_embedded "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
-  else
-    mark_not_requested wasm
-    wasm_result="$LAST_RESULT"
-    wasm_blocking="$LAST_BLOCKING"
-    emit_target_line wasm "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
-
-    mark_not_requested wasm_embedded
-    wasm_embedded_result="$LAST_RESULT"
-    wasm_embedded_blocking="$LAST_BLOCKING"
-    emit_target_line wasm_embedded "$LAST_RESULT" "$LAST_REASON" "$LAST_BLOCKING"
+    prepare_wasm_sdk wasm "$WORK/wasm.sdk"
+    prepare_wasm_sdk wasm_embedded "$WORK/wasm_embedded.sdk"
   fi
+
+  local pkg
+  for pkg in core providers; do
+    process_package "$pkg"
+  done
 
   local blocking_failures exit_code
-  blocking_failures="$(count_blocking_failures \
-    "${ios_device_result}:${ios_device_blocking}" \
-    "${ios_simulator_result}:${ios_simulator_blocking}" \
-    "${wasm_result}:${wasm_blocking}" \
-    "${wasm_embedded_result}:${wasm_embedded_blocking}")"
+  blocking_failures="$(count_blocking_failures "${PAIRS[@]}")"
   if [[ "$blocking_failures" -gt 0 ]]; then
     exit_code=1
   else
     exit_code=0
   fi
-  build_summary "$ios_device_result" "$ios_simulator_result" "$wasm_result" "$wasm_embedded_result" "$blocking_failures" "$exit_code"
+  build_overall_summary "$blocking_failures" "$exit_code"
   exit "$exit_code"
 }
 
