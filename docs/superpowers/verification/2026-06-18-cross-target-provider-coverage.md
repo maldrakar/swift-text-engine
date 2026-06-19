@@ -180,41 +180,95 @@ Exit status: `0`.
 | Previous single-package hosted macOS timing | `docs/superpowers/verification/2026-06-09-cross-target-textenginecore-ci.md` records the Slice 13 hosted cross-target job as `0m36s` for `TextEngineCore` only. | Baseline only; hosted image and helper shape differ from this slice. |
 | Current two-package local timing | The final successful local helper run above completed in the harness in about 5 seconds on Xcode 26.3 after warm caches. | Local-only observation; not comparable to hosted macOS timing. |
 | Attempted local old-vs-new timing | Extracting the pre-slice helper to `/private/tmp` and running it with `/usr/bin/time -p` failed before compilation with `xcodebuild_list_failed` / CoreSimulator service errors. A concurrent timing attempt also failed for the same reason. | Invalid comparison, not used as evidence. |
-| Current two-package hosted timing | PR-head Swift CI run. | Pending: fill after PR run. |
+| Current two-package hosted timing | PR-head Swift CI run `27785976502`: `iOS cross-target compile` = `42s` (device + simulator, both packages). Post-merge push run `27838480583`: `iOS cross-target compile` = `33s`. | Modest delta: PR-head is `+6s` over the `0m36s` single-package baseline; the providers build is incremental on top of the already-built core, as predicted. |
 
-Hosted macOS timing delta is therefore pending hosted PR evidence. The
-correct comparison is the future PR-head `iOS cross-target compile` job against
-the previous hosted single-package `0m36s` baseline.
+Hosted macOS timing delta is therefore confirmed modest. The PR-head
+`iOS cross-target compile` job ran in `42s` versus the previous hosted
+single-package `0m36s` baseline — roughly `+6s` to add the second iOS scheme
+across device and simulator. The post-merge run was `33s`, within normal
+runner-to-runner variance.
 
 ## Hosted Evidence
 
-To be filled after the branch is pushed and CI runs:
+### PR-Head Run (PR #31)
 
 ```text
-pr_number=<pending>
-pr_head_run_id=<pending>
-pr_head_run_url=<pending>
-pr_head_sha=<pending>
-required_context_host=Host tests and benchmark gate:<pending>
-required_context_ios=iOS cross-target compile:<pending>
-required_context_wasm=WASM cross-target observation:<pending>
+pr_number=31
+pr_head_run_id=27785976502
+pr_head_run_url=https://github.com/maldrakar/swift-text-engine/actions/runs/27785976502
+pr_head_sha=65526a971f8e2b67c97ef8d75892757734b754f6
+required_context_host=Host tests and benchmark gate:success (5m14s)
+required_context_ios=iOS cross-target compile:success (42s)
+required_context_wasm=WASM cross-target observation:success (39s)
 ```
 
-Post-merge proof to be filled after merging:
+All three required contexts passed on the PR head. The `iOS cross-target
+compile` job compiled both packages blocking-green:
 
 ```text
-post_merge_push_run_id=<pending>
-post_merge_push_run_url=<pending>
-merge_sha=<pending>
+mode=cross_target_compile target=ios_device package=core result=pass reason=none blocking=true
+mode=cross_target_compile target=ios_simulator package=core result=pass reason=none blocking=true
+mode=cross_target_compile_summary package=core ios_device=pass ios_simulator=pass wasm=skipped wasm_embedded=skipped
+mode=cross_target_compile target=ios_device package=providers result=pass reason=none blocking=true
+mode=cross_target_compile target=ios_simulator package=providers result=pass reason=none blocking=true
+mode=cross_target_compile_summary package=providers ios_device=pass ios_simulator=pass wasm=skipped wasm_embedded=skipped
+mode=cross_target_compile_overall blocking_failures=0 exit=0
 ```
 
-Expected hosted signals:
+The `WASM cross-target observation` job observed both packages and recorded the
+expected non-blocking SDK skip on the hosted runner:
 
-- `iOS cross-target compile` emits package-qualified pass lines for
+```text
+mode=cross_target_compile target=wasm package=core result=skipped reason=sdk_unavailable blocking=false
+mode=cross_target_compile target=wasm_embedded package=core result=skipped reason=sdk_unavailable blocking=false
+mode=cross_target_compile target=wasm package=providers result=skipped reason=sdk_unavailable blocking=false
+mode=cross_target_compile target=wasm_embedded package=providers result=skipped reason=sdk_unavailable blocking=false
+```
+
+### Post-Merge Push Run
+
+PR #31 merged to `main` as merge commit `c0e1681`.
+
+```text
+post_merge_push_run_id=27838480583
+post_merge_push_run_url=https://github.com/maldrakar/swift-text-engine/actions/runs/27838480583
+merge_sha=c0e16819cadc625ac71e551f5fae12e188882385
+required_context_host=Host tests and benchmark gate:success (192s)
+required_context_ios=iOS cross-target compile:success (33s)
+required_context_wasm=WASM cross-target observation:success (35s)
+```
+
+The post-merge `iOS cross-target compile` job anchors the merged-code proof:
+both packages compile blocking-green on the merge commit.
+
+```text
+mode=cross_target_compile target=ios_device package=core result=pass reason=none blocking=true
+mode=cross_target_compile target=ios_simulator package=core result=pass reason=none blocking=true
+mode=cross_target_compile_summary package=core ios_device=pass ios_simulator=pass wasm=skipped wasm_embedded=skipped
+mode=cross_target_compile target=ios_device package=providers result=pass reason=none blocking=true
+mode=cross_target_compile target=ios_simulator package=providers result=pass reason=none blocking=true
+mode=cross_target_compile_summary package=providers ios_device=pass ios_simulator=pass wasm=skipped wasm_embedded=skipped
+mode=cross_target_compile_overall blocking_failures=0 exit=0
+```
+
+The post-merge `WASM cross-target observation` job observed both packages with
+the same non-blocking SDK skip:
+
+```text
+mode=cross_target_compile target=wasm package=core result=skipped reason=sdk_unavailable blocking=false
+mode=cross_target_compile target=wasm_embedded package=core result=skipped reason=sdk_unavailable blocking=false
+mode=cross_target_compile target=wasm package=providers result=skipped reason=sdk_unavailable blocking=false
+mode=cross_target_compile target=wasm_embedded package=providers result=skipped reason=sdk_unavailable blocking=false
+```
+
+### Hosted Signals (confirmed)
+
+- `iOS cross-target compile` emitted package-qualified pass lines for
   `TextEngineCore` and `TextEngineReferenceProviders` on iOS device and
-  simulator, with `mode=cross_target_compile_overall blocking_failures=0 exit=0`.
-- `WASM cross-target observation` emits package-qualified WASM lines for both
-  packages; the hosted runner may record `result=skipped reason=sdk_unavailable`
-  when no matching Swift SDK is installed.
-- Required job contexts remain `Host tests and benchmark gate`,
+  simulator, with `mode=cross_target_compile_overall blocking_failures=0 exit=0`,
+  on both the PR head and the merge commit.
+- `WASM cross-target observation` emitted package-qualified WASM lines for both
+  packages; the hosted runner recorded `result=skipped reason=sdk_unavailable`
+  because no matching Swift SDK is installed.
+- Required job contexts remained `Host tests and benchmark gate`,
   `iOS cross-target compile`, and `WASM cross-target observation`.
