@@ -52,7 +52,9 @@ O(buffer). The variable path provably equals the fixed path for uniform metrics
 
 - `Sources/TextEngineCore` — the library. Pure, headless, Foundation-free.
 - `Sources/TextEngineReferenceProviders` — Foundation-free reference provider
-  library. Reference providers live outside the core.
+  library. Reference providers live outside the core. It is a supported portable
+  product: the hosted cross-target helper compiles it for iOS (blocking) and
+  WASM (observational) alongside `TextEngineCore`.
 - `Sources/ViewportBenchmarks` — executable. Benchmarks, gates, and diagnostics
   live here, NOT in the core.
 - `Tests/TextEngineCoreTests` — XCTest only. (`swift test` also prints a
@@ -103,10 +105,12 @@ Three jobs:
   justifies a retune. SwiftPM build artifacts use `/tmp/text-engine-host-build`,
   not workspace `.build`.
 - **iOS cross-target compile** on `macos-latest`: iOS device + simulator are
-  **blocking**, via `./.github/scripts/cross-target-compile.sh --targets ios`.
-  This is the only hosted macOS job.
+  **blocking** for both `TextEngineCore` and `TextEngineReferenceProviders`, via
+  `./.github/scripts/cross-target-compile.sh --targets ios`. This is the only
+  hosted macOS job.
 - **WASM cross-target observation** on `ubuntu-latest` with
-  `swift:6.2.1-bookworm`: WASM + embedded WASM run via
+  `swift:6.2.1-bookworm`: WASM + embedded WASM run for both `TextEngineCore` and
+  `TextEngineReferenceProviders` via
   `./.github/scripts/cross-target-compile.sh --targets wasm`. They remain
   **observational**: the helper compiles them when a matching Swift SDK is
   installed/provisioned, otherwise records a non-blocking skip.

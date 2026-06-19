@@ -215,7 +215,7 @@ jobs:
           xcodebuild -version
           uname -a
 
-      - name: Compile TextEngineCore for iOS targets
+      - name: Compile cross-target packages for iOS
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: ./.github/scripts/cross-target-compile.sh --targets ios
 
@@ -285,6 +285,6 @@ jobs:
           cat /etc/os-release
           lscpu || true
 
-      - name: Observe TextEngineCore for WASM targets
+      - name: Observe cross-target packages for WASM
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: ./.github/scripts/cross-target-compile.sh --targets wasm
