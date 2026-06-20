@@ -351,4 +351,64 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
             "tree height not logarithmic: height=\(tree.treeHeight()) lineCount=\(tree.lineCount)"
         )
     }
+
+    func testReLayoutAfterStructuralEditMatchesFreshOracle() {
+        var array = sampleHeights(10_000)
+        var tree = BalancedTreeLineMetrics(heights: array)
+        // Structural edit: delete one line, insert a different one elsewhere.
+        tree.removeLine(at: 4_321)
+        array.remove(at: 4_321)
+        tree.insertLine(at: 2_000, height: 48.0)
+        array.insert(48.0, at: 2_000)
+        let oracle = PrefixSumLineMetrics(heights: array)
+
+        let input = VariableViewportInput(
+            scrollOffsetY: oracle.offset(ofLine: 5_000) - 100.0,
+            viewportHeight: 80.0 * 16.0,
+            overscanLinesBefore: 5,
+            overscanLinesAfter: 5
+        )
+        let treeRange = expectSuccess(ViewportVirtualizer.compute(input, metrics: tree))
+        let oracleRange = expectSuccess(ViewportVirtualizer.compute(input, metrics: oracle))
+        XCTAssertEqual(treeRange, oracleRange)
+
+        var treeCursor = ViewportVirtualizer.geometry(for: treeRange, metrics: tree)
+        var oracleCursor = ViewportVirtualizer.geometry(for: oracleRange, metrics: oracle)
+        var emitted = 0
+        while true {
+            let a = treeCursor.next()
+            let b = oracleCursor.next()
+            XCTAssertEqual(a, b, "geometry mismatch at emitted index \(emitted)")
+            if a == nil && b == nil { break }
+            emitted += 1
+            if emitted >= 1_000 {
+                XCTFail("geometry cursor did not terminate")
+                return
+            }
+        }
+        XCTAssertGreaterThan(emitted, 0)
+    }
+
+    func testReLayoutAfterStructuralEditUsesLogarithmicCoreQueries() {
+        let n = 1_000_000
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(n))
+        tree.removeLine(at: n / 3)
+        tree.insertLine(at: n / 4, height: 50.0) // lineCount back to n
+
+        let counter = QueryCounter()
+        let counting = CountingMetrics(base: tree, counter: counter)
+        let input = VariableViewportInput(
+            scrollOffsetY: tree.offset(ofLine: n / 2),
+            viewportHeight: 80.0 * 16.0,
+            overscanLinesBefore: 5,
+            overscanLinesAfter: 5
+        )
+        _ = expectSuccess(ViewportVirtualizer.compute(input, metrics: counting))
+
+        // Two O(1) contract queries (offset 0 and total) plus two binary searches.
+        // A linear scan would be hundreds of thousands of queries.
+        let expectedMax = 2 + (ceilLog2(n) + 1) * 2
+        XCTAssertLessThanOrEqual(counter.count, expectedMax)
+        XCTAssertLessThan(counter.count, 100)
+    }
 }
