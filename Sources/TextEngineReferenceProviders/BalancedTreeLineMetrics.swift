@@ -61,6 +61,42 @@ public struct BalancedTreeLineMetrics: LineMetricsSource {
         return sum
     }
 
+    // MARK: - Height mutation
+
+    // Sets the line at `index` to `newHeight` and adds the height delta to
+    // subtreeHeightSum along the ancestor path on the way back up. No structural
+    // change, no rebalance. Returns the node-visit count. O(log N).
+    @discardableResult
+    public mutating func setHeight(ofLine index: Int, to newHeight: Double) -> Int {
+        precondition(
+            index >= 0 && index < lineCount,
+            "BalancedTreeLineMetrics.setHeight index out of range"
+        )
+        precondition(
+            newHeight.isFinite && newHeight > 0.0,
+            "BalancedTreeLineMetrics.setHeight requires a finite, positive height"
+        )
+        lastMutationNodeVisits = 0
+        _ = updateHeight(root, index, newHeight)
+        return lastMutationNodeVisits
+    }
+
+    private mutating func updateHeight(_ t: Int, _ index: Int, _ newHeight: Double) -> Double {
+        lastMutationNodeVisits += 1
+        let leftCount = nodeCount(nodes[t].left)
+        let delta: Double
+        if index < leftCount {
+            delta = updateHeight(nodes[t].left, index, newHeight)
+        } else if index > leftCount {
+            delta = updateHeight(nodes[t].right, index - leftCount - 1, newHeight)
+        } else {
+            delta = newHeight - nodes[t].height
+            nodes[t].height = newHeight
+        }
+        nodes[t].subtreeHeightSum += delta
+        return delta
+    }
+
     private func nodeCount(_ index: Int) -> Int {
         index == -1 ? 0 : nodes[index].subtreeCount
     }

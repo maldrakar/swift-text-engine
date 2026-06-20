@@ -113,4 +113,46 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         XCTAssertEqual(tree.offset(ofLine: 0), 0.0)
         XCTAssertEqual(tree.treeHeight(), 0)
     }
+
+    func testSetHeightMatchesFreshOracle() {
+        let heights = sampleHeights(500)
+        var tree = BalancedTreeLineMetrics(heights: heights)
+        var mutated = heights
+        // First line, last line, an interior line, then the same interior line
+        // again (repeated edit).
+        let edits: [(index: Int, height: Double)] = [
+            (0, 40.0), (heights.count - 1, 12.0), (250, 28.0), (250, 50.0)
+        ]
+        for edit in edits {
+            let returned = tree.setHeight(ofLine: edit.index, to: edit.height)
+            XCTAssertEqual(returned, tree.lastMutationNodeVisits)
+            mutated[edit.index] = edit.height
+            assertMatchesOracle(tree, mutated, "after editing line \(edit.index)")
+        }
+    }
+
+    func testSetHeightKeepsOffsetsStrictlyIncreasing() {
+        let heights = sampleHeights(300)
+        var tree = BalancedTreeLineMetrics(heights: heights)
+        tree.setHeight(ofLine: 0, to: 64.0)
+        tree.setHeight(ofLine: 299, to: 2.0)
+        tree.setHeight(ofLine: 150, to: 5.0)
+        for i in 0..<tree.lineCount {
+            XCTAssertLessThan(
+                tree.offset(ofLine: i),
+                tree.offset(ofLine: i + 1),
+                "offsets not strictly increasing at line \(i)"
+            )
+        }
+    }
+
+    func testSetHeightVisitCountIsLogarithmic() {
+        for n in [1_000, 100_000, 1_000_000] {
+            var tree = BalancedTreeLineMetrics(heights: sampleHeights(n))
+            let visits = tree.setHeight(ofLine: n / 2, to: 24.0)
+            // Descent depth only (no rebalance): bounded by the tree height.
+            XCTAssertLessThanOrEqual(visits, 4 * (floorLog2(n) + 1), "n=\(n)")
+            XCTAssertGreaterThan(visits, 0)
+        }
+    }
 }
