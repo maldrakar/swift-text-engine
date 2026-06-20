@@ -62,13 +62,50 @@ exhaustive switch that had to handle `.structuralMutation`.
 
 ## Hosted Runs
 
-Pending until PR / post-merge.
+All three required job contexts are `success` on both the PR-head run and the
+post-merge push run, verified at the **step-log** level (not just job
+conclusion). The new `--structural-mutation` gate is deliberately **not** wired
+into CI this slice (Non-Goal: no workflow change), so it does not appear in the
+hosted host-tests job; its proof is the local gate recorded above.
 
-Required contexts to capture after PR and post-merge push:
+### PR #34 head run
 
-- `Host tests and benchmark gate`
-- `iOS cross-target compile`
-- `WASM cross-target observation`
+- Run: `27864913365` (workflow `Swift CI`), head SHA
+  `2f59454583178274564561e5de46bbe37a3efe1d`.
+- `Host tests and benchmark gate` — job `82467240177`, conclusion `success`.
+  Step logs: `Executed 90 tests, with 0 failures`; synthetic `gate=pass` (1k/100k/1m),
+  `variable_height provider=prefix_sum gate=pass`,
+  `variable_height_mutation provider=fenwick gate=pass` (unchanged Fenwick gate),
+  `memory_shape ... invariant=pass`.
+- `iOS cross-target compile` — job `82467240161`, conclusion `success`. Step logs:
+  `package=core` and `package=providers` both `result=pass` on `ios_device` and
+  `ios_simulator`; `mode=cross_target_compile_overall blocking_failures=0 exit=0`.
+- `WASM cross-target observation` — job `82467240163`, conclusion `success`. Step
+  logs: both packages on both WASM kinds `result=skipped reason=sdk_unavailable
+  blocking=false`; overall `exit=0` (expected non-blocking SDK skip).
+
+### Post-merge push run
+
+- Merge commit: `f20c2479ba87770461ae9ef14ae38508e0c3199a`
+  (`Merge pull request #34 from maldrakar/slice-23-dynamic-line-insert-delete`).
+- Run: `27865474380` (workflow `Swift CI`, event `push` on `main`), head SHA
+  `f20c2479ba87770461ae9ef14ae38508e0c3199a`, conclusion `success`.
+- `Host tests and benchmark gate` — job `82468769079`, conclusion `success`.
+  Step logs: `Executed 90 tests, with 0 failures`; synthetic `gate=pass`,
+  `variable_height gate=pass`, `variable_height_mutation gate=pass`,
+  `memory_shape ... invariant=pass`.
+- `iOS cross-target compile` — job `82468769065`, conclusion `success`. Step logs:
+  `package=core` and `package=providers` both `result=pass` on `ios_device` and
+  `ios_simulator`; `mode=cross_target_compile_overall blocking_failures=0 exit=0`.
+- `WASM cross-target observation` — job `82468769083`, conclusion `success`. Step
+  logs: both packages on both WASM kinds `result=skipped reason=sdk_unavailable
+  blocking=false`; overall `exit=0`.
+
+This evidence-fill commit lands on `slice-23-post-merge-verification` (PR after
+the merged Slice 23 PR #34), mirroring the Slice 21 / Slice 22 split of PR-head
+behavior from post-merge push evidence. Land it before writing the Slice 23
+post-slice review so `main`'s verification record never sits with `Pending`
+hosted placeholders (Slice 22 review lesson #3).
 
 ## Commands
 
