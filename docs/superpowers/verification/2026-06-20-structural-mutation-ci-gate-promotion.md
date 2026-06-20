@@ -236,18 +236,39 @@ source_scope_status=0
 
 ## Hosted PR-Head Evidence
 
-Hosted PR-head evidence is added after the Slice 24 PR has a completed Swift CI run for the final head SHA.
+PR:
 
-Required evidence:
+```text
+PR #37: https://github.com/maldrakar/swift-text-engine/pull/37
+head SHA: b9725eed2339ac79d995a4bbe53a3fd205ebad7e
+Swift CI run: 27869783512
+event=pull_request status=completed conclusion=success
+```
 
-- PR number and head SHA;
-- Swift CI run ID;
-- all three required jobs `success`;
-- host job step `Run structural mutation benchmark gate` `success`;
-- hosted structural rows include `mode=structural_mutation`, `budget_p95_ns=`, `budget_p99_ns=`, and `gate=pass` (the hosted Linux x86_64 budget-fit evidence);
-- the committed PR-head workflow has no `continue-on-error` on the structural step.
+Required job conclusions from the PR-head Swift CI run:
 
-If the first hosted run exceeds budget, record the failing numbers here, stop, and revise the spec — do not mask the failure.
+```text
+Host tests and benchmark gate=success
+iOS cross-target compile=success
+WASM cross-target observation=success
+```
+
+Host job structural gate step:
+
+```text
+Run structural mutation benchmark gate=success
+Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T11:31:42.3171755Z ##[group]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --structural-mutation --gate
+Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T11:31:42.3172751Z swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --structural-mutation --gate
+Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T11:32:52.8587175Z mode=structural_mutation provider=balanced_tree scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=3002 p99_ns=3112 failures=0 budget_p95_ns=20000 budget_p99_ns=40000 gate=pass checksum=200106952336
+Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T11:32:52.8622993Z mode=structural_mutation provider=balanced_tree scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=12493 p99_ns=13130 failures=0 budget_p95_ns=80000 budget_p99_ns=120000 gate=pass checksum=89494497658324
+Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T11:32:52.8625926Z mode=structural_mutation provider=balanced_tree scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=45106 p99_ns=46888 failures=0 budget_p95_ns=250000 budget_p99_ns=400000 gate=pass checksum=3379593298396981
+```
+
+The PR-head workflow at `b9725eed2339ac79d995a4bbe53a3fd205ebad7e` contains the structural step with no `continue-on-error` on that step:
+
+```text
+pr_head_structural_gate_step=ok
+```
 
 ## Post-Merge Push Evidence
 
