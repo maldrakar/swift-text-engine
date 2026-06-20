@@ -500,6 +500,107 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         assertMatchesOracle(tree, array, "refill from empty")
     }
 
+    // MARK: - Bulk integration (Slice 25)
+
+    func testMixedBulkAndSingleMutationEquivalenceOracle() {
+        var rngState: UInt64 = 0x9E3779B97F4A7C15
+        func nextRandom(_ bound: Int) -> Int {
+            rngState = rngState &* 6364136223846793005 &+ 1442695040888963407
+            return Int((rngState >> 33) % UInt64(bound))
+        }
+
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(60))
+        var array = sampleHeights(60)
+        let heightChoices = [10.0, 16.0, 22.0, 28.0, 34.0]
+
+        for step in 0..<1_500 {
+            let count = array.count
+            let op = count == 0 ? 0 : nextRandom(5)
+            switch op {
+            case 0: // bulk insert
+                let index = nextRandom(count + 1)
+                let k = 1 + nextRandom(40)
+                let batch = (0..<k).map { _ in heightChoices[nextRandom(heightChoices.count)] }
+                tree.insertLines(at: index, heights: batch)
+                array.insert(contentsOf: batch, at: index)
+            case 1: // bulk remove
+                let span = 1 + nextRandom(min(40, count))
+                let index = nextRandom(count - span + 1)
+                tree.removeLines(at: index, count: span)
+                array.removeSubrange(index..<(index + span))
+            case 2: // single insert
+                let index = nextRandom(count + 1)
+                let height = heightChoices[nextRandom(heightChoices.count)]
+                tree.insertLine(at: index, height: height)
+                array.insert(height, at: index)
+            case 3: // single remove
+                let index = nextRandom(count)
+                tree.removeLine(at: index)
+                array.remove(at: index)
+            default: // setHeight
+                let index = nextRandom(count)
+                let height = heightChoices[nextRandom(heightChoices.count)]
+                tree.setHeight(ofLine: index, to: height)
+                array[index] = height
+            }
+            assertMatchesOracle(tree, array, "after step \(step) op \(op)")
+        }
+    }
+
+    func testReLayoutAfterBulkEditMatchesFreshOracle() {
+        var array = sampleHeights(10_000)
+        var tree = BalancedTreeLineMetrics(heights: array)
+        tree.removeLines(at: 4_000, count: 500)
+        array.removeSubrange(4_000..<4_500)
+        let inserted = (0..<500).map { Double(12 + ($0 % 5) * 6) }
+        tree.insertLines(at: 2_000, heights: inserted)
+        array.insert(contentsOf: inserted, at: 2_000)
+        let oracle = PrefixSumLineMetrics(heights: array)
+
+        let input = VariableViewportInput(
+            scrollOffsetY: oracle.offset(ofLine: 5_000) - 100.0,
+            viewportHeight: 80.0 * 16.0,
+            overscanLinesBefore: 5,
+            overscanLinesAfter: 5
+        )
+        let treeRange = expectSuccess(ViewportVirtualizer.compute(input, metrics: tree))
+        let oracleRange = expectSuccess(ViewportVirtualizer.compute(input, metrics: oracle))
+        XCTAssertEqual(treeRange, oracleRange)
+
+        var treeCursor = ViewportVirtualizer.geometry(for: treeRange, metrics: tree)
+        var oracleCursor = ViewportVirtualizer.geometry(for: oracleRange, metrics: oracle)
+        var emitted = 0
+        while true {
+            let a = treeCursor.next()
+            let b = oracleCursor.next()
+            XCTAssertEqual(a, b, "geometry mismatch at \(emitted)")
+            if a == nil && b == nil { break }
+            emitted += 1
+            if emitted >= 1_000 { XCTFail("cursor did not terminate"); return }
+        }
+        XCTAssertGreaterThan(emitted, 0)
+    }
+
+    func testReLayoutAfterBulkEditUsesLogarithmicCoreQueries() {
+        let n = 1_000_000
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(n))
+        tree.removeLines(at: n / 3, count: 1_000)
+        tree.insertLines(at: n / 4, heights: (0..<1_000).map { Double(20 + $0 % 9) })
+
+        let counter = QueryCounter()
+        let counting = CountingMetrics(base: tree, counter: counter)
+        let input = VariableViewportInput(
+            scrollOffsetY: tree.offset(ofLine: n / 2),
+            viewportHeight: 80.0 * 16.0,
+            overscanLinesBefore: 5,
+            overscanLinesAfter: 5
+        )
+        _ = expectSuccess(ViewportVirtualizer.compute(input, metrics: counting))
+        let expectedMax = 2 + (ceilLog2(n) + 1) * 2
+        XCTAssertLessThanOrEqual(counter.count, expectedMax)
+        XCTAssertLessThan(counter.count, 100)
+    }
+
     func testStructuralMutationVisitCountIsLogarithmic() {
         var visitsBySize: [Int: Int] = [:]
         for n in [1_000, 100_000, 1_000_000] {
