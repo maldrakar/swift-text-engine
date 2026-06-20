@@ -257,4 +257,98 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
             )
         }
     }
+
+    func testMixedMutationEquivalenceOracle() {
+        // Deterministic LCG (no Foundation): seeded, reproducible op sequence.
+        var rngState: UInt64 = 0x2545F4914F6CDD1D
+        func nextRandom(_ bound: Int) -> Int {
+            rngState = rngState &* 6364136223846793005 &+ 1442695040888963407
+            return Int((rngState >> 33) % UInt64(bound))
+        }
+
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(40))
+        var array = sampleHeights(40)
+        let heightChoices = [10.0, 16.0, 22.0, 28.0, 34.0]
+
+        for step in 0..<2_000 {
+            let count = array.count
+            let op = count == 0 ? 0 : nextRandom(3) // force insert when empty
+            switch op {
+            case 0: // insert (head / tail / interior all reachable)
+                let index = nextRandom(count + 1)
+                let height = heightChoices[nextRandom(heightChoices.count)]
+                tree.insertLine(at: index, height: height)
+                array.insert(height, at: index)
+            case 1: // remove
+                let index = nextRandom(count)
+                tree.removeLine(at: index)
+                array.remove(at: index)
+            default: // setHeight
+                let index = nextRandom(count)
+                let height = heightChoices[nextRandom(heightChoices.count)]
+                tree.setHeight(ofLine: index, to: height)
+                array[index] = height
+            }
+            assertMatchesOracle(tree, array, "after step \(step) op \(op)")
+            // Strictly-increasing invariant (spec test 3) after each op.
+            for i in 0..<tree.lineCount {
+                XCTAssertLessThan(
+                    tree.offset(ofLine: i),
+                    tree.offset(ofLine: i + 1),
+                    "not strictly increasing at \(i) after step \(step)"
+                )
+            }
+        }
+
+        // Remove-to-empty edge, then refill from empty.
+        while array.count > 0 {
+            tree.removeLine(at: 0)
+            array.remove(at: 0)
+            assertMatchesOracle(tree, array, "draining to empty")
+        }
+        XCTAssertEqual(tree.lineCount, 0)
+        tree.insertLine(at: 0, height: 21.0)
+        array.insert(21.0, at: 0)
+        assertMatchesOracle(tree, array, "refill from empty")
+    }
+
+    func testStructuralMutationVisitCountIsLogarithmic() {
+        var visitsBySize: [Int: Int] = [:]
+        for n in [1_000, 100_000, 1_000_000] {
+            var tree = BalancedTreeLineMetrics(heights: sampleHeights(n))
+            let visits = tree.insertLine(at: n / 2, height: 24.0)
+            XCTAssertGreaterThan(visits, 0)
+            // Descent + rebalance touches stay within a small constant times log N.
+            XCTAssertLessThanOrEqual(visits, 10 * (floorLog2(n) + 1), "n=\(n)")
+            visitsBySize[n] = visits
+        }
+        // A 1000x size jump must NOT scale visits ~1000x; a balanced tree's
+        // descent grows only logarithmically (~2x over this range).
+        XCTAssertLessThan(
+            visitsBySize[1_000_000]!,
+            visitsBySize[1_000]! * 8,
+            "node visits grew faster than logarithmic across a 1000x size jump"
+        )
+    }
+
+    func testTreeHeightStaysLogarithmicAfterEditSequence() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(10_000))
+        // Deterministic interleaved inserts and deletes that churn the structure.
+        for k in 0..<10_000 {
+            let count = tree.lineCount
+            if k % 2 == 0 {
+                let index = (k &* 7) % (count + 1)
+                tree.insertLine(at: index, height: Double(12 + (k % 4) * 5))
+            } else {
+                let index = (k &* 13) % count
+                tree.removeLine(at: index)
+            }
+        }
+        XCTAssertGreaterThan(tree.lineCount, 0)
+        XCTAssertLessThanOrEqual(
+            tree.treeHeight(),
+            3 * (floorLog2(tree.lineCount) + 1),
+            "tree height not logarithmic: height=\(tree.treeHeight()) lineCount=\(tree.lineCount)"
+        )
+    }
 }
