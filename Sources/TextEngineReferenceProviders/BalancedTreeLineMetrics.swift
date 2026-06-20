@@ -151,6 +151,73 @@ public struct BalancedTreeLineMetrics: LineMetricsSource {
         return maintain(t, leftGrew: goLeft)
     }
 
+    // MARK: - Structural mutation: remove
+
+    // Removes the line at `index`. O(log N): descend to the target, remove it
+    // (in-order successor swap when it has two children), recycle its slot, fix
+    // aggregates, rebalance. Returns node visits.
+    @discardableResult
+    public mutating func removeLine(at index: Int) -> Int {
+        precondition(
+            index >= 0 && index < lineCount,
+            "BalancedTreeLineMetrics.removeLine index out of range"
+        )
+        lastMutationNodeVisits = 0
+        root = remove(root, index)
+        return lastMutationNodeVisits
+    }
+
+    private mutating func remove(_ t: Int, _ index: Int) -> Int {
+        lastMutationNodeVisits += 1
+        let leftCount = nodeCount(nodes[t].left)
+        if index < leftCount {
+            let updated = remove(nodes[t].left, index)
+            nodes[t].left = updated
+            pull(t)
+            return maintain(t, leftGrew: false) // left shrank -> right may be too big
+        } else if index > leftCount {
+            let updated = remove(nodes[t].right, index - leftCount - 1)
+            nodes[t].right = updated
+            pull(t)
+            return maintain(t, leftGrew: true)  // right shrank -> left may be too big
+        } else {
+            let l = nodes[t].left
+            let r = nodes[t].right
+            if l == -1 {
+                freeList.append(t)
+                return r
+            } else if r == -1 {
+                freeList.append(t)
+                return l
+            } else {
+                // Two children: copy the in-order successor's height into this
+                // node, then delete the successor (the min of the right subtree).
+                let removed = removeMin(r)
+                nodes[t].height = removed.height
+                nodes[t].right = removed.root
+                pull(t)
+                return maintain(t, leftGrew: true) // right shrank -> left may be too big
+            }
+        }
+    }
+
+    // Removes the leftmost node of subtree `t`, recycles its slot, and returns
+    // the new subtree root plus the removed node's height.
+    private mutating func removeMin(_ t: Int) -> (root: Int, height: Double) {
+        lastMutationNodeVisits += 1
+        if nodes[t].left == -1 {
+            let r = nodes[t].right
+            let height = nodes[t].height
+            freeList.append(t)
+            return (r, height)
+        }
+        let removed = removeMin(nodes[t].left)
+        nodes[t].left = removed.root
+        pull(t)
+        let rebalanced = maintain(t, leftGrew: false) // left shrank -> right may be too big
+        return (rebalanced, removed.height)
+    }
+
     // MARK: - SBT balance
 
     private func leftChild(_ index: Int) -> Int { index == -1 ? -1 : nodes[index].left }

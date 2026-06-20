@@ -197,4 +197,64 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         tree.insertLine(at: 0, height: 17.0)
         assertMatchesOracle(tree, [17.0, 21.0, 13.0])
     }
+
+    func testRemoveSequenceMatchesOracleDownToEmpty() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(600))
+        var mutated = sampleHeights(600)
+        var k = 0
+        while !mutated.isEmpty {
+            let count = mutated.count
+            // Cycle head / tail / interior removals (interior exercises the
+            // two-children successor-swap delete path).
+            let raw: Int
+            switch k % 3 {
+            case 0: raw = 0
+            case 1: raw = count - 1
+            default: raw = count / 2
+            }
+            let index = raw % count
+            let visits = tree.removeLine(at: index)
+            XCTAssertGreaterThan(visits, 0)
+            mutated.remove(at: index)
+            assertMatchesOracle(tree, mutated, "after removing index \(index) (k=\(k))")
+            k += 1
+        }
+        XCTAssertEqual(tree.lineCount, 0)
+        XCTAssertEqual(tree.offset(ofLine: 0), 0.0)
+        XCTAssertEqual(tree.treeHeight(), 0)
+    }
+
+    func testRemoveThenInsertMatchesOracleWithRecycledSlots() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(12))
+        var mutated = sampleHeights(12)
+
+        for step in 0..<3 {
+            let index: Int
+            switch step {
+            case 0: index = 0
+            case 1: index = mutated.count - 1
+            default: index = mutated.count / 2
+            }
+            tree.removeLine(at: index)
+            mutated.remove(at: index)
+            assertMatchesOracle(tree, mutated, "after removing index \(index)")
+        }
+
+        for step in 0..<3 {
+            let index: Int
+            switch step {
+            case 0: index = 0
+            case 1: index = mutated.count
+            default: index = mutated.count / 2
+            }
+            let height = Double(41 + step * 2)
+            tree.insertLine(at: index, height: height)
+            mutated.insert(height, at: index)
+            assertMatchesOracle(
+                tree,
+                mutated,
+                "after inserting \(height) at \(index)"
+            )
+        }
+    }
 }
