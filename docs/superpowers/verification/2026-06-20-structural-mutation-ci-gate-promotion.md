@@ -272,12 +272,41 @@ pr_head_structural_gate_step=ok
 
 ## Post-Merge Push Evidence
 
-Post-merge evidence is added after the Slice 24 PR is merged and the `main` push Swift CI run for the merge commit completes.
+PR:
 
-Required evidence:
+```text
+PR #37: https://github.com/maldrakar/swift-text-engine/pull/37
+merge commit SHA: 716a8e6059635aef0bf1c661ec44c710454f834e
+mergedAt: 2026-06-20T14:08:49Z
+mergedBy: maldrakar
+```
 
-- merge commit SHA;
-- push run ID;
-- all three required jobs `success`;
-- host job structural gate step `success`;
-- hosted structural rows include `gate=pass` and budget fields.
+Post-merge push run:
+
+```text
+push run ID: 27873570781
+name=Swift CI
+event=push
+status=completed
+conclusion=success
+headSha=716a8e6059635aef0bf1c661ec44c710454f834e
+```
+
+Required job conclusions from the post-merge push Swift CI run:
+
+```text
+Host tests and benchmark gate=success
+iOS cross-target compile=success
+WASM cross-target observation=success
+```
+
+Host job structural gate step:
+
+```text
+Run structural mutation benchmark gate=success
+Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T14:12:26.4228622Z ##[group]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --structural-mutation --gate
+Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T14:12:26.4230270Z swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --structural-mutation --gate
+Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T14:13:28.3155700Z mode=structural_mutation provider=balanced_tree scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=3005 p99_ns=3070 failures=0 budget_p95_ns=20000 budget_p99_ns=40000 gate=pass checksum=200106952336
+Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T14:13:28.3157586Z mode=structural_mutation provider=balanced_tree scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=12483 p99_ns=14623 failures=0 budget_p95_ns=80000 budget_p99_ns=120000 gate=pass checksum=89494497658324
+Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T14:13:28.3159858Z mode=structural_mutation provider=balanced_tree scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=34577 p99_ns=36831 failures=0 budget_p95_ns=250000 budget_p99_ns=400000 gate=pass checksum=3379593298396981
+```
