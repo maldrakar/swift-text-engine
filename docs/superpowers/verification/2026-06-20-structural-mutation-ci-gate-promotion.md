@@ -240,8 +240,8 @@ PR:
 
 ```text
 PR #37: https://github.com/maldrakar/swift-text-engine/pull/37
-head SHA: b9725eed2339ac79d995a4bbe53a3fd205ebad7e
-Swift CI run: 27869783512
+head SHA: 69ddac0f2731be8c624dc08f70c86cc2222838dc
+Swift CI run: 27870025680
 event=pull_request status=completed conclusion=success
 ```
 
@@ -257,14 +257,14 @@ Host job structural gate step:
 
 ```text
 Run structural mutation benchmark gate=success
-Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T11:31:42.3171755Z ##[group]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --structural-mutation --gate
-Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T11:31:42.3172751Z swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --structural-mutation --gate
-Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T11:32:52.8587175Z mode=structural_mutation provider=balanced_tree scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=3002 p99_ns=3112 failures=0 budget_p95_ns=20000 budget_p99_ns=40000 gate=pass checksum=200106952336
-Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T11:32:52.8622993Z mode=structural_mutation provider=balanced_tree scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=12493 p99_ns=13130 failures=0 budget_p95_ns=80000 budget_p99_ns=120000 gate=pass checksum=89494497658324
-Host tests and benchmark gate	Run structural mutation benchmark gate	2026-06-20T11:32:52.8625926Z mode=structural_mutation provider=balanced_tree scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=45106 p99_ns=46888 failures=0 budget_p95_ns=250000 budget_p99_ns=400000 gate=pass checksum=3379593298396981
+Host tests and benchmark gate	UNKNOWN STEP	2026-06-20T11:42:21.7056416Z ##[group]Run swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --structural-mutation --gate
+Host tests and benchmark gate	UNKNOWN STEP	2026-06-20T11:42:21.7057319Z swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --structural-mutation --gate
+Host tests and benchmark gate	UNKNOWN STEP	2026-06-20T11:43:42.0703785Z mode=structural_mutation provider=balanced_tree scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=3193 p99_ns=3473 failures=0 budget_p95_ns=20000 budget_p99_ns=40000 gate=pass checksum=200106952336
+Host tests and benchmark gate	UNKNOWN STEP	2026-06-20T11:43:42.0705994Z mode=structural_mutation provider=balanced_tree scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=14090 p99_ns=14272 failures=0 budget_p95_ns=80000 budget_p99_ns=120000 gate=pass checksum=89494497658324
+Host tests and benchmark gate	UNKNOWN STEP	2026-06-20T11:43:42.0708364Z mode=structural_mutation provider=balanced_tree scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=54040 p99_ns=57660 failures=0 budget_p95_ns=250000 budget_p99_ns=400000 gate=pass checksum=3379593298396981
 ```
 
-The PR-head workflow at `b9725eed2339ac79d995a4bbe53a3fd205ebad7e` contains the structural step with no `continue-on-error` on that step:
+The PR-head workflow at `69ddac0f2731be8c624dc08f70c86cc2222838dc` contains the structural step with no `continue-on-error` on that step:
 
 ```text
 pr_head_structural_gate_step=ok
