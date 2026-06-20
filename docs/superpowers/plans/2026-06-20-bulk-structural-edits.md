@@ -43,7 +43,7 @@
   - `private mutating func join2(_ left: Int, _ right: Int) -> Int`
   - `internal var arenaNodeCount: Int` / `internal var freeSlotCount: Int`
 
-- [ ] **Step 1: Write the failing tests for `insertLines`**
+- [x] **Step 1: Write the failing tests for `insertLines`**
 
 Add these methods to `final class BalancedTreeLineMetricsTests` in `Tests/TextEngineReferenceProvidersTests/BalancedTreeLineMetricsTests.swift`:
 
@@ -137,12 +137,12 @@ Add these methods to `final class BalancedTreeLineMetricsTests` in `Tests/TextEn
     }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `swift test --filter BalancedTreeLineMetricsTests/testInsertLines`
 Expected: FAIL — compile error `value of type 'BalancedTreeLineMetrics' has no member 'insertLines'`.
 
-- [ ] **Step 3: Add the diagnostics and private primitives**
+- [x] **Step 3: Add the diagnostics and private primitives**
 
 In `Sources/TextEngineReferenceProviders/BalancedTreeLineMetrics.swift`, add the two diagnostics right after the `lastMutationNodeVisits` declaration:
 
@@ -262,7 +262,7 @@ Then add a new `// MARK: - Bulk structural mutation` section (place it after the
     }
 ```
 
-- [ ] **Step 4: Add the public `insertLines` method**
+- [x] **Step 4: Add the public `insertLines` method**
 
 Add to the `// MARK: - Bulk structural mutation` section:
 
@@ -294,19 +294,19 @@ Add to the `// MARK: - Bulk structural mutation` section:
     }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `swift test --filter BalancedTreeLineMetricsTests/testInsertLines`
 Expected: PASS (all six `testInsertLines*` tests).
 
 If `testInsertLinesKeepsTreeBalanced` or `testInsertLinesVisitCountIsKPlusLogarithmic` fails, the join is not restoring balance / not telescoping. See the spec's Decision 2 risk hedge (rebuild the affected spine subtree balanced) before changing the visit bound — the bound is the contract, not the variable to loosen. Surface this at the review checkpoint.
 
-- [ ] **Step 6: Run the full provider test suite to confirm no regression**
+- [x] **Step 6: Run the full provider test suite to confirm no regression**
 
 Run: `swift test --filter BalancedTreeLineMetricsTests`
 Expected: PASS — all existing single-line tests plus the new insert tests.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Sources/TextEngineReferenceProviders/BalancedTreeLineMetrics.swift Tests/TextEngineReferenceProvidersTests/BalancedTreeLineMetricsTests.swift
@@ -325,7 +325,7 @@ git commit -m "feat: add O(k + log N) bulk insertLines to BalancedTreeLineMetric
 - Consumes (from Task 1): `split`, `join2`, `buildBalancedRun`, `arenaNodeCount`, `freeSlotCount`, `insertLines`.
 - Produces (used by Task 3): `@discardableResult public mutating func removeLines(at index: Int, count: Int) -> Int`.
 
-- [ ] **Step 1: Write the failing tests for `removeLines`**
+- [x] **Step 1: Write the failing tests for `removeLines`**
 
 Add to `final class BalancedTreeLineMetricsTests`:
 
@@ -433,12 +433,12 @@ Add to `final class BalancedTreeLineMetricsTests`:
     }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `swift test --filter BalancedTreeLineMetricsTests/testRemoveLines`
 Expected: FAIL — compile error `value of type 'BalancedTreeLineMetrics' has no member 'removeLines'`.
 
-- [ ] **Step 3: Add `recycleSubtree` and `removeLines`**
+- [x] **Step 3: Add `recycleSubtree` and `removeLines`**
 
 In the `// MARK: - Bulk structural mutation` section of `BalancedTreeLineMetrics.swift`, add:
 
@@ -485,7 +485,7 @@ In the `// MARK: - Bulk structural mutation` section of `BalancedTreeLineMetrics
     }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `swift test --filter BalancedTreeLineMetricsTests/testRemoveLines`
 Expected: PASS (all `testRemoveLines*` tests).
@@ -497,7 +497,7 @@ Expected: PASS (`testBulkChurnKeepsTreeBalanced`, `testBulkChurnReusesArenaSlots
 
 If `testBulkChurnReusesArenaSlots` fails because the arena grows, confirm `buildBalancedRun` allocates via `allocateNode` (not `nodes.append`) and that `recycleSubtree` runs before the `join2`. If `testBulkChurnKeepsTreeBalanced` fails, this is the join-balance risk — surface at the review checkpoint per the spec's Decision 2.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/TextEngineReferenceProviders/BalancedTreeLineMetrics.swift Tests/TextEngineReferenceProvidersTests/BalancedTreeLineMetricsTests.swift
@@ -515,7 +515,7 @@ git commit -m "feat: add O(k + log N) bulk removeLines with slot recycling"
 - Consumes: `insertLines`, `removeLines`, `insertLine`, `removeLine`, `setHeight`, `ViewportVirtualizer.compute`, `ViewportVirtualizer.geometry`, `VariableViewportInput`, `PrefixSumLineMetrics`, `CountingMetrics`, `QueryCounter`, `expectSuccess`, `ceilLog2`.
 - Produces: none (test-only).
 
-- [ ] **Step 1: Write the failing integration tests**
+- [x] **Step 1: Write the failing integration tests**
 
 Add to `final class BalancedTreeLineMetricsTests`:
 
@@ -622,18 +622,18 @@ Add to `final class BalancedTreeLineMetricsTests`:
     }
 ```
 
-- [ ] **Step 2: Run the tests**
+- [x] **Step 2: Run the tests**
 
 Run: `swift test --filter BalancedTreeLineMetricsTests/testMixed`
 Run: `swift test --filter BalancedTreeLineMetricsTests/testReLayoutAfterBulk`
 Expected: PASS. (These exercise existing code from Tasks 1–2; they lock in bulk↔single interaction and core composition. If `testMixedBulkAndSingleMutationEquivalenceOracle` fails, the first failing step pinpoints the offending op.)
 
-- [ ] **Step 3: Run the whole provider suite**
+- [x] **Step 3: Run the whole provider suite**
 
 Run: `swift test --filter BalancedTreeLineMetricsTests`
 Expected: PASS — every existing and new test.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Tests/TextEngineReferenceProvidersTests/BalancedTreeLineMetricsTests.swift
@@ -653,7 +653,7 @@ git commit -m "test: cover mixed bulk/single edits and bulk re-layout compositio
 - Consumes: `BalancedTreeLineMetrics.insertLines` / `.removeLines` / `.lastMutationNodeVisits`, `variableHeights(lineCount:)`, `deterministicScrollOffset(sample:maxOffset:)`, `percentile`, `nanoseconds`, `formatSummary`, `BenchmarkSummary`, `BenchmarkOperationResult`, `ViewportVirtualizer.compute` / `.geometry`, `VariableViewportInput`.
 - Produces: `BenchmarkMode.bulkStructuralMutation`, `func runBulkStructuralMutationBenchmarks(enforceGate: Bool) -> Bool`.
 
-- [ ] **Step 1: Add the mode to `BenchmarkMode` (compile-driven failing state)**
+- [x] **Step 1: Add the mode to `BenchmarkMode` (compile-driven failing state)**
 
 In `Sources/ViewportBenchmarks/BenchmarkOptions.swift`, add `case bulkStructuralMutation` after `case structuralMutation` in the `enum BenchmarkMode`, and add its `outputName`:
 
@@ -662,7 +662,7 @@ In `Sources/ViewportBenchmarks/BenchmarkOptions.swift`, add `case bulkStructural
             return "bulk_structural_mutation"
 ```
 
-- [ ] **Step 2: Add parsing, usage, and gate-validity**
+- [x] **Step 2: Add parsing, usage, and gate-validity**
 
 In `BenchmarkOptions.swift`, add to `usage` (in the `Usage:` line and the options list):
 
@@ -682,7 +682,7 @@ Add the parse case after the `--structural-mutation` case:
 
 (`--gate` is already permitted for any mode except `rangeOnly` / `memoryShape` / `memoryObservation`, so `bulkStructuralMutation` is gate-valid with no change to the trailing guard.)
 
-- [ ] **Step 3: Write the benchmark file**
+- [x] **Step 3: Write the benchmark file**
 
 Create `Sources/ViewportBenchmarks/BulkStructuralMutationBenchmark.swift`:
 
@@ -849,7 +849,7 @@ func runBulkStructuralMutationBenchmarks(enforceGate: Bool) -> Bool {
 }
 ```
 
-- [ ] **Step 4: Dispatch the mode**
+- [x] **Step 4: Dispatch the mode**
 
 In `Sources/ViewportBenchmarks/BenchmarkProgram.swift`, add to the `switch options.mode` in `runBenchmarks`, after the `.structuralMutation` case:
 
@@ -858,7 +858,7 @@ In `Sources/ViewportBenchmarks/BenchmarkProgram.swift`, add to the `switch optio
         return runBulkStructuralMutationBenchmarks(enforceGate: options.enforceGate)
 ```
 
-- [ ] **Step 5: Build and run the new gate**
+- [x] **Step 5: Build and run the new gate**
 
 Run: `swift build -c release`
 Expected: `Build complete!`
@@ -868,7 +868,7 @@ Expected: one summary line per scenario, each ending `gate=pass`, process exits 
 
 If a scenario prints `gate=fail`, first confirm the measured p95/p99 vs the budget. **Calibrate budgets to observed-local + headroom** (macOS, like the other gates): raise an over-tight budget to ~1.5–2× the observed p95/p99 so it is stable but still tight enough that a regression to compose-level cost (≈ batchSize × the single-op `--structural-mutation` p95) would fail. Record the observed numbers for the verification doc.
 
-- [ ] **Step 6: Confirm mutual exclusivity and gate-validity**
+- [x] **Step 6: Confirm mutual exclusivity and gate-validity**
 
 Run: `swift run -c release ViewportBenchmarks -- --bulk-structural-mutation --structural-mutation`
 Expected: `error=--structural-mutation cannot be combined with another mode` (exit 1).
@@ -876,7 +876,7 @@ Expected: `error=--structural-mutation cannot be combined with another mode` (ex
 Run: `swift run -c release ViewportBenchmarks -- --help`
 Expected: usage text includes the `--bulk-structural-mutation` line.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Sources/ViewportBenchmarks/BulkStructuralMutationBenchmark.swift Sources/ViewportBenchmarks/BenchmarkOptions.swift Sources/ViewportBenchmarks/BenchmarkProgram.swift
@@ -892,7 +892,7 @@ git commit -m "feat: add --bulk-structural-mutation benchmark with local gate"
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Add the local-gate command to the Commands block**
+- [x] **Step 1: Add the local-gate command to the Commands block**
 
 In `AGENTS.md`, in the ```bash Commands fenced block, add after the `--structural-mutation --gate` line:
 
@@ -900,16 +900,16 @@ In `AGENTS.md`, in the ```bash Commands fenced block, add after the `--structura
 swift run -c release ViewportBenchmarks -- --bulk-structural-mutation --gate   # bulk insert/delete-range local gate
 ```
 
-- [ ] **Step 2: Add the flag to the benchmark-flags note**
+- [x] **Step 2: Add the flag to the benchmark-flags note**
 
 In `AGENTS.md`, in the "Benchmark flags:" paragraph, add `--bulk-structural-mutation` to the list of mode flags, and add it to the set for which `--gate` is **valid** (alongside `--structural-mutation`). Leave the `--gate`-rejected set (`--range-only`, `--memory-shape`, `--memory-observation`) unchanged.
 
-- [ ] **Step 3: Verify the docs-only nature of this change**
+- [x] **Step 3: Verify the docs-only nature of this change**
 
 Run: `git diff --name-only`
 Expected: only `AGENTS.md`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add AGENTS.md
