@@ -247,6 +247,47 @@ public struct BalancedTreeLineMetrics: LineMetricsSource {
         return lastMutationNodeVisits
     }
 
+    // Pushes every node slot in subtree `t` onto freeList so a later insert reuses
+    // them. Iterative (explicit stack) to avoid recursion depth on large ranges.
+    // O(size of t).
+    private mutating func recycleSubtree(_ t: Int) {
+        if t == -1 {
+            return
+        }
+        var stack = [t]
+        while let node = stack.popLast() {
+            lastMutationNodeVisits += 1
+            let left = nodes[node].left
+            let right = nodes[node].right
+            freeList.append(node)
+            if left != -1 { stack.append(left) }
+            if right != -1 { stack.append(right) }
+        }
+    }
+
+    // Removes the `count` lines starting at in-order position `index`. Validates
+    // before mutating (atomic). O(count + log N): split out the range, recycle its
+    // slots, join the remainder. Returns node visits. The bound is written as
+    // `count <= lineCount - index` (not `index + count <= lineCount`) so an
+    // adversarial near-Int.max input cannot trap on overflow before the
+    // precondition message fires.
+    @discardableResult
+    public mutating func removeLines(at index: Int, count: Int) -> Int {
+        precondition(
+            index >= 0 && index <= lineCount && count >= 0 && count <= lineCount - index,
+            "BalancedTreeLineMetrics.removeLines range out of bounds"
+        )
+        lastMutationNodeVisits = 0
+        if count == 0 {
+            return 0
+        }
+        let (left, rest) = split(root, at: index)
+        let (middle, right) = split(rest, at: count)
+        recycleSubtree(middle)
+        root = join2(left, right)
+        return lastMutationNodeVisits
+    }
+
     private mutating func buildBalancedRun(_ heights: [Double]) -> Int {
         buildBalancedRun(heights, 0, heights.count)
     }

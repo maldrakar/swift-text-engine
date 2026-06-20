@@ -284,6 +284,108 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         }
     }
 
+    // MARK: - Bulk remove (Slice 25)
+
+    func testRemoveLinesMatchesArrayOracleAtHeadTailInterior() {
+        // (index, count) spans: head, interior, tail.
+        let spans = [(0, 1), (0, 250), (375, 250), (900, 100), (500, 1)]
+        for (index, count) in spans {
+            var tree = BalancedTreeLineMetrics(heights: sampleHeights(1_000))
+            var array = sampleHeights(1_000)
+            tree.removeLines(at: index, count: count)
+            array.removeSubrange(index..<(index + count))
+            assertMatchesOracle(tree, array, "remove \(count) at \(index)")
+        }
+    }
+
+    func testRemoveLinesEntireDocumentLeavesEmpty() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(640))
+        tree.removeLines(at: 0, count: 640)
+        XCTAssertEqual(tree.lineCount, 0)
+        XCTAssertEqual(tree.offset(ofLine: 0), 0.0)
+        XCTAssertEqual(tree.treeHeight(), 0)
+    }
+
+    func testRemoveLinesEqualsLoopOfSingleRemoves() {
+        var bulk = BalancedTreeLineMetrics(heights: sampleHeights(500))
+        var loop = BalancedTreeLineMetrics(heights: sampleHeights(500))
+        let index = 113
+        let count = 80
+        bulk.removeLines(at: index, count: count)
+        for _ in 0..<count { loop.removeLine(at: index) }
+        XCTAssertEqual(bulk.lineCount, loop.lineCount)
+        for i in 0...bulk.lineCount {
+            XCTAssertEqual(bulk.offset(ofLine: i), loop.offset(ofLine: i), "offset[\(i)]")
+        }
+    }
+
+    func testRemoveLinesZeroCountIsNoOp() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(50))
+        let before = (0...tree.lineCount).map { tree.offset(ofLine: $0) }
+        let visits = tree.removeLines(at: 25, count: 0)
+        XCTAssertEqual(visits, 0)
+        XCTAssertEqual(tree.lineCount, 50)
+        XCTAssertEqual((0...tree.lineCount).map { tree.offset(ofLine: $0) }, before)
+    }
+
+    func testRemoveLinesKeepsOffsetsStrictlyIncreasing() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(400))
+        tree.removeLines(at: 0, count: 30)
+        tree.removeLines(at: tree.lineCount - 20, count: 20)
+        tree.removeLines(at: 100, count: 50)
+        for i in 0..<tree.lineCount {
+            XCTAssertLessThan(tree.offset(ofLine: i), tree.offset(ofLine: i + 1), "at \(i)")
+        }
+    }
+
+    func testRemoveLinesVisitCountIsCountPlusLogarithmic() {
+        let count = 64
+        for n in [1_000, 100_000, 1_000_000] {
+            var tree = BalancedTreeLineMetrics(heights: sampleHeights(n))
+            let visits = tree.removeLines(at: n / 2, count: count)
+            XCTAssertLessThanOrEqual(visits, count + 12 * (floorLog2(n) + 1), "n=\(n)")
+            XCTAssertLessThan(visits, count * (floorLog2(n) + 1), "n=\(n) not below compose cost")
+        }
+    }
+
+    func testBulkChurnKeepsTreeBalanced() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(2_000))
+        for k in 0..<300 {
+            let count = tree.lineCount
+            if k % 2 == 0 {
+                let batch = (0..<(1 + k % 50)).map { Double(10 + ($0 % 5) * 6) }
+                tree.insertLines(at: (k * 7) % (count + 1), heights: batch)
+            } else {
+                let span = min(1 + k % 50, tree.lineCount)
+                let index = tree.lineCount == 0 ? 0 : (k * 13) % (tree.lineCount - span + 1)
+                tree.removeLines(at: index, count: span)
+            }
+        }
+        XCTAssertGreaterThan(tree.lineCount, 0)
+        XCTAssertLessThanOrEqual(
+            tree.treeHeight(),
+            3 * (floorLog2(tree.lineCount) + 1),
+            "tree height not logarithmic: \(tree.treeHeight()) for \(tree.lineCount)"
+        )
+    }
+
+    func testBulkChurnReusesArenaSlots() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(1_000))
+        let batch = (0..<128).map { Double(10 + ($0 % 5) * 6) }
+        // First cycle establishes the high-water mark; later cycles must not grow.
+        tree.removeLines(at: 400, count: 128)
+        tree.insertLines(at: 400, heights: batch)
+        let arenaAfterFirstCycle = tree.arenaNodeCount
+        let freeAfterFirstCycle = tree.freeSlotCount
+        for c in 0..<10 {
+            tree.removeLines(at: 200 + c, count: 128)
+            tree.insertLines(at: 200 + c, heights: batch)
+            XCTAssertEqual(tree.arenaNodeCount, arenaAfterFirstCycle, "arena grew on cycle \(c)")
+            XCTAssertEqual(tree.freeSlotCount, freeAfterFirstCycle, "free slots drifted on cycle \(c)")
+        }
+        XCTAssertEqual(tree.lineCount, 1_000)
+    }
+
     func testRemoveSequenceMatchesOracleDownToEmpty() {
         var tree = BalancedTreeLineMetrics(heights: sampleHeights(600))
         var mutated = sampleHeights(600)
