@@ -198,6 +198,92 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         assertMatchesOracle(tree, [17.0, 21.0, 13.0])
     }
 
+    // MARK: - Bulk insert (Slice 25)
+
+    func testInsertLinesMatchesArrayOracleAtHeadTailInterior() {
+        let positions = [0, 500, 1_000]
+        for index in positions {
+            for k in [1, 8, 5_000] {
+                var tree = BalancedTreeLineMetrics(heights: sampleHeights(1_000))
+                var array = sampleHeights(1_000)
+                let inserted = (0..<k).map { Double(10 + ($0 % 5) * 6) }
+                tree.insertLines(at: index, heights: inserted)
+                array.insert(contentsOf: inserted, at: index)
+                assertMatchesOracle(tree, array, "insert k=\(k) at \(index)")
+            }
+        }
+    }
+
+    func testInsertLinesEqualsLoopOfSingleInserts() {
+        var bulk = BalancedTreeLineMetrics(heights: sampleHeights(300))
+        var loop = BalancedTreeLineMetrics(heights: sampleHeights(300))
+        let inserted = (0..<64).map { Double(12 + ($0 % 4) * 5) }
+        let index = 137
+        bulk.insertLines(at: index, heights: inserted)
+        for (offset, height) in inserted.enumerated() {
+            loop.insertLine(at: index + offset, height: height)
+        }
+        XCTAssertEqual(bulk.lineCount, loop.lineCount)
+        for i in 0...bulk.lineCount {
+            XCTAssertEqual(bulk.offset(ofLine: i), loop.offset(ofLine: i), "offset[\(i)]")
+        }
+    }
+
+    func testInsertLinesEmptyIsNoOpAndInsertIntoEmptyDocument() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(50))
+        let before = (0...tree.lineCount).map { tree.offset(ofLine: $0) }
+        let visits = tree.insertLines(at: 25, heights: [])
+        XCTAssertEqual(visits, 0)
+        XCTAssertEqual(tree.lineCount, 50)
+        XCTAssertEqual((0...tree.lineCount).map { tree.offset(ofLine: $0) }, before)
+
+        var empty = BalancedTreeLineMetrics(heights: [])
+        empty.insertLines(at: 0, heights: [21.0, 13.0, 17.0])
+        assertMatchesOracle(empty, [21.0, 13.0, 17.0])
+    }
+
+    func testInsertLinesKeepsOffsetsStrictlyIncreasing() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(400))
+        tree.insertLines(at: 0, heights: [40.0, 12.0])
+        tree.insertLines(at: tree.lineCount, heights: [5.0, 64.0, 9.0])
+        tree.insertLines(at: 200, heights: (0..<100).map { Double(8 + $0 % 7) })
+        for i in 0..<tree.lineCount {
+            XCTAssertLessThan(tree.offset(ofLine: i), tree.offset(ofLine: i + 1), "at \(i)")
+        }
+    }
+
+    func testInsertLinesKeepsTreeBalanced() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(40))
+        for k in 0..<200 {
+            let count = tree.lineCount
+            let index: Int
+            switch k % 4 {
+            case 0: index = 0
+            case 1: index = count
+            case 2: index = count / 2
+            default: index = count / 3
+            }
+            let batch = (0..<(1 + k % 32)).map { Double(10 + ($0 % 5) * 6) }
+            tree.insertLines(at: index, heights: batch)
+        }
+        XCTAssertLessThanOrEqual(
+            tree.treeHeight(),
+            3 * (floorLog2(tree.lineCount) + 1),
+            "tree height not logarithmic: \(tree.treeHeight()) for \(tree.lineCount)"
+        )
+    }
+
+    func testInsertLinesVisitCountIsKPlusLogarithmic() {
+        let k = 64
+        for n in [1_000, 100_000, 1_000_000] {
+            var tree = BalancedTreeLineMetrics(heights: sampleHeights(n))
+            let batch = (0..<k).map { Double(10 + ($0 % 5) * 6) }
+            let visits = tree.insertLines(at: n / 2, heights: batch)
+            XCTAssertLessThanOrEqual(visits, k + 12 * (floorLog2(n) + 1), "n=\(n)")
+            XCTAssertLessThan(visits, k * (floorLog2(n) + 1), "n=\(n) not below compose cost")
+        }
+    }
+
     func testRemoveSequenceMatchesOracleDownToEmpty() {
         var tree = BalancedTreeLineMetrics(heights: sampleHeights(600))
         var mutated = sampleHeights(600)

@@ -18,6 +18,11 @@ public struct BalancedTreeLineMetrics: LineMetricsSource {
 
     public private(set) var lastMutationNodeVisits: Int
 
+    // Test-only white-box diagnostics (reached via @testable import; NOT public
+    // API). Expose only arena slot bookkeeping, never the tree shape.
+    internal var arenaNodeCount: Int { nodes.count }
+    internal var freeSlotCount: Int { freeList.count }
+
     public init(heights: [Double]) {
         for height in heights {
             precondition(
@@ -216,6 +221,120 @@ public struct BalancedTreeLineMetrics: LineMetricsSource {
         pull(t)
         let rebalanced = maintain(t, leftGrew: false) // left shrank -> right may be too big
         return (rebalanced, removed.height)
+    }
+
+    // MARK: - Bulk structural mutation
+
+    @discardableResult
+    public mutating func insertLines(at index: Int, heights: [Double]) -> Int {
+        precondition(
+            index >= 0 && index <= lineCount,
+            "BalancedTreeLineMetrics.insertLines index out of range"
+        )
+        for height in heights {
+            precondition(
+                height.isFinite && height > 0.0,
+                "BalancedTreeLineMetrics.insertLines requires finite, positive heights"
+            )
+        }
+        lastMutationNodeVisits = 0
+        if heights.isEmpty {
+            return 0
+        }
+        let middle = buildBalancedRun(heights)
+        let (left, right) = split(root, at: index)
+        root = join2(join2(left, middle), right)
+        return lastMutationNodeVisits
+    }
+
+    private mutating func buildBalancedRun(_ heights: [Double]) -> Int {
+        buildBalancedRun(heights, 0, heights.count)
+    }
+
+    private mutating func buildBalancedRun(_ heights: [Double], _ start: Int, _ end: Int) -> Int {
+        if start >= end {
+            return -1
+        }
+
+        let middle = start + (end - start) / 2
+        lastMutationNodeVisits += 1
+        let index = allocateNode(height: heights[middle])
+        let left = buildBalancedRun(heights, start, middle)
+        let right = buildBalancedRun(heights, middle + 1, end)
+        nodes[index].left = left
+        nodes[index].right = right
+        pull(index)
+        return index
+    }
+
+    private func canRoot(_ L: Int, _ R: Int) -> Bool {
+        let cL = nodeCount(L)
+        let cR = nodeCount(R)
+        return cL >= nodeCount(leftChild(R)) && cL >= nodeCount(rightChild(R))
+            && cR >= nodeCount(leftChild(L)) && cR >= nodeCount(rightChild(L))
+    }
+
+    private mutating func join3(_ L: Int, _ m: Int, _ R: Int) -> Int {
+        lastMutationNodeVisits += 1
+        if canRoot(L, R) {
+            nodes[m].left = L
+            nodes[m].right = R
+            pull(m)
+            return m
+        }
+
+        if nodeCount(L) > nodeCount(R) {
+            nodes[L].right = join3(nodes[L].right, m, R)
+            pull(L)
+            return maintain(L, leftGrew: false)
+        } else {
+            nodes[R].left = join3(L, m, nodes[R].left)
+            pull(R)
+            return maintain(R, leftGrew: true)
+        }
+    }
+
+    private mutating func join2(_ L: Int, _ R: Int) -> Int {
+        if L == -1 { return R }
+        if R == -1 { return L }
+
+        let detached = detachMin(R)
+        return join3(L, detached.node, detached.root)
+    }
+
+    private mutating func detachMin(_ t: Int) -> (root: Int, node: Int) {
+        lastMutationNodeVisits += 1
+        if nodes[t].left == -1 {
+            let detached = t
+            let newRoot = nodes[t].right
+            nodes[detached].left = -1
+            nodes[detached].right = -1
+            return (newRoot, detached)
+        }
+
+        let result = detachMin(nodes[t].left)
+        nodes[t].left = result.root
+        pull(t)
+        let rebalanced = maintain(t, leftGrew: false)
+        return (rebalanced, result.node)
+    }
+
+    private mutating func split(_ t: Int, at index: Int) -> (left: Int, right: Int) {
+        lastMutationNodeVisits += 1
+        if t == -1 {
+            return (-1, -1)
+        }
+
+        let leftCount = nodeCount(nodes[t].left)
+        if index <= leftCount {
+            let (LL, LR) = split(nodes[t].left, at: index)
+            let right = join3(LR, t, nodes[t].right)
+            return (LL, right)
+        } else {
+            let (RL, RR) = split(nodes[t].right, at: index - leftCount - 1)
+            let left = join3(nodes[t].left, t, RL)
+            return (left, RR)
+        }
     }
 
     // MARK: - SBT balance
