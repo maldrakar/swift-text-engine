@@ -82,12 +82,17 @@ change `TextEngineCore` source or public API, and it does **not** touch
   `BalancedTreeLineMetrics`, each `@discardableResult -> Int` returning the
   node-visit count and recorded in `lastMutationNodeVisits`, mirroring the
   single-line ops.
-- Implement them via internal `split(at:)` and `join(_:_:)` primitives plus the
-  existing `buildBalanced`, achieving **O(k + log N)** while preserving the
-  size-balance invariant (logarithmic height) for subsequent operations.
-- Recycle the `count` removed slots onto `freeList`, preserving the bounded
-  slot-reuse the single-line `removeLine` already relies on (no unbounded arena
-  growth across bulk edit churn).
+- Implement them via internal `split(at:)`, `join(_:_:)`, and `detachMin(_:)`
+  primitives plus an allocation-aware `buildBalancedRun` (built on `allocateNode`,
+  not `init`'s `freeList`-bypassing `buildBalanced`), achieving **O(k + log N)**
+  while preserving the size-balance invariant (logarithmic height) for subsequent
+  operations.
+- Keep arena growth bounded under churn: `removeLines` recycles the `count` removed
+  slots onto `freeList`, and `insertLines` allocates its `k` nodes through
+  `allocateNode` (consuming `freeList` before appending), so a remove-K-then-insert-K
+  cycle reuses slots instead of growing the arena. Prove this with `@testable`
+  diagnostics (`arenaNodeCount` / `freeSlotCount`) and a test asserting the arena
+  does not grow across repeated equal-size remove/insert churn.
 - Prove, by XCTest: bulk insert/remove correctness against the array oracle;
   bulk-equals-compose equivalence; the strictly-increasing invariant; a tree-height
   invariant after bulk churn; an O(k + log N) visit characteristic; and correct,
@@ -131,48 +136,81 @@ change `TextEngineCore` source or public API, and it does **not** touch
 The user selected the true-bulk algorithm over a compose-only O(k·log N) wrapper.
 Both batch ops are built from three primitives:
 
-- `buildBalanced(heights)` (already present) — a perfectly balanced subtree from
-  `k` heights in **O(k)**, no rotations.
+- `buildBalancedRun(heights)` — a perfectly balanced subtree from `k` heights in
+  **O(k)**, no rotations. **It allocates every node through `allocateNode`** so it
+  **consumes recycled `freeList` slots first** and only appends when the free list
+  is empty. (The existing `buildBalanced` used by `init` does a direct
+  `nodes.append` and bypasses `freeList`; reusing it for bulk insert would leak the
+  slots `removeLines` recycled and let the arena grow unbounded under
+  remove-then-insert churn. The bulk path therefore uses this allocation-aware
+  builder, not `init`'s `buildBalanced`.) Its `k` allocations are counted in
+  `lastMutationNodeVisits`.
 - `split(_ root, at index) -> (left, right)` — partition the tree at in-order
   position `index` so `left` holds lines `[0, index)` and `right` holds
-  `[index, lineCount)`. **O(log N)**.
+  `[index, lineCount)`. **O(log N)** (see Decision 2).
 - `join(_ left, _ right) -> root` — concatenate two trees where every key in
-  `left` precedes every key in `right`, restoring balance. **O(log N)**.
+  `left` precedes every key in `right`, restoring balance. **O(|h(left) −
+  h(right)|) = O(log N)** (see Decision 2).
 
 Then:
 
 - `insertLines(at: index, heights:)` =
-  `mid = buildBalanced(heights); (l, r) = split(root, at: index);
+  `mid = buildBalancedRun(heights); (l, r) = split(root, at: index);
   root = join(join(l, mid), r)` → **O(k + log N)**.
 - `removeLines(at: index, count:)` =
   `(l, rest) = split(root, at: index); (mid, r) = split(rest, at: count);
-  recycle every node of mid onto freeList; root = join(l, r)` →
-  **O(count + log N)** (the O(count) term is the mandatory slot recycling).
+  recycleSubtree(mid); root = join(l, r)` → **O(count + log N)** (the O(count)
+  term is the mandatory slot recycling, which pushes every removed node back onto
+  `freeList` so the next `insertLines` reuses those slots).
 
-### Decision 2 — `join` shape and balance preservation
+### Decision 2 — `split`/`join` shape, strict O(log N), and balance preservation
 
-`join(L, R)` (all `L` keys < all `R` keys) is size-aware: it descends the spine of
-the **larger** tree until the two sides are size-comparable, grafts there, fixes
-aggregates with `pull`, and restores local balance with the **existing `maintain`
-primitive** on the way back up — the standard balanced-tree join shape, giving
-O(|height(L) − height(R)|) = O(log N). Concretely: if `L` is much larger than `R`,
-recurse `L.right = join(L.right, R)` and `maintain` (right grew); symmetric when
-`R` dominates; when comparable, detach one tree's boundary node (e.g. the min of
-`R`) as the junction root and attach both sides. `split` is its recursive dual:
-descend by position, and recombine the off-path subtrees with `join` as the
-recursion unwinds.
+This is the load-bearing decision and follows the join-based ("Just Join")
+balanced-tree framework, where `join` is the one balancing primitive and `split`
+is derived from it.
 
-Balance after split/join is **proven, not assumed**: the tree-height-logarithmic
-test (Component Design test 6) fails immediately if `maintain` does not restore an
-O(log N) height after bulk churn.
+**`join(L, R)`** (all `L` keys < all `R` keys) is **size-aware**: it descends the
+spine of the **larger** tree only until the two sides are size-comparable, grafts
+there, fixes aggregates with `pull`, and restores local balance with the existing
+`maintain` primitive on the way back up. Its cost is proportional to the height
+difference, **O(|h(L) − h(R)|)**, not O(log N) per call. Concretely: if `L` is much
+larger, recurse `L.right = join(L.right, R)` then `pull` + `maintain` (right grew);
+symmetric when `R` dominates; when the two sides are size-comparable, use
+`detachMin` (below) to pull `R`'s in-order-first node out as the junction root with
+`left = L` and `right = R-without-min`, then `pull` + `maintain`.
+
+**`detachMin(_ t) -> (root, node)`** is a **non-recycling** primitive that removes
+and returns the leftmost node *index* of `t` (rebalancing `t`), distinct from the
+deletion-path `removeMin`, which recycles the slot to `freeList` and returns only
+the height. `join` reuses the detached node as the junction, so no node is freed or
+allocated during a join.
+
+**`split(_ t, at index) -> (left, right)`** is the recursive dual: descend by
+position with a single pass, and recombine the off-path subtrees using `join` as
+the recursion unwinds. Because each `join` on the unwind costs only
+O(|height difference|) and those differences **telescope** along one root-to-leaf
+path, the whole split is **O(log N)** total — *not* O(log² N). This telescoping is
+the explicit guarantee the framework provides and is the answer to the "join per
+unwind level might be O(log² N)" concern: it would be, with a per-level O(log N)
+join, but a height-difference-proportional join sums to O(log N) over the path.
+
+**Resulting bulk cost and its enforcement.** `insertLines`/`removeLines` are
+therefore `O(k) build/recycle + O(log N) split + O(log N) joins = O(k + log N)`.
+This is not left as prose: the visit-characteristic test (Component Design test 7)
+asserts a **strict bound `lastMutationNodeVisits ≤ k + C·(⌊log₂N⌋ + 1)`** for a
+small constant `C` calibrated during TDD, which **fails** if the implementation
+regresses to O(k·log N) (a naive compose) or O(k + log² N) (a non-telescoping
+split). The bound — not the prose — is the contract.
+
+**Balance** after split/join is **proven, not assumed**: the tree-height test
+(test 6) fails if `maintain` does not restore O(log N) height after bulk churn.
 
 **Risk hedge.** SBT's amortized analysis is tuned for single-element steps, so
 `maintain` after a join (which grafts a whole subtree) is the primary correctness
-risk. If TDD shows `maintain` is insufficient to keep the height logarithmic, the
-documented fallback — chosen only if a test forces it — is to rebuild the affected
+risk. If TDD shows `maintain` is insufficient to keep height logarithmic, the
+documented fallback — chosen only if test 6 forces it — is to rebuild the affected
 spine subtree balanced at the graft point, still O(k + log N) amortized and with no
-public-API change. The decision between these is driven by test 6, not guessed up
-front.
+public-API change. The choice is driven by the test, not guessed up front.
 
 ### Decision 3 — API, atomicity, and empty-batch semantics
 
@@ -188,22 +226,28 @@ public mutating func removeLines(at index: Int, count: Int) -> Int
   checksum.
 - **Atomic validation:** all preconditions are checked **before** any mutation, so
   a bad batch leaves the tree unchanged. `insertLines` requires `0 ≤ index ≤
-  lineCount` and every height finite & positive; `removeLines` requires `count ≥
-  0`, `index ≥ 0`, and `index + count ≤ lineCount`. Enforced with
+  lineCount` and every height finite & positive; `removeLines` requires
+  `index ≥ 0 && index ≤ lineCount && count ≥ 0 && count ≤ lineCount − index`
+  (written as `count ≤ lineCount − index`, **not** `index + count ≤ lineCount`, so
+  an adversarial near-`Int.max` input cannot trap on integer-overflow before the
+  intended precondition message fires). Enforced with
   `precondition(_:)` and **static** string messages (fire in release, Embedded-safe;
   consistent with the existing provider style). No throwing / `Result` API.
 - **Empty batch is a no-op:** `heights == []` or `count == 0` mutates nothing,
   leaves `lineCount` and all offsets unchanged, sets `lastMutationNodeVisits = 0`,
   and returns 0.
 
-### Decision 4 — Visit accounting includes the O(k) build
+### Decision 4 — Visit accounting includes the O(k) build, gated by a strict bound
 
 `lastMutationNodeVisits` for a bulk op counts **every** node touched across
-`split` + `buildBalanced` + `join` + recycle, landing at ~`k + log N`. This makes
-the win directly assertable (Component Design test 7): for fixed `k`, doubling `N`
-adds only ~`log N` visits (sublinear in N); for fixed `N`, visits grow ~linearly in
-`k` (not `k·log N`). The `buildBalanced` touches are honest work, not scaffolding —
-counting them keeps the metric faithful to actual node activity.
+`buildBalancedRun` (its `k` allocations) + `split` + `join` + `detachMin` +
+recycle, landing at `k + O(log N)`. Counting the build allocations keeps the metric
+faithful to actual node activity. The win is enforced, not merely described:
+Component Design test 7 asserts the **strict bound
+`lastMutationNodeVisits ≤ k + C·(⌊log₂N⌋ + 1)`** (small constant `C` calibrated in
+TDD) on `N = 1k / 100k / 1M`. That bound fails for an O(k·log N) compose or an
+O(k + log² N) non-telescoping split, so it is the contract that the Decision 2
+complexity is actually achieved — not just a "sublinear" smell test.
 
 ### Decision 5 — Provider scope and value semantics unchanged
 
@@ -242,14 +286,22 @@ public mutating func insertLines(at index: Int, heights: [Double]) -> Int  // O(
 public mutating func removeLines(at index: Int, count: Int) -> Int         // O(count + log N)
 
 // internal primitives (not public API):
+private mutating func buildBalancedRun(_ heights: [Double]) -> Int  // O(k), via allocateNode (freeList-first)
 private mutating func split(_ t: Int, at index: Int) -> (left: Int, right: Int)
 private mutating func join(_ left: Int, _ right: Int) -> Int
+private mutating func detachMin(_ t: Int) -> (root: Int, node: Int)  // non-recycling; junction node for join
 private mutating func recycleSubtree(_ t: Int)   // push every node slot onto freeList
+
+// test-only white-box diagnostics, reached via @testable import (NOT public API):
+internal var arenaNodeCount: Int { nodes.count }   // total arena slots ever materialized
+internal var freeSlotCount: Int { freeList.count }  // recycled slots available for reuse
 ```
 
-`split` / `join` / `recycleSubtree` are `private`; the public surface gains only
-the two batch methods. `lastMutationNodeVisits` is the existing
-`public private(set) var`.
+`buildBalancedRun` / `split` / `join` / `detachMin` / `recycleSubtree` are
+`private`; the public surface gains only the two batch methods.
+`lastMutationNodeVisits` is the existing `public private(set) var`. The two
+`internal` diagnostics expose only slot bookkeeping (never the tree shape) and are
+used solely by the arena-growth test.
 
 ### Tests (`TextEngineReferenceProvidersTests`, TDD failing-first)
 
@@ -275,27 +327,42 @@ are bit-exact.
    of bulk inserts and removes, `treeHeight() ≤ C·log₂(lineCount)`, proving
    split/join preserve balance. Read via the existing `internal func treeHeight()`
    through `@testable import`.
-7. **Visit characteristic** — `lastMutationNodeVisits` for a fixed-`k` bulk op on
-   `N = 1k / 100k / 1M` grows only ~additively with `log N` (sublinear in N), and
-   for fixed `N` grows ~linearly with `k` and stays well under the `k·(⌊log₂N⌋+1)`
-   a compose loop would cost.
-8. **Mixed sequence** — extend the existing mixed-mutation equivalence oracle to
+7. **Visit characteristic (strict bound)** — for a fixed batch `k`,
+   `lastMutationNodeVisits ≤ k + C·(⌊log₂N⌋ + 1)` on `N = 1k / 100k / 1M` for a
+   small constant `C`; and the count stays **strictly below** the
+   `k·(⌊log₂N⌋ + 1)` a compose loop would cost (asserting the O(k + log N) win,
+   and catching an accidental O(k·log N) or O(k + log² N) regression).
+8. **Arena-growth bound** — over repeated equal-size `removeLines(K)` /
+   `insertLines(K)` churn, `arenaNodeCount` does not grow (slots are recycled and
+   reused); `freeSlotCount` returns to its prior level after each remove/insert
+   pair. Confirms the allocation-aware builder consumes `freeList` and the recycle
+   path repopulates it.
+9. **Mixed sequence** — extend the existing mixed-mutation equivalence oracle to
    interleave bulk `insertLines` / `removeLines` with single-line ops, comparing
    to the array after each step.
-9. **Re-layout composition** — after a bulk edit, `ViewportVirtualizer.compute` +
-   `geometry(...)` against the tree yield a range and `LineGeometry` stream
-   identical to a fresh `PrefixSumLineMetrics` over the updated heights, and a
-   counting wrapper confirms the core still issues O(log N) offset queries.
+10. **Re-layout composition** — after a bulk edit, `ViewportVirtualizer.compute` +
+    `geometry(...)` against the tree yield a range and `LineGeometry` stream
+    identical to a fresh `PrefixSumLineMetrics` over the updated heights, and a
+    counting wrapper confirms the core still issues O(log N) offset queries.
 
 ### Benchmark mode (`ViewportBenchmarks`)
 
 - New `--bulk-structural-mutation` mode (output name `bulk_structural_mutation`),
   modeled on `StructuralMutationBenchmark`, over the existing 1k / 100k / 1M
-  scenarios with a fixed representative batch size `K` (e.g. 64 lines,
-  paste/selection-sized). Fully deterministic:
-  - One `BalancedTreeLineMetrics` is built once per scenario from the deterministic
-    `{14,16,20,32}` heights and **mutated in place**; the PrefixSum oracle never
-    appears in the hot path.
+  document sizes. Each size runs **two batch profiles**, because a single small `K`
+  would not exercise the large-paste case the Problem motivates:
+  - **Small batch** `K = 64` (typical paste/selection): the common interactive case.
+  - **Large batch** `K ≈ 4,096` (or `lineCount` when smaller — e.g. the 1k doc):
+    the large-paste / range-delete case where O(k + log N) diverges sharply from a
+    compose loop's O(k·log N). Because each op is far heavier, this profile uses a
+    **smaller `operationsPerSample`** so wall-clock per sample stays comparable.
+    Its budget must be tight enough that a regression to compose-level cost
+    (≈ `K`× the single-op gate) fails the gate — this is what gives the large-paste
+    claim teeth.
+  Fully deterministic:
+  - One `BalancedTreeLineMetrics` is built once per (size, profile) from the
+    deterministic `{14,16,20,32}` heights and **mutated in place**; the PrefixSum
+    oracle never appears in the hot path.
   - Each measured operation pins `lineCount` constant by pairing a
     `removeLines(at: idx, count: K)` with an `insertLines(at: idx2, heights:)` of
     `K` heights at deterministic positions, then runs `compute` and a full geometry
@@ -349,7 +416,7 @@ Recorded with actual commands and outputs, anchored on the post-merge push run:
 
 - **Join-induced balance (primary risk).** Grafting a whole subtree during `join`
   is outside SBT's single-step amortized model. Mitigated by the tree-height
-  invariant (test 6) after bulk churn and the equivalence oracle (tests 1–3, 8)
+  invariant (test 6) after bulk churn and the equivalence oracle (tests 1–3, 9)
   after every op; the Decision 2 spine-rebuild fallback is the documented escape
   hatch if a test forces it.
 - **Aggregate maintenance through split/join.** Every `split`/`join`/rotation must
