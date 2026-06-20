@@ -70,6 +70,7 @@ swift build -c release                                       # release build
 swift run -c release ViewportBenchmarks -- --gate            # synthetic gate (blocking); expect gate=pass
 swift run -c release ViewportBenchmarks -- --variable-height --gate   # variable-height local gate
 swift run -c release ViewportBenchmarks -- --variable-height-mutation --gate   # mutate+recompute local gate
+swift run -c release ViewportBenchmarks -- --structural-mutation --gate   # structural insert/delete local gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --help            # all flags
@@ -80,11 +81,11 @@ swift run -c release ViewportBenchmarks -- --help            # all flags
 ```
 
 Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
-`--variable-height-mutation`, `--memory-shape`, `--memory-observation`, `--gate`.
-Only one mode flag at a time. `--gate` is valid with the default pipeline,
-`--realistic-provider`, `--variable-height`, and `--variable-height-mutation`
-modes; it is **rejected** with `--range-only`, `--memory-shape`,
-`--memory-observation`.
+`--variable-height-mutation`, `--structural-mutation`, `--memory-shape`,
+`--memory-observation`, `--gate`. Only one mode flag at a time. `--gate` is
+valid with the default pipeline, `--realistic-provider`, `--variable-height`,
+`--variable-height-mutation`, and `--structural-mutation` modes; it is
+**rejected** with `--range-only`, `--memory-shape`, `--memory-observation`.
 
 Local WASM build (needs a matching Swift SDK installed):
 `swift build --swift-sdk <id> --target TextEngineCore` for both `wasm` and

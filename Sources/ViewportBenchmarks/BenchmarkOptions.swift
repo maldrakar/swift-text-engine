@@ -4,6 +4,7 @@ enum BenchmarkMode {
     case realisticProvider
     case variableHeight
     case variableHeightMutation
+    case structuralMutation
     case memoryShape
     case memoryObservation
 
@@ -19,6 +20,8 @@ enum BenchmarkMode {
             return "variable_height"
         case .variableHeightMutation:
             return "variable_height_mutation"
+        case .structuralMutation:
+            return "structural_mutation"
         case .memoryShape:
             return "memory_shape"
         case .memoryObservation:
@@ -38,7 +41,7 @@ struct BenchmarkOptions {
     let enforceGate: Bool
 
     static let usage = """
-    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--memory-shape] [--memory-observation] [--help]
+    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--memory-shape] [--memory-observation] [--help]
 
     Options:
       --range-only          Run only viewport range recompute benchmark.
@@ -46,6 +49,7 @@ struct BenchmarkOptions {
       --realistic-provider  Run large-text provider benchmark. Combine with --gate to enforce calibrated budgets.
       --variable-height     Run variable-height compute+geometry benchmark. Combine with --gate to enforce budgets.
       --variable-height-mutation  Run mutate+recompute benchmark (Fenwick provider). Combine with --gate to enforce budgets.
+      --structural-mutation  Run insert/delete+recompute benchmark (balanced-tree provider). Combine with --gate to enforce budgets.
       --memory-shape        Run deterministic core-owned memory-shape diagnostics.
       --memory-observation  Run host RSS observation diagnostics.
       --help                Print this help.
@@ -83,6 +87,11 @@ struct BenchmarkOptions {
                     return .failure("--variable-height-mutation cannot be combined with another mode")
                 }
                 mode = .variableHeightMutation
+            case "--structural-mutation":
+                if mode != .pipeline {
+                    return .failure("--structural-mutation cannot be combined with another mode")
+                }
+                mode = .structuralMutation
             case "--memory-shape":
                 if mode != .pipeline {
                     return .failure("--memory-shape cannot be combined with another mode")
