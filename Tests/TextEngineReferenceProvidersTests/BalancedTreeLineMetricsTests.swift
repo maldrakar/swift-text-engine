@@ -155,4 +155,46 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
             XCTAssertGreaterThan(visits, 0)
         }
     }
+
+    func testInsertSequenceMatchesOracleAndStaysBalanced() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(40))
+        var mutated = sampleHeights(40)
+        // 500 deterministic inserts at head, tail, and interior positions, heights
+        // from a fixed integer set. Head inserts (index 0) force left-heavy
+        // rebalancing; tail inserts force right-heavy.
+        let positionsCycle = 5
+        for k in 0..<500 {
+            let count = mutated.count
+            let index: Int
+            switch k % positionsCycle {
+            case 0: index = 0
+            case 1: index = count            // tail (insert at end)
+            case 2: index = count / 2
+            case 3: index = count / 3
+            default: index = (count * 2) / 3
+            }
+            let height = Double(10 + (k % 5) * 6) // 10,16,22,28,34
+            let visits = tree.insertLine(at: index, height: height)
+            XCTAssertGreaterThan(visits, 0)
+            mutated.insert(height, at: index)
+            assertMatchesOracle(tree, mutated, "after insert #\(k) at \(index)")
+        }
+        // Balanced after 500 inserts: height stays logarithmic, not linear.
+        XCTAssertLessThanOrEqual(
+            tree.treeHeight(),
+            3 * (floorLog2(tree.lineCount) + 1),
+            "tree height not logarithmic: \(tree.treeHeight()) for lineCount \(tree.lineCount)"
+        )
+    }
+
+    func testInsertIntoEmptyDocument() {
+        var tree = BalancedTreeLineMetrics(heights: [])
+        XCTAssertEqual(tree.lineCount, 0)
+        tree.insertLine(at: 0, height: 21.0)
+        assertMatchesOracle(tree, [21.0])
+        tree.insertLine(at: 1, height: 13.0)
+        assertMatchesOracle(tree, [21.0, 13.0])
+        tree.insertLine(at: 0, height: 17.0)
+        assertMatchesOracle(tree, [17.0, 21.0, 13.0])
+    }
 }

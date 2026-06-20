@@ -1,8 +1,8 @@
 import TextEngineCore
 
-/// Read-only reference provider backed by a balanced order-statistics tree over
-/// per-line heights. The provider owns O(N) line metrics outside the core;
-/// offset queries walk O(log N) tree nodes.
+/// Mutable indexed metrics provider backed by a balanced order-statistics tree
+/// over per-line heights. The provider owns O(N) line metrics outside the core;
+/// offset queries and structural mutations walk O(log N) tree nodes.
 public struct BalancedTreeLineMetrics: LineMetricsSource {
     private struct Node {
         var height: Double
@@ -95,6 +95,126 @@ public struct BalancedTreeLineMetrics: LineMetricsSource {
         }
         nodes[t].subtreeHeightSum += delta
         return delta
+    }
+
+    // MARK: - Structural mutation: insert
+
+    // Inserts a new line of `height` so it lands at in-order position `index`.
+    // O(log N): descend to the leaf insertion point, splice in a node, fix
+    // aggregates, and rebalance. Returns node visits.
+    @discardableResult
+    public mutating func insertLine(at index: Int, height: Double) -> Int {
+        precondition(
+            index >= 0 && index <= lineCount,
+            "BalancedTreeLineMetrics.insertLine index out of range"
+        )
+        precondition(
+            height.isFinite && height > 0.0,
+            "BalancedTreeLineMetrics.insertLine requires a finite, positive height"
+        )
+        lastMutationNodeVisits = 0
+        let newNode = allocateNode(height: height)
+        root = insert(root, index, newNode)
+        return lastMutationNodeVisits
+    }
+
+    private mutating func allocateNode(height: Double) -> Int {
+        let node = Node(
+            height: height, left: -1, right: -1,
+            subtreeCount: 1, subtreeHeightSum: height
+        )
+        if let slot = freeList.popLast() {
+            nodes[slot] = node
+            return slot
+        }
+
+        nodes.append(node)
+        return nodes.count - 1
+    }
+
+    private mutating func insert(_ t: Int, _ index: Int, _ newNode: Int) -> Int {
+        lastMutationNodeVisits += 1
+        if t == -1 {
+            return newNode
+        }
+
+        let leftCount = nodeCount(nodes[t].left)
+        let goLeft = index <= leftCount
+        if goLeft {
+            let updated = insert(nodes[t].left, index, newNode)
+            nodes[t].left = updated
+        } else {
+            let updated = insert(nodes[t].right, index - leftCount - 1, newNode)
+            nodes[t].right = updated
+        }
+        pull(t)
+        return maintain(t, leftGrew: goLeft)
+    }
+
+    // MARK: - SBT balance
+
+    private func leftChild(_ index: Int) -> Int { index == -1 ? -1 : nodes[index].left }
+
+    private func rightChild(_ index: Int) -> Int { index == -1 ? -1 : nodes[index].right }
+
+    private mutating func rotateRight(_ x: Int) -> Int {
+        let y = nodes[x].left
+        let yRight = nodes[y].right
+        nodes[x].left = yRight
+        nodes[y].right = x
+        pull(x)
+        pull(y)
+        return y
+    }
+
+    private mutating func rotateLeft(_ x: Int) -> Int {
+        let y = nodes[x].right
+        let yLeft = nodes[y].left
+        nodes[x].right = yLeft
+        nodes[y].left = x
+        pull(x)
+        pull(y)
+        return y
+    }
+
+    private mutating func maintain(_ t: Int, leftGrew: Bool) -> Int {
+        if t == -1 {
+            return -1
+        }
+
+        lastMutationNodeVisits += 1
+        var t = t
+        if leftGrew {
+            let l = nodes[t].left
+            if nodeCount(leftChild(l)) > nodeCount(nodes[t].right) {
+                t = rotateRight(t)
+            } else if nodeCount(rightChild(l)) > nodeCount(nodes[t].right) {
+                let rotated = rotateLeft(l)
+                nodes[t].left = rotated
+                t = rotateRight(t)
+            } else {
+                return t
+            }
+        } else {
+            let r = nodes[t].right
+            if nodeCount(rightChild(r)) > nodeCount(nodes[t].left) {
+                t = rotateLeft(t)
+            } else if nodeCount(leftChild(r)) > nodeCount(nodes[t].left) {
+                let rotated = rotateRight(r)
+                nodes[t].right = rotated
+                t = rotateLeft(t)
+            } else {
+                return t
+            }
+        }
+
+        let newLeft = maintain(nodes[t].left, leftGrew: true)
+        nodes[t].left = newLeft
+        let newRight = maintain(nodes[t].right, leftGrew: false)
+        nodes[t].right = newRight
+        t = maintain(t, leftGrew: true)
+        t = maintain(t, leftGrew: false)
+        return t
     }
 
     private func nodeCount(_ index: Int) -> Int {
