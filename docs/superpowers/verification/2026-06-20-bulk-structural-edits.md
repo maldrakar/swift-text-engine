@@ -12,8 +12,8 @@ oracle and virtualizer integration tests, adds a local
 
 Local verification below was run at implementation head
 `6e780d5bd6585ac73488ee7b5ab0a3b31466fc40` before this verification artifact
-and checklist update were committed. Hosted PR and post-merge push proof are
-pending branch publication and merge.
+and checklist update were committed. Hosted PR-head proof for the full
+implementation branch is recorded below; post-merge push proof is pending merge.
 
 ## Local State
 
@@ -279,3 +279,37 @@ Exit status: `0`.
 Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--bulk-structural-mutation] [--memory-shape] [--memory-observation] [--help]
 --bulk-structural-mutation  Run bulk insert/delete-range+recompute benchmark (balanced-tree provider). Combine with --gate to enforce budgets.
 ```
+
+## Hosted PR-Head Proof
+
+PR: `#41` (`slice-25-bulk-structural-edits` -> `main`)
+
+Implementation head verified by hosted CI:
+`ebb8424b7d5a3e4326ff8f4a93690daa68cb9c4e`
+
+Workflow run: `27895095147`
+
+Command:
+
+```bash
+gh pr view 41 --json mergeStateStatus,statusCheckRollup,headRefOid
+```
+
+Exit status: `0`.
+
+```text
+headRefOid=ebb8424b7d5a3e4326ff8f4a93690daa68cb9c4e
+mergeStateStatus=CLEAN
+Host tests and benchmark gate: SUCCESS
+iOS cross-target compile: SUCCESS
+WASM cross-target observation: SUCCESS
+```
+
+The host job completed `Run host tests`, synthetic gate, variable-height gate,
+variable-height mutation gate, structural mutation gate, memory-shape diagnostic,
+RSS memory observation, and PR-only realistic-provider relative observation
+successfully. iOS and WASM cross-target jobs also completed successfully.
+
+This later docs-only evidence commit records the PR-head proof above. The
+current PR head after this commit is expected to receive the required contexts
+through the trusted docs-only shortcut; post-merge push proof remains pending.
