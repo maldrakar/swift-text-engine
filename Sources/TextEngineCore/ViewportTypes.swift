@@ -96,3 +96,25 @@ public struct VariableViewportInput: Equatable {
         self.overscanLinesAfter = overscanLinesAfter
     }
 }
+
+public enum LineQuery: Equatable {
+    case line(LineLocation)
+    case empty
+    case failure(ViewportValidationError)
+}
+
+public struct LineLocation: Equatable {
+    public let lineIndex: Int
+    public let clamp: Clamp
+
+    public init(lineIndex: Int, clamp: Clamp) {
+        self.lineIndex = lineIndex
+        self.clamp = clamp
+    }
+
+    public enum Clamp: Equatable {
+        case inRange
+        case clampedToTop
+        case clampedToBottom
+    }
+}
