@@ -198,6 +198,194 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         assertMatchesOracle(tree, [17.0, 21.0, 13.0])
     }
 
+    // MARK: - Bulk insert (Slice 25)
+
+    func testInsertLinesMatchesArrayOracleAtHeadTailInterior() {
+        let positions = [0, 500, 1_000]
+        for index in positions {
+            for k in [1, 8, 5_000] {
+                var tree = BalancedTreeLineMetrics(heights: sampleHeights(1_000))
+                var array = sampleHeights(1_000)
+                let inserted = (0..<k).map { Double(10 + ($0 % 5) * 6) }
+                tree.insertLines(at: index, heights: inserted)
+                array.insert(contentsOf: inserted, at: index)
+                assertMatchesOracle(tree, array, "insert k=\(k) at \(index)")
+            }
+        }
+    }
+
+    func testInsertLinesEqualsLoopOfSingleInserts() {
+        var bulk = BalancedTreeLineMetrics(heights: sampleHeights(300))
+        var loop = BalancedTreeLineMetrics(heights: sampleHeights(300))
+        let inserted = (0..<64).map { Double(12 + ($0 % 4) * 5) }
+        let index = 137
+        bulk.insertLines(at: index, heights: inserted)
+        for (offset, height) in inserted.enumerated() {
+            loop.insertLine(at: index + offset, height: height)
+        }
+        XCTAssertEqual(bulk.lineCount, loop.lineCount)
+        for i in 0...bulk.lineCount {
+            XCTAssertEqual(bulk.offset(ofLine: i), loop.offset(ofLine: i), "offset[\(i)]")
+        }
+    }
+
+    func testInsertLinesEmptyIsNoOpAndInsertIntoEmptyDocument() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(50))
+        let before = (0...tree.lineCount).map { tree.offset(ofLine: $0) }
+        let visits = tree.insertLines(at: 25, heights: [])
+        XCTAssertEqual(visits, 0)
+        XCTAssertEqual(tree.lineCount, 50)
+        XCTAssertEqual((0...tree.lineCount).map { tree.offset(ofLine: $0) }, before)
+
+        var empty = BalancedTreeLineMetrics(heights: [])
+        empty.insertLines(at: 0, heights: [21.0, 13.0, 17.0])
+        assertMatchesOracle(empty, [21.0, 13.0, 17.0])
+    }
+
+    func testInsertLinesKeepsOffsetsStrictlyIncreasing() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(400))
+        tree.insertLines(at: 0, heights: [40.0, 12.0])
+        tree.insertLines(at: tree.lineCount, heights: [5.0, 64.0, 9.0])
+        tree.insertLines(at: 200, heights: (0..<100).map { Double(8 + $0 % 7) })
+        for i in 0..<tree.lineCount {
+            XCTAssertLessThan(tree.offset(ofLine: i), tree.offset(ofLine: i + 1), "at \(i)")
+        }
+    }
+
+    func testInsertLinesKeepsTreeBalanced() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(40))
+        for k in 0..<200 {
+            let count = tree.lineCount
+            let index: Int
+            switch k % 4 {
+            case 0: index = 0
+            case 1: index = count
+            case 2: index = count / 2
+            default: index = count / 3
+            }
+            let batch = (0..<(1 + k % 32)).map { Double(10 + ($0 % 5) * 6) }
+            tree.insertLines(at: index, heights: batch)
+        }
+        XCTAssertLessThanOrEqual(
+            tree.treeHeight(),
+            3 * (floorLog2(tree.lineCount) + 1),
+            "tree height not logarithmic: \(tree.treeHeight()) for \(tree.lineCount)"
+        )
+    }
+
+    func testInsertLinesVisitCountIsKPlusLogarithmic() {
+        let k = 64
+        for n in [1_000, 100_000, 1_000_000] {
+            var tree = BalancedTreeLineMetrics(heights: sampleHeights(n))
+            let batch = (0..<k).map { Double(10 + ($0 % 5) * 6) }
+            let visits = tree.insertLines(at: n / 2, heights: batch)
+            XCTAssertLessThanOrEqual(visits, k + 12 * (floorLog2(n) + 1), "n=\(n)")
+            XCTAssertLessThan(visits, k * (floorLog2(n) + 1), "n=\(n) not below compose cost")
+        }
+    }
+
+    // MARK: - Bulk remove (Slice 25)
+
+    func testRemoveLinesMatchesArrayOracleAtHeadTailInterior() {
+        // (index, count) spans: head, interior, tail.
+        let spans = [(0, 1), (0, 250), (375, 250), (900, 100), (500, 1)]
+        for (index, count) in spans {
+            var tree = BalancedTreeLineMetrics(heights: sampleHeights(1_000))
+            var array = sampleHeights(1_000)
+            tree.removeLines(at: index, count: count)
+            array.removeSubrange(index..<(index + count))
+            assertMatchesOracle(tree, array, "remove \(count) at \(index)")
+        }
+    }
+
+    func testRemoveLinesEntireDocumentLeavesEmpty() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(640))
+        tree.removeLines(at: 0, count: 640)
+        XCTAssertEqual(tree.lineCount, 0)
+        XCTAssertEqual(tree.offset(ofLine: 0), 0.0)
+        XCTAssertEqual(tree.treeHeight(), 0)
+    }
+
+    func testRemoveLinesEqualsLoopOfSingleRemoves() {
+        var bulk = BalancedTreeLineMetrics(heights: sampleHeights(500))
+        var loop = BalancedTreeLineMetrics(heights: sampleHeights(500))
+        let index = 113
+        let count = 80
+        bulk.removeLines(at: index, count: count)
+        for _ in 0..<count { loop.removeLine(at: index) }
+        XCTAssertEqual(bulk.lineCount, loop.lineCount)
+        for i in 0...bulk.lineCount {
+            XCTAssertEqual(bulk.offset(ofLine: i), loop.offset(ofLine: i), "offset[\(i)]")
+        }
+    }
+
+    func testRemoveLinesZeroCountIsNoOp() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(50))
+        let before = (0...tree.lineCount).map { tree.offset(ofLine: $0) }
+        let visits = tree.removeLines(at: 25, count: 0)
+        XCTAssertEqual(visits, 0)
+        XCTAssertEqual(tree.lineCount, 50)
+        XCTAssertEqual((0...tree.lineCount).map { tree.offset(ofLine: $0) }, before)
+    }
+
+    func testRemoveLinesKeepsOffsetsStrictlyIncreasing() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(400))
+        tree.removeLines(at: 0, count: 30)
+        tree.removeLines(at: tree.lineCount - 20, count: 20)
+        tree.removeLines(at: 100, count: 50)
+        for i in 0..<tree.lineCount {
+            XCTAssertLessThan(tree.offset(ofLine: i), tree.offset(ofLine: i + 1), "at \(i)")
+        }
+    }
+
+    func testRemoveLinesVisitCountIsCountPlusLogarithmic() {
+        let count = 64
+        for n in [1_000, 100_000, 1_000_000] {
+            var tree = BalancedTreeLineMetrics(heights: sampleHeights(n))
+            let visits = tree.removeLines(at: n / 2, count: count)
+            XCTAssertLessThanOrEqual(visits, count + 12 * (floorLog2(n) + 1), "n=\(n)")
+            XCTAssertLessThan(visits, count * (floorLog2(n) + 1), "n=\(n) not below compose cost")
+        }
+    }
+
+    func testBulkChurnKeepsTreeBalanced() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(2_000))
+        for k in 0..<300 {
+            let count = tree.lineCount
+            if k % 2 == 0 {
+                let batch = (0..<(1 + k % 50)).map { Double(10 + ($0 % 5) * 6) }
+                tree.insertLines(at: (k * 7) % (count + 1), heights: batch)
+            } else {
+                let span = min(1 + k % 50, tree.lineCount)
+                let index = tree.lineCount == 0 ? 0 : (k * 13) % (tree.lineCount - span + 1)
+                tree.removeLines(at: index, count: span)
+            }
+        }
+        XCTAssertGreaterThan(tree.lineCount, 0)
+        XCTAssertLessThanOrEqual(
+            tree.treeHeight(),
+            3 * (floorLog2(tree.lineCount) + 1),
+            "tree height not logarithmic: \(tree.treeHeight()) for \(tree.lineCount)"
+        )
+    }
+
+    func testBulkChurnReusesArenaSlots() {
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(1_000))
+        let batch = (0..<128).map { Double(10 + ($0 % 5) * 6) }
+        // First cycle establishes the high-water mark; later cycles must not grow.
+        tree.removeLines(at: 400, count: 128)
+        tree.insertLines(at: 400, heights: batch)
+        let arenaAfterFirstCycle = tree.arenaNodeCount
+        let freeAfterFirstCycle = tree.freeSlotCount
+        for c in 0..<10 {
+            tree.removeLines(at: 200 + c, count: 128)
+            tree.insertLines(at: 200 + c, heights: batch)
+            XCTAssertEqual(tree.arenaNodeCount, arenaAfterFirstCycle, "arena grew on cycle \(c)")
+            XCTAssertEqual(tree.freeSlotCount, freeAfterFirstCycle, "free slots drifted on cycle \(c)")
+        }
+        XCTAssertEqual(tree.lineCount, 1_000)
+    }
+
     func testRemoveSequenceMatchesOracleDownToEmpty() {
         var tree = BalancedTreeLineMetrics(heights: sampleHeights(600))
         var mutated = sampleHeights(600)
@@ -310,6 +498,107 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         tree.insertLine(at: 0, height: 21.0)
         array.insert(21.0, at: 0)
         assertMatchesOracle(tree, array, "refill from empty")
+    }
+
+    // MARK: - Bulk integration (Slice 25)
+
+    func testMixedBulkAndSingleMutationEquivalenceOracle() {
+        var rngState: UInt64 = 0x9E3779B97F4A7C15
+        func nextRandom(_ bound: Int) -> Int {
+            rngState = rngState &* 6364136223846793005 &+ 1442695040888963407
+            return Int((rngState >> 33) % UInt64(bound))
+        }
+
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(60))
+        var array = sampleHeights(60)
+        let heightChoices = [10.0, 16.0, 22.0, 28.0, 34.0]
+
+        for step in 0..<1_500 {
+            let count = array.count
+            let op = count == 0 ? 0 : nextRandom(5)
+            switch op {
+            case 0: // bulk insert
+                let index = nextRandom(count + 1)
+                let k = 1 + nextRandom(40)
+                let batch = (0..<k).map { _ in heightChoices[nextRandom(heightChoices.count)] }
+                tree.insertLines(at: index, heights: batch)
+                array.insert(contentsOf: batch, at: index)
+            case 1: // bulk remove
+                let span = 1 + nextRandom(min(40, count))
+                let index = nextRandom(count - span + 1)
+                tree.removeLines(at: index, count: span)
+                array.removeSubrange(index..<(index + span))
+            case 2: // single insert
+                let index = nextRandom(count + 1)
+                let height = heightChoices[nextRandom(heightChoices.count)]
+                tree.insertLine(at: index, height: height)
+                array.insert(height, at: index)
+            case 3: // single remove
+                let index = nextRandom(count)
+                tree.removeLine(at: index)
+                array.remove(at: index)
+            default: // setHeight
+                let index = nextRandom(count)
+                let height = heightChoices[nextRandom(heightChoices.count)]
+                tree.setHeight(ofLine: index, to: height)
+                array[index] = height
+            }
+            assertMatchesOracle(tree, array, "after step \(step) op \(op)")
+        }
+    }
+
+    func testReLayoutAfterBulkEditMatchesFreshOracle() {
+        var array = sampleHeights(10_000)
+        var tree = BalancedTreeLineMetrics(heights: array)
+        tree.removeLines(at: 4_000, count: 500)
+        array.removeSubrange(4_000..<4_500)
+        let inserted = (0..<500).map { Double(12 + ($0 % 5) * 6) }
+        tree.insertLines(at: 2_000, heights: inserted)
+        array.insert(contentsOf: inserted, at: 2_000)
+        let oracle = PrefixSumLineMetrics(heights: array)
+
+        let input = VariableViewportInput(
+            scrollOffsetY: oracle.offset(ofLine: 5_000) - 100.0,
+            viewportHeight: 80.0 * 16.0,
+            overscanLinesBefore: 5,
+            overscanLinesAfter: 5
+        )
+        let treeRange = expectSuccess(ViewportVirtualizer.compute(input, metrics: tree))
+        let oracleRange = expectSuccess(ViewportVirtualizer.compute(input, metrics: oracle))
+        XCTAssertEqual(treeRange, oracleRange)
+
+        var treeCursor = ViewportVirtualizer.geometry(for: treeRange, metrics: tree)
+        var oracleCursor = ViewportVirtualizer.geometry(for: oracleRange, metrics: oracle)
+        var emitted = 0
+        while true {
+            let a = treeCursor.next()
+            let b = oracleCursor.next()
+            XCTAssertEqual(a, b, "geometry mismatch at \(emitted)")
+            if a == nil && b == nil { break }
+            emitted += 1
+            if emitted >= 1_000 { XCTFail("cursor did not terminate"); return }
+        }
+        XCTAssertGreaterThan(emitted, 0)
+    }
+
+    func testReLayoutAfterBulkEditUsesLogarithmicCoreQueries() {
+        let n = 1_000_000
+        var tree = BalancedTreeLineMetrics(heights: sampleHeights(n))
+        tree.removeLines(at: n / 3, count: 1_000)
+        tree.insertLines(at: n / 4, heights: (0..<1_000).map { Double(20 + $0 % 9) })
+
+        let counter = QueryCounter()
+        let counting = CountingMetrics(base: tree, counter: counter)
+        let input = VariableViewportInput(
+            scrollOffsetY: tree.offset(ofLine: n / 2),
+            viewportHeight: 80.0 * 16.0,
+            overscanLinesBefore: 5,
+            overscanLinesAfter: 5
+        )
+        _ = expectSuccess(ViewportVirtualizer.compute(input, metrics: counting))
+        let expectedMax = 2 + (ceilLog2(n) + 1) * 2
+        XCTAssertLessThanOrEqual(counter.count, expectedMax)
+        XCTAssertLessThan(counter.count, 100)
     }
 
     func testStructuralMutationVisitCountIsLogarithmic() {

@@ -121,6 +121,8 @@ func runScenario(
                 preconditionFailure("variable height mutation mode uses runVariableHeightMutationScenario")
             case .structuralMutation:
                 preconditionFailure("structural mutation mode uses runStructuralMutationScenario")
+            case .bulkStructuralMutation:
+                preconditionFailure("bulk structural mutation mode uses runBulkStructuralMutationScenario")
             case .memoryShape:
                 preconditionFailure("memory shape mode uses runMemoryShapeDiagnostics")
             case .memoryObservation:
