@@ -57,9 +57,14 @@ macOS-calibrated only. The PR-head hosted run is what produces that evidence.
 The one material difference from Slice 24: the bulk benchmark carries the
 **heaviest workload in the entire suite** — the 1M × K=4096 scenario at
 ~0.19 ms/op locally. That makes the hosted budget-fit check more load-bearing
-than the prior three promotions. The mitigating fact is headroom: the bulk
-budgets carry 6.7×–19× local headroom, larger than the ~10× Slice 24 promoted
-against successfully in one shot.
+than the prior three promotions. The headroom picture is mixed rather than
+uniformly more generous than Slice 24's: the bulk budgets span 6.7×–19× local
+headroom, so most scenarios are comfortable, but the **tightest** scenario
+(1M × K=64 at ~6.7×) is actually *below* the ~10× Slice 24 promoted against in
+one shot. So the rollout does not lean on "more headroom than Slice 24"; the
+real guardrail is Decision 3 (a failing hosted run stops the slice and retunes
+budgets in-PR) backed by the PR-head hosted run as first-time Linux x86_64
+evidence.
 
 ### Current host CI shape (relevant excerpt)
 
@@ -120,14 +125,20 @@ regression-protection gap Slice 25 opened.
 ## Scope
 
 Slice 26 introduces the bulk-structural-mutation benchmark to the hosted
-host-tests job as a **blocking gate** in a single PR, and folds in the one P3
-benchmark-hardening fix that protects that gate against a latent crash.
+host-tests job as a **blocking gate** in a single PR, and folds in the P3
+benchmark-hardening fix — extracted as a shared helper and applied to both
+structural-mutation benchmarks — that protects the blocking gates against a
+latent index-overflow crash.
 
 Expected implementation surface:
 
 - `.github/workflows/swift-ci.yml`
-- `Sources/ViewportBenchmarks/BulkStructuralMutationBenchmark.swift` (index-mixing
-  hardening only)
+- `Sources/ViewportBenchmarks/BenchmarkSupport.swift` (new `deterministicIndex`
+  helper)
+- `Sources/ViewportBenchmarks/BulkStructuralMutationBenchmark.swift` (use the
+  helper; no scenario/budget change)
+- `Sources/ViewportBenchmarks/StructuralMutationBenchmark.swift` (use the helper;
+  no scenario/budget change)
 - `AGENTS.md`
 - `docs/superpowers/verification/2026-06-21-bulk-structural-mutation-ci-gate-promotion.md`
 
@@ -138,10 +149,11 @@ Expected paper trail:
 - a verification record with local and hosted evidence;
 - a post-slice review after implementation and merge.
 
-The slice should not change any other Swift source. It must not touch
-`TextEngineCore`, the provider/algorithm in `TextEngineReferenceProviders`,
-benchmark scenarios/budgets (unless a hosted run forces a retune per Decision 3),
-or any other benchmark mode.
+The slice changes only the three benchmark files named above (helper + two call
+sites) plus the workflow and docs. It must not touch `TextEngineCore`, the
+provider/algorithm in `TextEngineReferenceProviders`, benchmark
+scenarios/budgets (unless a hosted run forces a retune per Decision 3), or any
+other benchmark mode.
 
 ## Goals
 
@@ -155,10 +167,11 @@ or any other benchmark mode.
   workflow YAML.
 - Keep the current macOS-calibrated budgets for this promotion, and use the
   PR-head hosted run as the Linux x86_64 evidence that confirms they fit.
-- Harden the benchmark's deterministic index mixing (P3 #2 from the Slice 25
-  review) so a future iteration-count bump cannot produce a negative index that
-  crashes the now-blocking gate — without changing emitted output at current
-  parameters.
+- Harden the deterministic index mixing (P3 #2 from the Slice 25 review) via a
+  shared `deterministicIndex` helper used by **both** the bulk and structural
+  mutation benchmarks, so a future iteration-count bump cannot produce a negative
+  index that crashes either blocking gate — without changing emitted output
+  (including per-row checksums) at current parameters.
 - Keep the three required job contexts unchanged.
 - Keep trusted docs-only PR behavior unchanged.
 - Update `AGENTS.md` so the CI section lists the bulk-structural-mutation gate as
@@ -195,12 +208,14 @@ Add the step directly as a blocking gate in one PR, rather than first landing a
 `continue-on-error` observation step and flipping it later. (User-selected
 rollout.)
 
-Rationale: the budgets carry 6.7×–19× macOS headroom; the PR-head CI run
+Rationale: the budgets span 6.7×–19× macOS headroom; the PR-head CI run
 executes the step on hosted Linux x86_64 and prints `p95_ns` / `p99_ns` / budget
 fields whether or not it passes, so a single blocking step both enforces and
 produces the hosted evidence. Slice 24 promoted the structural-mutation gate
-one-shot against a smaller ~10× headroom and passed. This keeps the slice to one
-clean PR.
+one-shot at ~10× headroom and passed; the bulk tightest scenario (1M × K=64) is
+a touch tighter at ~6.7×, so one-shot here relies on Decision 3's stop-and-retune
+fallback rather than on a headroom margin that strictly exceeds Slice 24's. This
+keeps the slice to one clean PR.
 
 Rejected alternative — observe-then-block: add a non-blocking observation step
 first, read the hosted numbers, then promote in a follow-up. Safer against a
@@ -256,7 +271,7 @@ gate:
 This keeps all five blocking latency gates contiguous and fails before
 lower-priority diagnostics if the bulk path regresses.
 
-### Decision 5 — Fold in the P3 #2 index-mixing hardening, scoped to the benchmark
+### Decision 5 — Harden the index-mixing trap via a shared helper, applied to both mutation benchmarks
 
 The Slice 25 review's P3 #2 finding: `runBulkStructuralMutationScenario` computes
 
@@ -274,28 +289,66 @@ But once this benchmark is a blocking required gate, a future bump to
 `iterations` / `operationsPerSample` that crosses the overflow threshold would
 turn a latent trap into a spurious red required gate.
 
-Fix: do the modular mixing in `UInt`:
+**The identical trap already exists in an already-blocking gate.**
+`StructuralMutationBenchmark.swift` (lines 90 / 94) uses the same pattern
+against the structural-mutation gate, which has been blocking since Slice 24:
+
+```swift
+let removeIndex = (sample &* 2_654_435_761) % lineCount
+let insertIndex = (sample &* 40_503) % lineCount
+```
+
+Hardening only the bulk site would leave the same latent crash in a gate that is
+*already* required — so a bulk-only fix is both less correct and less DRY than
+extracting the idiom once.
+
+Fix: add a small shared helper to `BenchmarkSupport.swift` and use it at all four
+sites:
+
+```swift
+// Deterministic, always-non-negative index in 0..<modulus, computed with
+// unsigned mixing so the wrapping multiply can never yield a negative index.
+// modulus must be > 0.
+func deterministicIndex(sample: Int, multiplier: UInt, modulus: Int) -> Int {
+    Int(UInt(bitPattern: sample) &* multiplier % UInt(modulus))
+}
+```
+
+Call sites become, for bulk:
 
 ```swift
 let modulus = lineCount - batch + 1
-let removeIndex = Int(UInt(bitPattern: sample &* 2_654_435_761) % UInt(modulus))
-let insertIndex = Int(UInt(bitPattern: sample &* 40_503) % UInt(modulus))
+let removeIndex = deterministicIndex(sample: sample, multiplier: 2_654_435_761, modulus: modulus)
+let insertIndex = deterministicIndex(sample: sample, multiplier: 40_503, modulus: modulus)
 ```
 
-**Behavior-preserving at current parameters.** For the current positive products,
-`UInt(bitPattern:)` reinterprets the same magnitude and unsigned `%` equals
-signed `%` for a positive dividend, so `removeIndex` / `insertIndex` — and
-therefore the emitted **checksums — are bit-identical** to the recorded Slice 25
-runs. The change only removes the latent trap; the verification record will show
-the gate checksums unchanged before and after the edit. `modulus =
-lineCount - batch + 1` is positive for every scenario (`batch ≤ lineCount`
-always; the smallest modulus is the `1k_lines_batch_64` case at
-`1000 − 64 + 1 = 937`), so `UInt(modulus)` is well-defined for all five
-scenarios.
+and for structural (`modulus = lineCount`).
 
-This is a benchmark-only, non-behavioral hardening that directly serves the
-slice goal (a blocking gate must not be crashable by its own index generation).
-It does not touch the bulk algorithm, the provider, or the core. The P3 #3
+**Behavior-preserving at current parameters.** For every `sample` reached by the
+current loop bounds in both benchmarks, `sample` is non-negative and
+`sample * multiplier < Int.max`, so `UInt(bitPattern: sample) &* multiplier`
+holds the same magnitude as the old signed `sample &* multiplier`, and unsigned
+`%` equals signed `%` for a non-negative dividend. Therefore `removeIndex` /
+`insertIndex` — and the emitted **checksums (printed on every gate row by
+`formatSummary`) — are bit-identical** for both the bulk and structural gates.
+The change only removes the latent trap. The verification record will capture a
+**before-edit baseline checksum** for each scenario of both gates and show the
+post-edit checksums are identical (the Slice 25 verification doc abbreviated its
+rows and omitted `checksum=`, so the baseline must be re-captured here, not read
+from that doc — see the Verification Record section).
+
+Both moduli are positive for every scenario: bulk's smallest is
+`1k_lines_batch_64` at `1000 − 64 + 1 = 937`; structural's smallest is its 1k
+scenario at `lineCount = 1000`. So `UInt(modulus)` is well-defined throughout.
+
+**Scope note.** This is a benchmark-only, non-behavioral hardening that directly
+serves the slice goal (no blocking gate may be crashable by its own index
+generation). It touches `BenchmarkSupport.swift`,
+`BulkStructuralMutationBenchmark.swift`, and `StructuralMutationBenchmark.swift`
+only — never the bulk/structural algorithm, the provider, or the core. The
+`VariableHeightBenchmark` bucket selector `((index &* 31) &+ 7) % 4` is
+**deliberately excluded**: it picks a height bucket, not an array index, so a
+negative result cannot trip an index precondition (no crash class). The P3 #3
 naming-drift item is cosmetic and unrelated to CI; it stays out of scope.
 
 ### Decision 6 — Do not change required context names
@@ -337,10 +390,19 @@ No other workflow step should need to move or change.
 
 ### Benchmark hardening
 
-In `Sources/ViewportBenchmarks/BulkStructuralMutationBenchmark.swift`,
-`runBulkStructuralMutationScenario`, replace the two signed `&*`-into-`%`
-index expressions with the `UInt`-mixed form shown in Decision 5. No scenario,
-budget, iteration count, or summary field changes.
+Add the `deterministicIndex(sample:multiplier:modulus:)` helper from Decision 5
+to `Sources/ViewportBenchmarks/BenchmarkSupport.swift` (alongside the existing
+shared helpers `percentile`, `nanoseconds`, `deterministicScrollOffset`). Then
+replace the signed `&*`-into-`%` index expressions at both mutation call sites
+with helper calls:
+
+- `BulkStructuralMutationBenchmark.swift` `runBulkStructuralMutationScenario`
+  (lines 127 / 131), `modulus = lineCount - batch + 1`;
+- `StructuralMutationBenchmark.swift` `runStructuralMutationScenario`
+  (lines 90 / 94), `modulus = lineCount`.
+
+No scenario, budget, iteration count, or summary field changes in either
+benchmark.
 
 ### Documentation
 
@@ -380,14 +442,40 @@ swift run -c release ViewportBenchmarks -- --variable-height --gate
 swift run -c release ViewportBenchmarks -- --variable-height-mutation --gate
 swift run -c release ViewportBenchmarks -- --structural-mutation --gate
 swift test
-ruby -ryaml -e "YAML.load_file('.github/workflows/swift-ci.yml'); puts 'yaml_ok'"
 git diff --check
 rg -n "Foundation" Sources/TextEngineCore
 ```
 
-It should also record the **checksum-equality proof** for the hardening: the
-`bulk_structural_mutation` checksums printed before and after the index-mixing
-edit are identical for all five scenarios.
+Plus a **workflow-invariant assertion** that goes beyond a bare YAML parse —
+asserting the new step exists, invokes `--bulk-structural-mutation --gate`, is
+not `continue-on-error`, and sits in the required order
+(structural → bulk → memory-shape). For example:
+
+```bash
+ruby -ryaml -e '
+  wf = YAML.load_file(".github/workflows/swift-ci.yml")
+  steps = wf["jobs"]["host-tests-and-benchmark-gate"]["steps"]
+  names = steps.map { |s| s["name"] }
+  bulk = steps.find { |s| s["name"] == "Run bulk structural mutation benchmark gate" }
+  raise "missing bulk gate step" unless bulk
+  raise "bulk gate not invoking --bulk-structural-mutation --gate" unless bulk["run"].include?("--bulk-structural-mutation --gate")
+  raise "bulk gate must not be continue-on-error" if bulk["continue-on-error"]
+  i_struct = names.index("Run structural mutation benchmark gate")
+  i_bulk   = names.index("Run bulk structural mutation benchmark gate")
+  i_mem    = names.index("Run memory shape diagnostic")
+  raise "bad gate ordering" unless i_struct && i_bulk && i_mem && i_struct < i_bulk && i_bulk < i_mem
+  puts "workflow_assertions_ok"
+'
+```
+
+It should also record the **checksum-equality proof** for the hardening. Because
+the Slice 25 verification record abbreviated its benchmark rows and did not
+include the `checksum=` field, the baseline cannot be read from that doc; instead
+the Slice 26 record captures a **before-edit baseline** by running both gates on
+the pre-edit tree and recording each scenario's full `checksum=` value, then
+re-running after the helper edit and showing the `bulk_structural_mutation` and
+`structural_mutation` checksums are identical to that baseline for every
+scenario.
 
 Hosted verification should include:
 
@@ -418,9 +506,13 @@ detector reads the full diff, which includes Swift/YAML here).
   - `Host tests and benchmark gate`
   - `iOS cross-target compile`
   - `WASM cross-target observation`
-- `BulkStructuralMutationBenchmark.swift` mixes `removeIndex` / `insertIndex` in
-  `UInt`, and the five `bulk_structural_mutation` checksums are unchanged from the
-  recorded Slice 25 values.
+- `BenchmarkSupport.swift` defines `deterministicIndex(sample:multiplier:modulus:)`,
+  and both `BulkStructuralMutationBenchmark.swift` and
+  `StructuralMutationBenchmark.swift` compute their remove/insert indices through
+  it (no remaining signed `&*`-into-`%` index site in either).
+- The five `bulk_structural_mutation` and three `structural_mutation` per-scenario
+  checksums are unchanged from a before-edit baseline captured in the Slice 26
+  verification record.
 - `AGENTS.md` describes the bulk-structural-mutation benchmark as a blocking
   host-job gate that fails the job on perf regression.
 - Local bulk-structural-mutation gate passes with `gate=pass` for all five
