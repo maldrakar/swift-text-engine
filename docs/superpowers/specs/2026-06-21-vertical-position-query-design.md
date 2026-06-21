@@ -243,11 +243,12 @@ structural-mutation, and bulk-structural-mutation modes); it remains rejected wi
 
 The result is `lineIndex` + `clamp` only — no `y`/`height` of the located line, no
 fractional within-line offset, no horizontal data. A caller needing the line's span
-gets it from the existing `offset(ofLine:)` (one or two O(log N) probes). Keeping
-the result minimal avoids widening the public type and an extra `offset(ofLine:)`
-query on the hot path for callers that only need the index. The richer
-geometry-bearing variant was considered in brainstorming and deferred (Risks And
-Gaps).
+gets it from one or two additional `offset(ofLine:)` queries; that cost is
+**provider-defined** (O(1) for `PrefixSumLineMetrics`, O(log N) for the mutable
+`BalancedTreeLineMetrics`), not uniformly O(log N). Keeping the result minimal
+avoids widening the public type and an extra `offset(ofLine:)` query on the hot
+path for callers that only need the index. The richer geometry-bearing variant was
+considered in brainstorming and deferred (Risks And Gaps).
 
 ## Component Design
 
@@ -277,6 +278,17 @@ identically. (If review prefers, the loop body can instead be lifted into a name
 internal helper both call — equivalent and behavior-preserving either way; the
 plan picks the minimal diff.)
 
+### Doc-comment: `Sources/TextEngineCore/LineMetricsSource.swift`
+
+The `offset(ofLine:)` **stability precondition** currently scopes the
+"stable for one layout operation" guarantee to "a `compute` and any
+`VariableLineGeometryCursor` traversal derived from the range it produced".
+`lineAt` also issues several `offset(ofLine:)` queries (offset 0, total height, and
+the in-range binary search) that must observe one consistent snapshot. Update the
+wording to "one layout/query operation — a `compute`, a `lineAt`, and any
+`VariableLineGeometryCursor` traversal derived from a range it produced". Comment
+only; no signature or behavior change.
+
 ### Algorithm sketch
 
 ```
@@ -302,19 +314,34 @@ XCTest only, in `Tests/TextEngineCoreTests`, TDD failing-first.
 
 ### Equivalence oracle (load-bearing)
 
-For `UniformLineMetrics(lineCount:lineHeight:)`, sweep `y` across a grid covering:
-negative `y`; `y == 0`; exact line boundaries `k * lineHeight`; mid-line values
-`k * lineHeight + lineHeight/2`; `y == totalHeight`; `y > totalHeight`. Assert
-`lineAt(y:)` equals the closed form:
+The oracle is **structural**, not a re-derivation by `floor(y / lineHeight)`. A
+raw division-based floor is numerically fragile at exact boundaries: `lineAt`'s
+in-range answer comes from the binary search comparing **products**
+(`offset(i) = Double(i) * lineHeight <= y`), while `floor(y / lineHeight)` divides,
+and the two can disagree by one at an exact boundary `y = k * lineHeight`. This is
+the same hazard the fixed path guards with `snappedIntegerQuotient`
+(`ViewportVirtualizer.swift:147`), and the reason the existing uniform equivalence
+test restricts to exactly-representable heights
+(`VariableUniformEquivalenceTests.swift:43`).
 
-```
-expected(y):
-    if y < 0:               .line(0, .clampedToTop)
-    else if y >= total:     .line(lineCount - 1, .clampedToBottom)
-    else:                   .line(min(Int(floor(y / lineHeight)), lineCount - 1), .inRange)
-```
+So the oracle reuses that precedent: pick `lineHeight` from the
+exactly-representable set (`[1.0, 10.0, 16.0, 12.5, 256.0]`) and `lineCount` well
+under `2^53`, **build each `y` from a product** so the expected line is known by
+construction rather than divided out:
 
-Run the sweep for several `(lineCount, lineHeight)` pairs, including `lineCount == 1`.
+| Constructed `y` | Expected `LineQuery` |
+| --- | --- |
+| `-lineHeight` | `.line(0, .clampedToTop)` |
+| `0.0` | `.line(0, .inRange)` |
+| `Double(k) * lineHeight` for `k ∈ {0, 1, lineCount/2, lineCount-1}` | `.line(k, .inRange)` |
+| `Double(k) * lineHeight + lineHeight/2` for `k < lineCount` | `.line(k, .inRange)` |
+| `Double(lineCount) * lineHeight` (total) | `.line(lineCount-1, .clampedToBottom)` |
+| `Double(lineCount) * lineHeight + lineHeight` | `.line(lineCount-1, .clampedToBottom)` |
+
+Run the sweep for several `(lineCount, lineHeight)` pairs, including
+`lineCount == 1`. Because every `y` is a product (not a quotient) over a
+representable height, the search and the expected index agree exactly, and the
+boundary case `y = k * lineHeight → line k` is asserted directly.
 
 ### Unit tests
 
@@ -334,6 +361,26 @@ Run the sweep for several `(lineCount, lineHeight)` pairs, including `lineCount 
 - **Single-line document**: every in-range `y` → line 0 `inRange`; `y < 0` /
   `y >= total` → the clamp flags.
 
+### Query-count tests (deterministic O(log N) proof)
+
+The O(log N) / O(1) claim is asserted directly, mirroring the existing
+`VariableHeightQueryCountTests` (`CountingLineMetrics` wraps `UniformLineMetrics`
+and increments a shared counter on every `offset(ofLine:)`). A new
+`LineAtQueryCountTests` asserts the exact `offset(ofLine:)` query count per path —
+not a wall-clock measurement:
+
+| `lineAt` path | Expected `offset(ofLine:)` count |
+| --- | --- |
+| **in-range**, 1M lines | `≤ 2 + (ceilLog2(lineCount) + 1)` — two O(1) contract probes (`offset(0)`, total height) plus one binary search; and `< 100` (a linear scan would be hundreds of thousands) |
+| **empty document** (`lineCount == 0`) | exactly `1` — only the `offset(0)` contract probe, then `.empty`, no total/search |
+| **clamp branch** (`y < 0` and `y >= total`, 1M lines) | exactly `2` — `offset(0)` + total height, no binary-search probes |
+| **non-finite `y`** | exactly `0` — `.failure(.nonFiniteValue)` returns before any `offset` probe |
+
+This is the structural counterpart to the equivalence oracle: the oracle proves
+*correctness*, these tests prove the *cost envelope* (logarithmic query count,
+constant memory, no accidental linear scan), reusing the codebase's established
+counting harness.
+
 ### Behavior-preservation of the shared-search refactor
 
 Re-run the existing `compute` equivalence-oracle and variable-height tests; they
@@ -348,9 +395,17 @@ New file `Sources/ViewportBenchmarks/LineQueryBenchmark.swift`, modeled on
 - **Mode**: add `.lineQuery` to `BenchmarkMode` (`outputName = "line_query"`),
   `--line-query` to `BenchmarkOptions.parse`/usage, and a `runLineQueryBenchmarks`
   arm in `BenchmarkProgram.runBenchmarks`.
-- **Scenarios**: large synthetic docs (e.g. `1k`, `100k`, `1m` lines) over a
-  `LineMetricsSource` (uniform and/or the non-uniform `variableHeights` generator
-  reused from `VariableHeightBenchmark`), each with `p95`/`p99` budgets.
+- **Scenarios**: large synthetic docs (e.g. `1k`, `100k`, `1m` lines), each with
+  `p95`/`p99` budgets. The suite **must include at least one `provider=balanced_tree`
+  scenario** (`BalancedTreeLineMetrics`), not only O(1)-offset providers. This is
+  load-bearing: `UniformLineMetrics`/`PrefixSumLineMetrics` answer `offset(ofLine:)`
+  in O(1), so a generic binary search over them is O(log N) wall-clock — but
+  `BalancedTreeLineMetrics.offset(ofLine:)` is itself an O(log N) tree descent
+  (`BalancedTreeLineMetrics.swift:47`), so the generic search over it is the real
+  **O(log² N)** mutable-provider hot path. A uniform-only benchmark would silently
+  under-measure that path. Include a uniform (or `variableHeights`-driven
+  `PrefixSumLineMetrics`) scenario for the O(log N) baseline **and** a balanced-tree
+  scenario for the O(log² N) realistic case.
 - **Workload**: per operation, derive a deterministic `y` spanning in-range and
   out-of-range values (reusing `deterministicScrollOffset` / a deterministic
   fraction of `totalHeight`, with a slice of samples pushed below 0 and above
@@ -401,11 +456,19 @@ Recorded in `docs/superpowers/verification/2026-06-21-vertical-position-query.md
 
 1. `ViewportVirtualizer.lineAt(y:metrics:) -> LineQuery` is public, stateless, and
    behaves exactly per the Decision 4 table.
-2. The equivalence oracle passes: `lineAt` equals the uniform closed form
-   (index + clamp flag) across the full `y` sweep, for multiple `(lineCount,
-   lineHeight)` including `lineCount == 1`.
-3. All listed unit and failure tests pass; `.empty` and all four
-   `ViewportValidationError` outcomes are covered.
+2. The equivalence oracle passes: `lineAt` equals the structurally-derived expected
+   line (index + clamp flag) across the full product-built `y` sweep over
+   exactly-representable heights, for multiple `(lineCount, lineHeight)` including
+   `lineCount == 1`.
+3. All listed unit and failure tests pass; `.empty` and all **`lineAt`-reachable**
+   validation outcomes are covered — `.negativeLineCount`, `.nonFiniteValue`, and
+   both `.invalidLineMetrics` triggers (invalid first offset, invalid total height).
+   (`ViewportValidationError` has six cases; `lineAt` cannot reach the three
+   fixed-/viewport-specific ones — `.nonPositiveLineHeight`, `.negativeViewportHeight`,
+   `.negativeOverscan` — and does not claim to.)
+3a. The query-count tests pass with the exact per-path `offset(ofLine:)` counts in
+   the Testing Strategy table (in-range `≤ 2 + (ceilLog2(n) + 1)` and `< 100`; empty
+   `= 1`; clamp `= 2`; non-finite `y` `= 0`).
 4. The shared-search refactor is behavior-preserving: existing `compute`
    tests/oracle and all five existing gates pass with identical checksums.
 5. `--line-query` benchmark runs; `--line-query --gate` enforces budgets and is
@@ -422,10 +485,14 @@ Recorded in `docs/superpowers/verification/2026-06-21-vertical-position-query.md
 
 A caller doing tap-to-caret wants the line's `y`/`height` and the fractional offset
 within the line. This slice returns only `lineIndex` + `clamp`; such a caller makes
-one or two extra `offset(ofLine:)` probes. If real usage shows this is a common hot
-path, a future slice can add a geometry-bearing query (or a `pointAt(x:y:)` once the
-horizontal axis exists) without breaking `lineAt` — `LineQuery` is additive. Chosen
-now for minimal surface (Decision 7).
+one or two extra `offset(ofLine:)` queries (provider-defined cost). If real usage
+shows this is a common hot path, a future slice can add the richness **as a new
+query method / result type** (e.g. `lineLocation(at:)` returning geometry, or
+`pointAt(x:y:)` once the horizontal axis exists). It must **not** be added by
+appending a case to the public `LineQuery` enum: that is source-breaking for client
+`switch`es over a non-frozen enum. A new method or a separate result type is the
+non-breaking path; `lineAt`'s own signature stays stable. Chosen now for minimal
+surface (Decision 7).
 
 ### Budgets are macOS-calibrated and local-only
 
@@ -454,8 +521,18 @@ path's contract posture.
 - **Slice 28 (recommended next): promote `--line-query --gate` to a blocking hosted
   CI gate**, completing the functional → promotion pair, exactly as Slices 15 / 21 /
   24 / 26 did for the prior four modes.
+- **Provider-native prefix search (drop O(log² N) → O(log N))**: the generic
+  `lineAt` does a binary search whose every probe is itself an `offset(ofLine:)`
+  call, so over a tree provider it is O(log² N). A provider that exposes a native
+  "line containing cumulative offset `y`" descent (one tree walk accumulating left
+  subtree sums) answers `y → line` in a single O(log N) descent. A future slice
+  could add an optional `LineMetricsSource` requirement (e.g. `line(atOffset:)`)
+  with a default implementation that falls back to the generic search, letting
+  `BalancedTreeLineMetrics` override it. Out of scope here; the balanced-tree
+  benchmark scenario (above) is what would make such a win measurable.
 - **Geometry-bearing / point queries**: a richer result with the located line's
-  span, and eventually `pointAt(x:y:)` once a horizontal axis exists.
+  span, and eventually `pointAt(x:y:)` once a horizontal axis exists (added as a new
+  method/result type, not a new `LineQuery` case — see Risks).
 - **Horizontal axis** (x / width, max-width query, horizontal virtualization) and
   **wrap-aware visual rows** remain the larger future capabilities flagged by the
   Slice 26 review; each needs its own brainstorm.
