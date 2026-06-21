@@ -70,9 +70,11 @@ no wrap, no new provider data.
 - Validation parity with `compute`: up-front, return-based (no `throws`),
   Foundation-free, reusing the existing `ViewportValidationError`.
 - An **equivalence oracle**: for `UniformLineMetrics`, `lineAt(y:)` equals the
-  closed form `clamp(floor(y / lineHeight), 0, lineCount-1)` with the correct
-  clamp flag — the same "variable path provably equals the closed form for uniform
-  metrics" discipline the project already uses for `compute`.
+  structurally-derived expected line (index + clamp flag) over a product-built
+  sweep of exactly-representable heights — **not** a raw
+  `clamp(floor(y / lineHeight), …)`, which is numerically fragile at boundaries
+  (see Testing Strategy) — the same "variable path provably matches the expected
+  mapping for uniform metrics" discipline the project already uses for `compute`.
 - A `--line-query` benchmark mode + local `--gate` with a macOS-calibrated budget,
   following the established functional-slice rhythm.
 - Foundation-free, Embedded-compatible, zero-dependency; iOS/WASM cross-target
@@ -156,11 +158,12 @@ extension ViewportVirtualizer {
 ```
 
 There is **no** separate fixed-height (`ViewportInput`-style) overload. The uniform
-case is served by `UniformLineMetrics`, whose `offset(ofLine:)` is O(1), so the
-binary search degenerates to the same closed-form answer the equivalence oracle
-asserts. `compute` carries a historical fixed-height overload (it predates the
-metrics abstraction); there is no reason to grow a second `lineAt` surface for the
-same algorithm. YAGNI: one path, proven equal to the closed form by the oracle.
+case is served by `UniformLineMetrics`; its `offset(ofLine:)` is O(1) per query, so
+the binary search still runs its O(log N) probes but each is cheap, and it yields
+the structurally-derived expected line the equivalence oracle asserts. `compute`
+carries a historical fixed-height overload (it predates the metrics abstraction);
+there is no reason to grow a second `lineAt` surface for the same algorithm. YAGNI:
+one path, proven equal to the expected mapping by the structural oracle.
 
 ### Decision 3 — Reuse the existing binary search; do not duplicate it
 
@@ -306,7 +309,13 @@ lineAt(y, metrics):
     return .line(i, .inRange)
 ```
 
-O(log N) (one binary search; O(1) for `UniformLineMetrics`), O(1) core memory.
+**O(log N) `offset(ofLine:)` queries** (one binary search) / **O(1) core memory**.
+Wall-clock is `O(log N × offsetCost)`: `UniformLineMetrics` /
+`PrefixSumLineMetrics` answer each `offset(ofLine:)` in O(1) → O(log N) overall,
+while `BalancedTreeLineMetrics` answers each in O(log N) → **O(log² N)** until a
+provider-native prefix search exists (Future Slices). The single metrics-based API
+runs the binary search for **every** provider, including uniform — there is no
+O(1)-query closed-form shortcut.
 
 ## Testing Strategy
 
