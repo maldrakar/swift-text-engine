@@ -87,11 +87,11 @@ func runStructuralMutationScenario(
             // at deterministic positions spread across the document. After the
             // remove the count is lineCount - 1, so insert index domain is
             // 0...(lineCount - 1); % lineCount stays within it.
-            let removeIndex = (sample &* 2_654_435_761) % lineCount
+            let removeIndex = deterministicIndex(sample: sample, multiplier: 2_654_435_761, modulus: lineCount)
             metrics.removeLine(at: removeIndex)
             checksum &+= metrics.lastMutationNodeVisits
 
-            let insertIndex = (sample &* 40_503) % lineCount
+            let insertIndex = deterministicIndex(sample: sample, multiplier: 40_503, modulus: lineCount)
             let newHeight = ((sample & 1) == 0) ? 18.0 : 30.0
             metrics.insertLine(at: insertIndex, height: newHeight)
             checksum &+= metrics.lastMutationNodeVisits

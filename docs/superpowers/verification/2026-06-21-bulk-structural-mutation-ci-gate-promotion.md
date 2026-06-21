@@ -40,7 +40,63 @@ mode=structural_mutation provider=balanced_tree scenario=1m_lines_200_visible_ov
 
 ## Post-Hardening Checksum Equality
 
-_Filled in Task 2._
+Captured after the `deterministicIndex` refactor. All eight `checksum=` values
+match the pre-hardening baseline above byte-for-byte; p95/p99 timing differences
+are measurement noise and are not part of the equality assertion.
+
+Structural check:
+```bash
+rg -n "&\* (2_654_435_761|40_503)" Sources/ViewportBenchmarks/
+```
+Exit status: `1`; no matches.
+
+### `--bulk-structural-mutation --gate`
+
+Command:
+```bash
+swift run -c release ViewportBenchmarks -- --bulk-structural-mutation --gate
+```
+Exit status: `0`.
+
+```text
+mode=bulk_structural_mutation provider=balanced_tree scenario=1k_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=1000 p95_ns=3587 p99_ns=4719 failures=0 budget_p95_ns=60000 budget_p99_ns=120000 gate=pass checksum=82740062444
+mode=bulk_structural_mutation provider=balanced_tree scenario=100k_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=100000 p95_ns=11852 p99_ns=12138 failures=0 budget_p95_ns=150000 budget_p99_ns=250000 gate=pass checksum=36564666309410
+mode=bulk_structural_mutation provider=balanced_tree scenario=1m_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=1000000 p95_ns=53016 p99_ns=54747 failures=0 budget_p95_ns=400000 budget_p99_ns=600000 gate=pass checksum=1317343499882000
+mode=bulk_structural_mutation provider=balanced_tree scenario=100k_lines_batch_4096 iterations=2000 operations_per_sample=16 line_count=100000 p95_ns=65684 p99_ns=68151 failures=0 budget_p95_ns=1500000 budget_p99_ns=2500000 gate=pass checksum=2285022074625
+mode=bulk_structural_mutation provider=balanced_tree scenario=1m_lines_batch_4096 iterations=2000 operations_per_sample=16 line_count=1000000 p95_ns=164841 p99_ns=174843 failures=0 budget_p95_ns=2500000 budget_p99_ns=4000000 gate=pass checksum=82203678997143
+```
+
+Checksum comparison against baseline:
+
+```text
+1k_lines_batch_64: checksum=82740062444 match
+100k_lines_batch_64: checksum=36564666309410 match
+1m_lines_batch_64: checksum=1317343499882000 match
+100k_lines_batch_4096: checksum=2285022074625 match
+1m_lines_batch_4096: checksum=82203678997143 match
+```
+
+### `--structural-mutation --gate`
+
+Command:
+```bash
+swift run -c release ViewportBenchmarks -- --structural-mutation --gate
+```
+Exit status: `0`.
+
+```text
+mode=structural_mutation provider=balanced_tree scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=1751 p99_ns=1832 failures=0 budget_p95_ns=20000 budget_p99_ns=40000 gate=pass checksum=200106952336
+mode=structural_mutation provider=balanced_tree scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=8305 p99_ns=8534 failures=0 budget_p95_ns=80000 budget_p99_ns=120000 gate=pass checksum=89494497658324
+mode=structural_mutation provider=balanced_tree scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=35595 p99_ns=36918 failures=0 budget_p95_ns=250000 budget_p99_ns=400000 gate=pass checksum=3379593298396981
+```
+
+Checksum comparison against baseline:
+
+```text
+1k_lines_20_visible_overscan_0: checksum=200106952336 match
+100k_lines_80_visible_overscan_5: checksum=89494497658324 match
+1m_lines_200_visible_overscan_50: checksum=3379593298396981 match
+```
 
 ## Local Gate Sweep
 

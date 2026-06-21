@@ -20,6 +20,14 @@ func deterministicScrollOffset(sample: Int, maxOffset: Double) -> Double {
     return maxOffset * fraction
 }
 
+// Deterministic, always-non-negative index in 0..<modulus. Mixing is done in
+// UInt so the wrapping multiply can never produce a negative dividend that
+// Swift's signed `%` would carry into a negative index (which would trip an
+// `index >= 0` precondition and crash a benchmark gate). `modulus` must be > 0.
+func deterministicIndex(sample: Int, multiplier: UInt, modulus: Int) -> Int {
+    Int(UInt(bitPattern: sample) &* multiplier % UInt(modulus))
+}
+
 @inline(never)
 func runProviderOperation<Source: DocumentLineSource>(
     input: ViewportInput,

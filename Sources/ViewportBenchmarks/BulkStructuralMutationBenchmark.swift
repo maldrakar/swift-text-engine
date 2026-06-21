@@ -124,11 +124,12 @@ func runBulkStructuralMutationScenario(
         let start = clock.now
         for operation in 0..<scenario.operationsPerSample {
             let sample = iteration * scenario.operationsPerSample + operation
-            let removeIndex = (sample &* 2_654_435_761) % (lineCount - batch + 1)
+            let modulus = lineCount - batch + 1
+            let removeIndex = deterministicIndex(sample: sample, multiplier: 2_654_435_761, modulus: modulus)
             metrics.removeLines(at: removeIndex, count: batch)
             checksum &+= metrics.lastMutationNodeVisits
 
-            let insertIndex = (sample &* 40_503) % (lineCount - batch + 1)
+            let insertIndex = deterministicIndex(sample: sample, multiplier: 40_503, modulus: modulus)
             metrics.insertLines(at: insertIndex, heights: insertedHeights)
             checksum &+= metrics.lastMutationNodeVisits
 
