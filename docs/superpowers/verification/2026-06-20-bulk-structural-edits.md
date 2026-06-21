@@ -13,7 +13,7 @@ oracle and virtualizer integration tests, adds a local
 Local verification below was run at implementation head
 `6e780d5bd6585ac73488ee7b5ab0a3b31466fc40` before this verification artifact
 and checklist update were committed. Hosted PR-head proof for the full
-implementation branch is recorded below; post-merge push proof is pending merge.
+implementation branch and the post-merge push proof are both recorded below.
 
 ## Local State
 
@@ -311,5 +311,65 @@ RSS memory observation, and PR-only realistic-provider relative observation
 successfully. iOS and WASM cross-target jobs also completed successfully.
 
 This later docs-only evidence commit records the PR-head proof above. The
-current PR head after this commit is expected to receive the required contexts
-through the trusted docs-only shortcut; post-merge push proof remains pending.
+current PR head after this commit received the required contexts through the
+trusted docs-only shortcut (`mergeStateStatus=CLEAN`); the post-merge push proof
+is recorded below.
+
+## Post-Merge Push Proof
+
+PR `#41` merged to `main` as merge commit
+`0db88f5876fa25f76822afb8ffaf60bfbef85042` at `2026-06-21T06:43:28Z`. The merge
+brings the bulk-structural-edits implementation onto `main`, so this push run is
+the merged-code evidence anchor for Slice 25.
+
+Post-merge push workflow run: `27896284202` (event `push`, branch `main`,
+head `0db88f5876fa25f76822afb8ffaf60bfbef85042`).
+
+Command:
+
+```bash
+gh run view 27896284202 --json conclusion,event,headSha
+gh run view 27896284202 --json jobs --jq '.jobs[] | {name, conclusion}'
+```
+
+Exit status: `0`.
+
+```text
+conclusion=success event=push headSha=0db88f5876fa25f76822afb8ffaf60bfbef85042
+Host tests and benchmark gate: success
+WASM cross-target observation: success
+iOS cross-target compile: success
+```
+
+Step-level conclusions for the `Host tests and benchmark gate` job (verified at
+step level, not just the job rollup, per the standing "a green job can hide a
+dead continue-on-error step" lesson):
+
+Command:
+
+```bash
+gh run view 27896284202 --json jobs \
+  --jq '.jobs[] | select(.name=="Host tests and benchmark gate")
+        | .steps[] | "\(.number)\t\(.conclusion)\t\(.name)"'
+```
+
+Exit status: `0`.
+
+```text
+7   success  Run host tests
+8   success  Run synthetic benchmark gate
+9   success  Run variable-height benchmark gate
+10  success  Run variable-height mutation benchmark gate
+11  success  Run structural mutation benchmark gate
+12  success  Run memory shape diagnostic
+13  success  Run RSS memory observation diagnostic
+5   skipped  Complete docs-only PR        (real source PR, not docs-only)
+14  skipped  Observe realistic provider relative performance  (PR-only)
+```
+
+The four blocking latency gates (synthetic, variable-height, variable-height
+mutation, structural mutation) plus the memory-shape and RSS diagnostics all ran
+`success` on the merge commit, with iOS (blocking) and WASM (observational)
+cross-target jobs also `success`. Consistent with this slice's Non-Goals, the new
+`--bulk-structural-mutation` gate is **not** wired into CI — it remains a local
+gate, with hosted promotion deferred to Slice 26.
