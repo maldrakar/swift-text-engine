@@ -310,10 +310,41 @@ variable-height mutation gate, structural mutation gate, memory-shape diagnostic
 RSS memory observation, and PR-only realistic-provider relative observation
 successfully. iOS and WASM cross-target jobs also completed successfully.
 
-This later docs-only evidence commit records the PR-head proof above. The
-current PR head after this commit received the required contexts through the
-trusted docs-only shortcut (`mergeStateStatus=CLEAN`); the post-merge push proof
-is recorded below.
+**Correction (added by the Slice 25 post-slice review, 2026-06-21).** The block
+above records the proof against head `ebb8424` / run `27895095147`, but
+committing this verification doc produced a **new** PR head
+`2f738cddef9ae944551eda2070d2036a3ed4403c` — the head that was actually merged —
+which triggered a fresh CI run `27895264320`. PR #41 carries Swift source, so its
+full base→head diff is **never** docs-only; the earlier claim that the final head
+"received the required contexts through the trusted docs-only shortcut" was
+incorrect. Run `27895264320` on `2f738cd` ran the **full heavy path** (all three
+required jobs `success`):
+
+```bash
+gh run view 27895264320 --json jobs \
+  --jq '.jobs[] | select(.name=="Host tests and benchmark gate")
+        | .steps[] | "\(.number)\t\(.conclusion)\t\(.name)"'
+```
+
+Exit status: `0`.
+
+```text
+4   success  Detect PR change scope
+5   skipped  Complete docs-only PR          (real source PR, not docs-only)
+7   success  Run host tests
+8   success  Run synthetic benchmark gate
+9   success  Run variable-height benchmark gate
+10  success  Run variable-height mutation benchmark gate
+11  success  Run structural mutation benchmark gate
+12  success  Run memory shape diagnostic
+13  success  Run RSS memory observation diagnostic
+14  success  Observe realistic provider relative performance
+```
+
+So the true merged PR head is `2f738cd`, verified heavy-path by run
+`27895264320`; the `ebb8424` / `27895095147` evidence above remains valid for
+that earlier commit. The merged-code evidence anchor is the post-merge push proof
+recorded below.
 
 ## Post-Merge Push Proof
 
