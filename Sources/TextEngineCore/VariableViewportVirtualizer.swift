@@ -64,7 +64,7 @@ extension ViewportVirtualizer {
 
     // Largest i in [0, lineCount) with offset(i) <= target (the line containing
     // `target`). For `target` at or past the document end, returns lineCount.
-    private static func firstLineTopAtOrBelow<Metrics: LineMetricsSource>(
+    static func firstLineTopAtOrBelow<Metrics: LineMetricsSource>(
         _ target: Double,
         metrics: Metrics,
         lineCount: Int,

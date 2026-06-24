@@ -13,9 +13,10 @@ public protocol LineMetricsSource {
     /// chain). The core never queries outside `0...lineCount`.
     ///
     /// Stability precondition: `lineCount` and `offset(ofLine:)` must be stable
-    /// for one layout operation — a `compute` and any `VariableLineGeometryCursor`
-    /// traversal derived from the range it produced — so the range and the
-    /// geometry come from one consistent snapshot.
+    /// for one layout/query operation - a `compute`, a `lineAt`, and any
+    /// `VariableLineGeometryCursor` traversal derived from a range it produced -
+    /// so the range, the located line, and the geometry come from one consistent
+    /// snapshot.
     func offset(ofLine index: Int) -> Double
 }
 
