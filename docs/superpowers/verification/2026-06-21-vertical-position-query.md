@@ -6,11 +6,42 @@ Local verification HEAD: `dfdb49f077f28d0357347f3f11a53ac1a5079357`
 
 ## Hosted Proof
 
-- PR-head Swift CI run: Pending
-- Post-merge `push` Swift CI run: Pending
+Recorded in this post-merge follow-up, against the final stable PR-head SHA and
+the merge commit, so the verification record no longer has the stale-on-write
+gap described by the plan.
 
-The hosted run IDs are intentionally pending until the PR head and post-merge
-commit exist. Do not backfill them from a pre-final local commit.
+### PR-head run (PR #47, final head)
+
+- PR: #47 `slice-27-vertical-position-query` -> `main`.
+- Final head SHA: `16f69c0fb1e0078509d0ad604a2561723f243ddf` (`16f69c0`).
+- Run: `27914867890`, event `pull_request`, conclusion `success`.
+- All three required jobs `success`:
+  - `Host tests and benchmark gate` - job `82598316450`
+  - `iOS cross-target compile` - job `82598316429`
+  - `WASM cross-target observation` - job `82598316437`
+- Host job step list: `Complete docs-only PR` = `skipped`; host tests,
+  synthetic gate, variable-height gate, variable-height mutation gate,
+  structural mutation gate, bulk structural mutation gate, memory-shape
+  diagnostic, RSS memory observation, and PR-only realistic-provider observation
+  all ran successfully. The new `--line-query --gate` remains local-only for
+  Slice 27 and is intentionally not part of hosted CI until the follow-up
+  CI-promotion slice.
+
+### Post-merge push run (merge commit - merged-code anchor)
+
+- Merge commit: `619805e05b152da95b90ca479db91deee51a94b0` (`619805e`),
+  "Merge pull request #47 from maldrakar/slice-27-vertical-position-query".
+- Run: `28105492251`, event `push`, branch `main`, conclusion `success`.
+- All three required jobs `success`:
+  - `Host tests and benchmark gate` - job `83218493520`
+  - `iOS cross-target compile` - job `83218493497`
+  - `WASM cross-target observation` - job `83218493488`
+- Host job step list: `Complete docs-only PR` = `skipped`; host tests,
+  synthetic gate, variable-height gate, variable-height mutation gate,
+  structural mutation gate, bulk structural mutation gate, memory-shape
+  diagnostic, and RSS memory observation all ran successfully; realistic-provider
+  observation was `skipped` because it is PR-only. This post-merge `push` run is
+  the merged-code evidence anchor for Slice 27.
 
 ## Host Tests And Release Build
 
