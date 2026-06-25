@@ -46,15 +46,26 @@ and lays out Options B–E (provider-native prefix search, geometry-bearing quer
 horizontal/wrap-aware capability, WASM blocking) as later directions. The user
 selected **Option A**, the **one-shot blocking** rollout.
 
-### Relationship to the prior promotions (Slices 18, 22, 24, 26)
+### Relationship to the prior promotions (Slices 15, 21, 24, 26)
 
-This slice is the fifth functional→gate promotion in the established cadence,
-and the direct analog of Slice 26 (bulk-structural-mutation gate promotion) for
-the line-query path. It reuses those decisions almost verbatim. Like the
-line-query benchmark before this slice, each promoted benchmark had **never run
-in hosted CI** before its promotion: there is no observation step to flip and no
-prior hosted Linux x86_64 evidence; its budgets are macOS-calibrated only, and
-the PR-head hosted run is what produces the Linux evidence.
+This slice is the fifth benchmark-gate promotion in the established cadence. The
+prior four were Slice 15 (variable-height), Slice 21 (variable-height-mutation),
+Slice 24 (structural-mutation), and Slice 26 (bulk-structural-mutation). They
+split into two shapes:
+
+- **Flip an existing hosted observation step to blocking** — Slices 15 and 21.
+  Those benchmarks already ran in hosted CI as non-blocking observation steps, so
+  promotion had prior hosted Linux evidence in hand.
+- **Promote a benchmark that has never run in hosted CI** — Slices 24 and 26.
+  There was no observation step to flip and no prior hosted Linux x86_64
+  evidence; budgets were macOS-calibrated only, and the PR-head hosted run
+  produced the Linux evidence.
+
+Slice 28 is the second shape — the direct analog of Slices 24 and 26. Slice 27
+kept `--line-query --gate` local-only, so the line-query benchmark has **never
+run in hosted CI**: there is no observation step to flip and no prior hosted
+Linux x86_64 evidence, its budgets are macOS-calibrated only, and the one-shot
+PR-head run is what produces the Linux budget-fit evidence.
 
 The one material difference from Slice 26 makes this the **lowest-risk
 promotion in the series**: where the bulk gate carried the heaviest workload in
@@ -86,7 +97,9 @@ There is no `--line-query` step anywhere in the workflow today.
 
 The benchmark mode already carries executable-owned budgets
 (`Sources/ViewportBenchmarks/LineQueryBenchmark.swift`). Recorded Slice 27 local
-observation (macOS arm64), reproduced bit-identically during the Slice 27 review:
+observation (macOS arm64); the Slice 27 review reran the gate, matched the
+deterministic per-scenario checksums, and stayed passing (timing rows vary run to
+run and were not bit-identical):
 
 | Scenario | Observed p95 ns | Budget p95 ns | Headroom | Observed p99 ns | Budget p99 ns |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -101,15 +114,26 @@ roughly 48× more headroom than the bulk gate's tightest scenario at promotion.
 
 ## Problem
 
-The line-query path is proven locally but invisible to hosted CI. Today the host
-job stays green regardless of `lineAt` performance, because the benchmark is not
-invoked in the workflow at all. That leaves an enforcement gap:
+The line-query path is proven locally but its **latency** is invisible to hosted
+CI. Today the host job stays green regardless of `lineAt` runtime, because the
+benchmark is not invoked in the workflow at all.
 
-- regressions in `ViewportVirtualizer.lineAt` — for example an accidental linear
-  scan, a clamp-branch search, or a boundary-convention change that defeats the
-  shared binary search — are not blocking;
-- regressions in the unchanged generic variable-height core path, when exercised
-  through the inverse y→line query, are not blocking;
+The hosted job already runs `swift test`, so the correctness and
+algorithmic-shape guarantees are enforced: `LineAtQueryCountTests`
+deterministically bounds the `offset(ofLine:)` probe count at O(log N) and proves
+the clamp branches never run the binary search, and `LineAtTests` plus the
+equivalence oracle cover the half-open boundary behavior. An accidental linear
+scan, a clamp-branch search, or a boundary-convention change would fail those
+unit tests and already block merge.
+
+What the unit tests do **not** catch is a runtime budget/latency regression — a
+constant-factor slowdown, an added allocation, or a cache-unfriendly change that
+preserves query count and correctness but degrades wall-clock p95/p99. That is
+the enforcement gap:
+
+- runtime latency regressions in `ViewportVirtualizer.lineAt` — and in the
+  unchanged generic variable-height core path it exercises through the inverse
+  y→line query — are not blocking;
 - the brief's "benchmark gates block merge" principle is not yet true for the
   inverse vertical position-query path.
 
@@ -206,11 +230,12 @@ Rationale: the budgets span ~325×–3000× macOS headroom — by far the most
 generous of any promotion in this series. The PR-head CI run executes the step
 on hosted Linux x86_64 and prints `p95_ns` / `p99_ns` / budget fields whether or
 not it passes, so a single blocking step both enforces and produces the hosted
-evidence. The previous four promotions (variable-height-mutation,
-structural-mutation, bulk-structural-mutation) all went one-shot at much thinner
-margins and passed; with ~48× more headroom than the tightest prior promotion,
-one-shot here is the clear low-risk choice. Decision 3's stop-and-retune fallback
-remains the net. This keeps the slice to one clean PR.
+evidence. The most comparable prior promotions — Slice 24 (structural-mutation)
+and Slice 26 (bulk-structural-mutation), which like this slice promoted a
+never-hosted benchmark straight to blocking — went one-shot at ~6.7×–~10×
+headroom and passed; with ~48× more headroom than the tightest of those, one-shot
+here is the clear low-risk choice. Decision 3's stop-and-retune fallback remains
+the net. This keeps the slice to one clean PR.
 
 Rejected alternative — observe-then-block: add a non-blocking observation step
 first, read the hosted numbers, then promote in a follow-up. For a benchmark
