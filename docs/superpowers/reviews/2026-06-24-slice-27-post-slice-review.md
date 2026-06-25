@@ -362,14 +362,16 @@ the API minimal now and avoids forcing geometry cost onto index-only callers.
 If usage proves the richer result is hot, add a new method/result type rather
 than extending `LineQuery` with a source-breaking case.
 
-### Historical plan snippet had one stale expected value
+### Historical plan snippet had one stale expected value (now corrected)
 
-The implementation plan's first illustrative TDD snippet still contains the
-pre-review pasted expectation for `y = 44.0` in offsets `[0, 10, 40, 45, 95]`.
-The final code, spec, tests, and verification all use the correct half-open
-answer (`lineIndex: 2`), so this is not an actionable defect. The lesson is to
-treat the spec and final tests as authoritative when a plan snippet predates a
-review correction.
+The implementation plan's first illustrative TDD snippet originally carried the
+pre-review pasted expectation for `y = 44.0` in offsets `[0, 10, 40, 45, 95]`
+(`lineIndex: 1`), while the final code, spec, tests, and verification all use the
+correct half-open answer (`lineIndex: 2`). This was never a code defect — only a
+stale snippet in a historical plan — and the plan line has since been corrected
+to `lineIndex: 2` to match the shipped `LineAtTests.testNonUniformMetricsResolveCorrectly`.
+The standing lesson is to treat the spec and final tests as authoritative when a
+plan snippet predates a review correction.
 
 ### Standing items unchanged
 
