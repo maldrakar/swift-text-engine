@@ -221,5 +221,59 @@ Exit status: `0`
 
 ## Hosted Proof
 
-Pending - recorded in the post-merge follow-up (Task 4) against the final stable
-PR-head SHA and the merge commit, to avoid a stale-on-write hosted record.
+Recorded in this post-merge follow-up, against the final stable PR-head SHA and
+the merge commit, so the verification record no longer has a stale-on-write
+hosted section.
+
+### PR-head run (PR #50, final head)
+
+- PR: #50 `slice-28-line-query-ci-gate-promotion` -> `main`.
+- Final head SHA: `c26765cab17a93036bddc34d279037a845fd329d` (`c26765c`).
+- Run: `28183651687`, event `pull_request`, conclusion `success`.
+- All three required jobs `success`:
+  - `Host tests and benchmark gate` - job `83479679111`
+  - `iOS cross-target compile` - job `83479679002`
+  - `WASM cross-target observation` - job `83479679034`
+- Host job step ordering: `Run bulk structural mutation benchmark gate`
+  completed successfully, then `Run line query benchmark gate` completed
+  successfully, then `Run memory shape diagnostic` completed successfully.
+- Blocking proof: the workflow-invariant assertion above verifies no
+  `continue-on-error` on the line-query step; the hosted PR-head step ran as a
+  normal `sh -e` step and the host job concluded `success`.
+
+Hosted Linux line-query rows from `Run line query benchmark gate`:
+
+```text
+mode=line_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=33 p99_ns=52 failures=0 budget_p95_ns=30000 budget_p99_ns=60000 gate=pass checksum=641440000
+mode=line_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=47 p99_ns=75 failures=0 budget_p95_ns=60000 budget_p99_ns=120000 gate=pass checksum=63985556480
+mode=line_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=79 p99_ns=89 failures=0 budget_p95_ns=120000 budget_p99_ns=240000 gate=pass checksum=639841600000
+mode=line_query provider=balanced_tree scenario=balanced_tree_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=1413 p99_ns=1463 failures=0 budget_p95_ns=300000 budget_p99_ns=600000 gate=pass checksum=63985600000
+mode=line_query provider=balanced_tree scenario=balanced_tree_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=2456 p99_ns=3193 failures=0 budget_p95_ns=600000 budget_p99_ns=1200000 gate=pass checksum=639841547520
+```
+
+### Post-merge push run (merge commit - merged-code anchor)
+
+- Merge commit: `3bbb74accb58662bd444146ba9a5c815caa73e3f` (`3bbb74a`),
+  "Merge pull request #50 from
+  maldrakar/slice-28-line-query-ci-gate-promotion".
+- Run: `28184592976`, event `push`, branch `main`, conclusion `success`.
+- All three required jobs `success`:
+  - `Host tests and benchmark gate` - job `83482961743`
+  - `iOS cross-target compile` - job `83482961767`
+  - `WASM cross-target observation` - job `83482961817`
+- Host job step ordering: `Run bulk structural mutation benchmark gate`
+  completed successfully, then `Run line query benchmark gate` completed
+  successfully, then `Run memory shape diagnostic` completed successfully.
+- PR-only realistic-provider observation was `skipped` on the push run, as
+  expected. This post-merge `push` run is the merged-code evidence anchor for
+  Slice 28.
+
+Hosted Linux line-query rows from the merged `main` push run:
+
+```text
+mode=line_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=25 p99_ns=41 failures=0 budget_p95_ns=30000 budget_p99_ns=60000 gate=pass checksum=641440000
+mode=line_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=54 p99_ns=62 failures=0 budget_p95_ns=60000 budget_p99_ns=120000 gate=pass checksum=63985556480
+mode=line_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=40 p99_ns=64 failures=0 budget_p95_ns=120000 budget_p99_ns=240000 gate=pass checksum=639841600000
+mode=line_query provider=balanced_tree scenario=balanced_tree_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=1094 p99_ns=1127 failures=0 budget_p95_ns=300000 budget_p99_ns=600000 gate=pass checksum=63985600000
+mode=line_query provider=balanced_tree scenario=balanced_tree_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=1778 p99_ns=1850 failures=0 budget_p95_ns=600000 budget_p99_ns=1200000 gate=pass checksum=639841547520
+```
