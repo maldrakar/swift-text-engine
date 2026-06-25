@@ -205,7 +205,7 @@ final class LineAtTests: XCTestCase {
         XCTAssertEqual(ViewportVirtualizer.lineAt(y: 10.0, metrics: metrics),
                        .line(LineLocation(lineIndex: 1, clamp: .inRange)))
         XCTAssertEqual(ViewportVirtualizer.lineAt(y: 44.0, metrics: metrics),
-                       .line(LineLocation(lineIndex: 1, clamp: .inRange)))
+                       .line(LineLocation(lineIndex: 2, clamp: .inRange)))
         XCTAssertEqual(ViewportVirtualizer.lineAt(y: 45.0, metrics: metrics),
                        .line(LineLocation(lineIndex: 3, clamp: .inRange)))
         XCTAssertEqual(ViewportVirtualizer.lineAt(y: 94.999, metrics: metrics),
