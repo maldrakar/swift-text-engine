@@ -106,11 +106,12 @@ Three jobs:
   `swift:6.2.1-bookworm`: `swift test` → synthetic `--gate` (blocking)
   → `--variable-height --gate` (blocking) → `--variable-height-mutation --gate`
   (blocking) → `--structural-mutation --gate` (blocking)
-  → `--bulk-structural-mutation --gate` (blocking) → `--memory-shape`
-  → `--memory-observation` → realistic relative observation (PR-only,
+  → `--bulk-structural-mutation --gate` (blocking) → `--line-query --gate`
+  (blocking) → `--memory-shape` → `--memory-observation` → realistic relative
+  observation (PR-only,
   `continue-on-error`). The synthetic, static variable-height, mutation
-  variable-height, structural-mutation, and bulk-structural-mutation gates
-  **fail the job on perf regression**. Benchmark budgets
+  variable-height, structural-mutation, bulk-structural-mutation, and line-query
+  gates **fail the job on perf regression**. Benchmark budgets
   are still macOS-calibrated unless hosted Linux x86_64 evidence explicitly
   justifies a retune. SwiftPM build artifacts use `/tmp/text-engine-host-build`,
   not workspace `.build`.
