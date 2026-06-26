@@ -3,8 +3,11 @@ extension ViewportVirtualizer {
     /// `[offset(i), offset(i+1))` contains it - the inverse of
     /// `LineMetricsSource.offset(ofLine:)`.
     ///
-    /// Stateless. O(log N) `offset(ofLine:)` queries (one binary search), O(1)
-    /// core memory. A `y` outside `[0, totalHeight)` resolves to the nearest line
+    /// Stateless. The in-range branch calls
+    /// `LineMetricsSource.lineIndex(containingOffset:)`: providers may override
+    /// it with a native prefix search, while the default remains an O(log N)
+    /// binary search over `offset(ofLine:)`. O(1) core memory. A `y` outside
+    /// `[0, totalHeight)` resolves to the nearest line
     /// with `LineLocation.clamp` recording the edge. Validation mirrors
     /// `compute`'s order; an empty document is `.empty`, not a failure.
     public static func lineAt<Metrics: LineMetricsSource>(

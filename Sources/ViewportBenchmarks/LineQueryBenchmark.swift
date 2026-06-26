@@ -10,8 +10,9 @@ struct LineQueryScenario {
     let p99BudgetNanoseconds: Int64
 }
 
-// Starter budgets (macOS-calibrated in Step 6). Uniform/PrefixSum offsets are
-// O(1) -> O(log N) search; balanced-tree offsets are O(log N) -> O(log^2 N).
+// Budgets remain the hosted Slice 28 values. Uniform uses the default O(log N)
+// fallback; balanced-tree scenarios exercise the native O(log N) provider
+// descent through ViewportVirtualizer.lineAt(y:metrics:).
 func lineQueryScenarios() -> [LineQueryScenario] {
     [
         LineQueryScenario(name: "uniform_1k", providerName: "uniform",

@@ -48,8 +48,9 @@ geometry cursors stream per-line `LineGeometry` over the buffer range in
 O(buffer). The variable path provably equals the fixed path for uniform metrics
 (equivalence oracle test) — keep it that way.
 `ViewportVirtualizer.lineAt(y:metrics:)` is the inverse query - y -> line - over
-the same `LineMetricsSource`, O(log N) queries / O(1) core memory, reusing the
-same binary search; out-of-range `y` clamps with a `LineLocation.clamp` flag.
+the same `LineMetricsSource`, O(1) core memory, using a provider-native
+prefix-search hook when available and the generic O(log N) binary-search
+fallback otherwise; out-of-range `y` clamps with a `LineLocation.clamp` flag.
 
 ## Package layout
 
