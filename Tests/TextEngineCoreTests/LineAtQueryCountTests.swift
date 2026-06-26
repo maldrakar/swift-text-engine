@@ -23,6 +23,49 @@ final class LineAtQueryCountTests: XCTestCase {
         }
     }
 
+    private enum NativeSearchEvent: Equatable {
+        case offset(Int)
+        case native(Double)
+    }
+
+    private final class NativeSearchCounter {
+        var offsetIndexes: [Int] = []
+        var nativeOffsets: [Double] = []
+        var events: [NativeSearchEvent] = []
+    }
+
+    private struct NativeSearchMetrics: LineMetricsSource {
+        let offsets: [Double]
+        let counter: NativeSearchCounter
+
+        init(offsets: [Double], counter: NativeSearchCounter) {
+            self.offsets = offsets
+            self.counter = counter
+        }
+
+        var lineCount: Int { offsets.count - 1 }
+
+        func offset(ofLine index: Int) -> Double {
+            counter.offsetIndexes.append(index)
+            counter.events.append(.offset(index))
+            return offsets[index]
+        }
+
+        func lineIndex(containingOffset y: Double) -> Int {
+            counter.nativeOffsets.append(y)
+            counter.events.append(.native(y))
+            var result = 0
+            for index in 0..<(offsets.count - 1) {
+                if offsets[index] <= y {
+                    result = index
+                } else {
+                    break
+                }
+            }
+            return result
+        }
+    }
+
     private func ceilLog2(_ value: Int) -> Int {
         if value <= 1 { return 0 }
         var power = 0
@@ -77,5 +120,33 @@ final class LineAtQueryCountTests: XCTestCase {
 
         XCTAssertEqual(ViewportVirtualizer.lineAt(y: .nan, metrics: metrics), .failure(.nonFiniteValue))
         XCTAssertEqual(counter.count, 0)
+    }
+
+    func testDefaultLineIndexRequirementUsesLogarithmicFallback() {
+        let lineCount = 1_000_000
+        let counter = QueryCounter()
+        let metrics = CountingLineMetrics(lineCount: lineCount, lineHeight: 16.0, counter: counter)
+
+        let index = metrics.lineIndex(containingOffset: Double(lineCount / 2) * 16.0 + 8.0)
+
+        XCTAssertEqual(index, lineCount / 2)
+        let expectedMax = ceilLog2(lineCount) + 1
+        XCTAssertLessThanOrEqual(counter.count, expectedMax)
+        XCTAssertLessThan(counter.count, 100)
+    }
+
+    func testLineAtDispatchesToNativeHookAfterValidationProbes() {
+        let counter = NativeSearchCounter()
+        let metrics = NativeSearchMetrics(
+            offsets: [0.0, 10.0, 30.0, 35.0, 80.0],
+            counter: counter
+        )
+
+        let result = ViewportVirtualizer.lineAt(y: 31.0, metrics: metrics)
+
+        XCTAssertEqual(result, .line(LineLocation(lineIndex: 2, clamp: .inRange)))
+        XCTAssertEqual(counter.offsetIndexes, [0, 4])
+        XCTAssertEqual(counter.nativeOffsets, [31.0])
+        XCTAssertEqual(counter.events, [.offset(0), .offset(4), .native(31.0)])
     }
 }

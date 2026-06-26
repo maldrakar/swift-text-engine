@@ -18,6 +18,40 @@ public protocol LineMetricsSource {
     /// so the range, the located line, and the geometry come from one consistent
     /// snapshot.
     func offset(ofLine index: Int) -> Double
+
+    /// Returns the line whose half-open vertical span contains `y`.
+    ///
+    /// Preconditions: `lineCount > 0`, `offset(ofLine: 0) == 0`, and `y` is
+    /// finite and in `[0, offset(ofLine: lineCount))` for the same stable metrics
+    /// snapshot. This primitive does not validate or clamp; public query
+    /// semantics stay centralized in `ViewportVirtualizer.lineAt(y:metrics:)`.
+    func lineIndex(containingOffset y: Double) -> Int
+}
+
+extension LineMetricsSource {
+    public func lineIndex(containingOffset y: Double) -> Int {
+        binarySearchLineIndex(containingOffset: y, metrics: self, lineCount: lineCount)
+    }
+}
+
+func binarySearchLineIndex<Metrics: LineMetricsSource>(
+    containingOffset target: Double,
+    metrics: Metrics,
+    lineCount: Int
+) -> Int {
+    var low = 0
+    var high = lineCount - 1
+    var result = 0
+    while low <= high {
+        let mid = low + (high - low) / 2
+        if metrics.offset(ofLine: mid) <= target {
+            result = mid
+            low = mid + 1
+        } else {
+            high = mid - 1
+        }
+    }
+    return result
 }
 
 public struct UniformLineMetrics: LineMetricsSource {

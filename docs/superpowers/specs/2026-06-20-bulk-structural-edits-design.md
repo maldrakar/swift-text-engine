@@ -87,6 +87,11 @@ change `TextEngineCore` source or public API, and it does **not** touch
   not `init`'s `freeList`-bypassing `buildBalanced`), achieving **O(k + log N)**
   while preserving the size-balance invariant (logarithmic height) for subsequent
   operations.
+
+> Shipped naming note (Slice 29): the implementation names the weight-aware
+> three-way join `join3` and the detach-min-derived two-way join `join2`; the
+> earlier `join(_:_:)` wording refers to that shipped split.
+
 - Keep arena growth bounded under churn: `removeLines` recycles the `count` removed
   slots onto `freeList`, and `insertLines` allocates its `k` nodes through
   `allocateNode` (consuming `freeList` before appending), so a remove-K-then-insert-K

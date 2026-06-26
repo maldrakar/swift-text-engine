@@ -66,6 +66,41 @@ public struct BalancedTreeLineMetrics: LineMetricsSource {
         return sum
     }
 
+    public func lineIndex(containingOffset y: Double) -> Int {
+        lineIndexAndVisitCount(containingOffset: y).lineIndex
+    }
+
+    internal func lineIndexAndVisitCount(containingOffset y: Double) -> (lineIndex: Int, visits: Int) {
+        precondition(root != -1, "BalancedTreeLineMetrics.lineIndex requires a non-empty tree")
+
+        var current = root
+        var baseIndex = 0
+        var remaining = y
+        var visits = 0
+
+        while current != -1 {
+            visits += 1
+            let node = nodes[current]
+            let leftSum = nodeSum(node.left)
+            if remaining < leftSum {
+                current = node.left
+                continue
+            }
+
+            remaining -= leftSum
+            let leftCount = nodeCount(node.left)
+            if remaining < node.height {
+                return (baseIndex + leftCount, visits)
+            }
+
+            remaining -= node.height
+            baseIndex += leftCount + 1
+            current = node.right
+        }
+
+        preconditionFailure("BalancedTreeLineMetrics.lineIndex search exhausted")
+    }
+
     // MARK: - Height mutation
 
     // Sets the line at `index` to `newHeight` and adds the height delta to
