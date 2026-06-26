@@ -172,3 +172,47 @@ mode=cross_target_compile target=wasm_embedded package=providers result=skipped 
 mode=cross_target_compile_summary package=providers ios_device=skipped ios_simulator=skipped wasm=skipped wasm_embedded=skipped
 mode=cross_target_compile_overall blocking_failures=0 exit=0
 ```
+
+## Post-Merge Proof
+
+Recorded in a post-merge follow-up against the merged `main`, so the verification
+record carries a merged-code anchor and not only the PR-head run.
+
+- Merge commit: `d380eb11a02887a007f61151a4f6d170fc85c573` (`d380eb1`),
+  "Merge pull request #53 from maldrakar/slice-29-provider-native-prefix-search".
+  Its second parent is the verified PR head
+  `6764fa19d11244e878d20104eedcbbc43ae142db` (`6764fa1`); the implementation head
+  remains `15d3f2f12a9e80d579f5ed086e55ac1e333f8b39`.
+- Run: `28264342225`, event `push`, branch `main`, conclusion `success`,
+  https://github.com/maldrakar/swift-text-engine/actions/runs/28264342225
+- All three required jobs `success`:
+  - `Host tests and benchmark gate` - job `83747310410`
+  - `iOS cross-target compile` - job `83747310415`
+  - `WASM cross-target observation` - job `83747310459`
+- The host job ran the full heavy path on merged code: step 5
+  `Complete docs-only PR` was `skipped`, and `Run host tests` plus all six
+  blocking latency gates ran. Step ordering: step 12
+  `Run bulk structural mutation benchmark gate` -> step 13
+  `Run line query benchmark gate` -> step 14 `Run memory shape diagnostic`, all
+  `success`. The PR-only step 16
+  `Observe realistic provider relative performance` was `skipped` on the push
+  event, as expected. This `push` run on the merge commit is the merged-code
+  evidence anchor for Slice 29.
+
+Hosted Linux line-query rows from the merged `main` push run:
+
+```text
+mode=line_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=23 p99_ns=54 failures=0 budget_p95_ns=30000 budget_p99_ns=60000 gate=pass checksum=641440000
+mode=line_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=34 p99_ns=65 failures=0 budget_p95_ns=60000 budget_p99_ns=120000 gate=pass checksum=63985556480
+mode=line_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=40 p99_ns=70 failures=0 budget_p95_ns=120000 budget_p99_ns=240000 gate=pass checksum=639841600000
+mode=line_query provider=balanced_tree scenario=balanced_tree_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=209 p99_ns=233 failures=0 budget_p95_ns=300000 budget_p99_ns=600000 gate=pass checksum=63985600000
+mode=line_query provider=balanced_tree scenario=balanced_tree_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=252 p99_ns=269 failures=0 budget_p95_ns=600000 budget_p99_ns=1200000 gate=pass checksum=639841547520
+```
+
+All five checksums equal the local and PR-head baseline
+(`641440000`, `63985556480`, `639841600000`, `63985600000`, `639841547520`),
+confirming the provider-native descent is deterministic across local, PR-head, and
+merged-code runs. The tightest hosted scenario `balanced_tree_1m` cleared at
+p95=252 ns against the 600,000 ns budget (~2381x under budget) - far below the
+generic O(log^2 N) path's ~2456 ns p95 recorded for the same scenario in the
+Slice 28 verification record, the measurable payoff of this slice.
