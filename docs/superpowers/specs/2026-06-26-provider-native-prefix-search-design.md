@@ -167,7 +167,7 @@ Rationale:
 6. `y < 0` -> `.clampedToTop`
 7. `y >= totalHeight` -> `.clampedToBottom`
 8. otherwise call `metrics.lineIndex(containingOffset: y)` and wrap the returned
-   index as `.line(LineLocation(index, .inRange))`
+   index as `.line(LineLocation(lineIndex: index, clamp: .inRange))`
 
 No public behavior changes are allowed. The hook is used only after the core has
 established the exact preconditions it documents.
@@ -182,7 +182,9 @@ offset probes.
 
 ### Decision 3 - Implement balanced-tree search as one subtree-sum descent
 
-`BalancedTreeLineMetrics` overrides the requirement with a non-mutating tree walk:
+`BalancedTreeLineMetrics` overrides the requirement with a non-mutating,
+iterative tree walk (matching the existing iterative `offset(ofLine:)`, so the
+descent stays O(1) auxiliary space rather than O(log N) recursion stack):
 
 - Track the current node, the accumulated in-order base index, and the remaining
   y offset inside the current subtree.
@@ -235,7 +237,12 @@ Expected benchmark behavior:
 - `balanced_tree_100k` and `balanced_tree_1m` p95/p99 should improve because the
   in-range path is one tree descent instead of binary-searching over tree offsets.
 - Uniform scenarios may stay effectively unchanged because `UniformLineMetrics`
-  inherits the fallback in this slice.
+  inherits the fallback in this slice. This is deliberate: a closed-form
+  `floor(y / lineHeight)` override would be O(1) but risks disagreeing with the
+  binary search by one line at exact `y == i * lineHeight` boundaries due to
+  floating-point division, which would break the `LineAtEquivalenceTests`
+  oracle. Keeping uniform on the fallback protects that equivalence; a verified
+  closed-form override is a separate, well-scoped future slice.
 - Budgets remain unchanged. Tightening them or deriving Linux-native budgets is a
   separate policy/baseline slice, not part of this functional increment.
 
