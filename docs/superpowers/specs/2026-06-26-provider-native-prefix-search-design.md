@@ -62,8 +62,8 @@ This slice adds a provider-native prefix-search hook under the existing
 `ViewportVirtualizer.lineAt(y:metrics:)` public API:
 
 - Add a defaulted requirement to `LineMetricsSource` for the in-range primitive:
-  "given a validated non-empty metrics snapshot and `0 <= y < totalHeight`,
-  return the line index whose half-open span contains y."
+  "given a validated non-empty metrics snapshot and an in-range y offset, return
+  the line index whose half-open span contains y."
 - Implement the default requirement with the current generic binary search, so
   existing conformers keep source compatibility and behavior.
 - Change `lineAt` to preserve its validation/clamp order and call the new hook
@@ -122,25 +122,27 @@ public protocol LineMetricsSource {
     var lineCount: Int { get }
     func offset(ofLine index: Int) -> Double
 
-    func lineIndex(containingOffset y: Double, totalHeight: Double) -> Int
+    func lineIndex(containingOffset y: Double) -> Int
 }
 ```
 
 The exact implementation will live in `LineMetricsSource.swift`. The requirement
 is intentionally lower-level than `lineAt`:
 
-- Preconditions: `lineCount > 0`; `offset(ofLine: 0) == 0`; `totalHeight` is the
-  validated `offset(ofLine: lineCount)`; `totalHeight` is finite and positive;
-  `0 <= y && y < totalHeight`.
+- Preconditions: `lineCount > 0`; `offset(ofLine: 0) == 0`; y is finite and in
+  the document's half-open vertical extent `[0, offset(ofLine: lineCount))` for
+  the same stable metrics snapshot.
 - Return: the largest line index `i` in `0..<lineCount` such that
   `offset(ofLine: i) <= y`.
 - It does not validate inputs, clamp edges, or return `LineQuery`. Public
   validation remains centralized in `ViewportVirtualizer.lineAt`.
 
-The default implementation calls the existing generic binary search helper. This
-is effectively an optional provider hook implemented through a default protocol
-requirement: existing providers inherit the fallback, while providers with a
-better native prefix search override the requirement.
+The default implementation calls one shared internal monotone-search helper that
+contains the current binary-search loop. `firstLineTopAtOrBelow` keeps its
+`target >= totalHeight` edge guard for `compute`, then delegates to the same loop.
+This is effectively an optional provider hook implemented through a default
+protocol requirement: existing providers inherit the fallback, while providers
+with a better native prefix search override the requirement.
 
 Rationale:
 
@@ -164,16 +166,19 @@ Rationale:
 5. invalid total height -> `.failure(.invalidLineMetrics)`
 6. `y < 0` -> `.clampedToTop`
 7. `y >= totalHeight` -> `.clampedToBottom`
-8. otherwise call `metrics.lineIndex(containingOffset: y, totalHeight: totalHeight)`
-   and wrap the returned index as `.line(LineLocation(index, .inRange))`
+8. otherwise call `metrics.lineIndex(containingOffset: y)` and wrap the returned
+   index as `.line(LineLocation(index, .inRange))`
 
 No public behavior changes are allowed. The hook is used only after the core has
 established the exact preconditions it documents.
 
 For non-native providers, the default hook preserves the current binary-search
-fallback and query-count envelope. For native providers, the validation probes
-still happen (`offset(0)` and `offset(lineCount)`), but the in-range search
-avoids the generic binary-search offset probes.
+fallback and query-count envelope. It does not take `totalHeight`: `lineAt`
+already computes and validates total height for its own clamp decision, and the
+fallback loop does not need that value once the in-range precondition holds. For
+native providers, the validation probes still happen (`offset(0)` and
+`offset(lineCount)`), but the in-range search avoids the generic binary-search
+offset probes.
 
 ### Decision 3 - Implement balanced-tree search as one subtree-sum descent
 
@@ -205,6 +210,12 @@ memory.
 `firstLineTopAtOrBelow` for visible start and `firstLineTopAtOrAbove` for visible
 end. The provider-native primitive in this slice answers only "line containing
 this y", which is the exact in-range primitive `lineAt` needs.
+
+The generic monotone-search loop itself is still shared with `compute`: the
+default hook and `firstLineTopAtOrBelow` both call the same internal helper.
+`firstLineTopAtOrBelow` retains the `target >= totalHeight` guard because compute
+can ask about a target at or past the document end; the hook never sees that
+case because `lineAt` clamps before dispatching to it.
 
 Using it in `compute` would only cover visible start directly. Visible end has
 end-exclusive semantics and needs "first top at or above target", which is a
@@ -305,18 +316,19 @@ generic boundary. The method is documented as a lower-level primitive with
 strict preconditions; public callers should normally keep using
 `ViewportVirtualizer.lineAt`.
 
-### `totalHeight` can be misused by direct callers
-
-The hook accepts `totalHeight` to avoid recomputing `offset(ofLine: lineCount)`
-inside the fallback after `lineAt` has already validated it. Direct callers could
-pass an inconsistent value. The mitigation is explicit documentation: the value
-must be the validated total height for the same stable metrics snapshot.
-
 ### Native and fallback boundary behavior could drift
 
 The primary risk is exact-boundary drift between the generic binary search and
 the tree descent. The oracle tests must include line-top boundaries and line-end
 boundaries so the half-open convention is locked down.
+
+### Fallback and compute boundary behavior could drift
+
+If the default hook copied the binary-search loop while `compute` kept its own
+copy, the fallback `lineAt` path and `compute` could drift in their half-open
+boundary convention. The mitigation is structural: extract one internal
+monotone-search helper and have both the default hook and `firstLineTopAtOrBelow`
+call it.
 
 ### Embedded Swift compatibility must be verified
 
