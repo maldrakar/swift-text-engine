@@ -39,12 +39,7 @@ extension ViewportVirtualizer {
             return .line(LineLocation(lineIndex: lineCount - 1, clamp: .clampedToBottom))
         }
 
-        let index = firstLineTopAtOrBelow(
-            y,
-            metrics: metrics,
-            lineCount: lineCount,
-            totalHeight: totalHeight
-        )
+        let index = metrics.lineIndex(containingOffset: y)
         return .line(LineLocation(lineIndex: index, clamp: .inRange))
     }
 }
