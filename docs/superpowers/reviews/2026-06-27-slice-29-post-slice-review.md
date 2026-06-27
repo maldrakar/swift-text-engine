@@ -294,9 +294,14 @@ job conclusion:
   gate, with `balanced_tree_100k`/`balanced_tree_1m` reported at p95 243/252 ns,
   `gate=pass`. This is the run that exercised the optimized source under the gate.
 - **PR #53 final-head run `28236592208`** (head `6764fa1`, event `pull_request`):
-  conclusion `success`. `6764fa1` is a docs-only commit (it only added hosted
-  evidence to the verification record), so this run correctly took the trusted
-  docs-only path.
+  conclusion `success`, and it **ran the full heavy path** — host job `83652848763`
+  shows step 5 `Complete docs-only PR` `skipped`, then `Run host tests` and all six
+  gates (incl. step 13 `Run line query benchmark gate`) `success`. Although `6764fa1`
+  by itself only edits the verification record, the docs-only detector evaluates the
+  full `BASE_SHA...HEAD_SHA` PR diff — which carries the Swift source — so the PR is
+  correctly classified as **not** docs-only and the final head gets a full heavy-path
+  run. This makes `28236592208` a heavy-path PR-head proof on the exact final source,
+  not a docs-only caveat.
 - **Post-merge push run `28264342225`** on merge commit `d380eb1` (event `push`,
   branch `main`): conclusion `success`; all three required jobs `success`
   (`83747310410` / `83747310415` / `83747310459`). The host job ran the full heavy
@@ -360,23 +365,7 @@ None. The merged result is correct and proven green on merged code at step level
 
 ### P3 / Minor But Valid
 
-**1. The cited "PR-head" run is one docs-only commit behind PR #53's final head.**
-The verification record cites full-code run `28236023961` @ `0607962` as the Swift CI
-pull_request evidence, but PR #53's final head was `6764fa1` (a docs-only commit that
-added the hosted evidence into the verification file). The final head did get its own
-green run (`28236592208`), but as a docs-only commit that run took the trusted
-docs-only path, so the doc reasonably cites the earlier full-code run that actually
-exercised the gate. The record is transparent about this ("the artifact-only update
-after this evidence does not change implementation files") and the merged-code push
-run is the authoritative anchor, so this does not affect correctness. It is a slight
-deviation from the Slice 26/28 gold standard, which recorded the PR-head proof in the
-post-merge follow-up against a *stable* final head and so never referenced a
-non-final head. Here the PR-head proof was instead written *inside* the source PR
-(commit `6764fa1`), which inherently references the pre-evidence commit. Folding all
-hosted evidence into the post-merge follow-up (as Slice 28 did) would retire this
-ambiguity next time. No code or merged-behavior impact.
-
-**2. Uniform/prefix-sum providers still inherit the generic O(log N) fallback.** This
+**1. Uniform/prefix-sum providers still inherit the generic O(log N) fallback.** This
 is deliberate (Decision 5): a closed-form `floor(y / lineHeight)` override would be
 O(1) but risks a one-line disagreement with the binary search at exact
 `y == i·lineHeight` boundaries under floating-point division, which would break the
@@ -434,11 +423,15 @@ were in scope for Slice 29.
    oracle test that pins the half-open boundary on both line-top and line-end
    samples, is what makes the optimization safe to land. Timing was recorded as
    observation only — equivalence is the proof.
-4. **Fold all hosted evidence into the post-merge follow-up.** Slice 28's clean
-   convention — record both the PR-head proof (against the stable final head) and the
-   post-merge proof in the docs-only follow-up — avoids the "PR-head run references a
-   non-final head" ambiguity that Slice 29's in-PR evidence reintroduced as P3 #1.
-   Reuse Slice 28's structure for the next source/workflow-touching slice.
+4. **The docs-only detector keys off the full PR diff, so a docs-only *tail* commit on
+   a source-bearing PR still runs the heavy path.** PR #53 ended on a docs-only commit
+   (`6764fa1`) yet its final-head run `28236592208` executed every gate, because the
+   detector compares the whole `BASE_SHA...HEAD_SHA` diff (which carries the Swift
+   source), not just the last commit. The contrast is the entirely-docs PR #54, whose
+   run `28264789045` correctly took the docs-only skip path. Takeaway: the final-head
+   run of a source-bearing PR is a valid heavy PR-head proof regardless of the last
+   commit's contents — do not assume a docs-only tail commit downgrades it (this review
+   initially made exactly that wrong assumption).
 5. **A functional slice that reuses an existing gate leaves no governance debt.**
    When the optimized path is already CI-protected, do not invent a new benchmark
    mode just to keep the "functional → promotion" cadence; reuse the gate and let the
@@ -464,7 +457,7 @@ Give `UniformLineMetrics` (and possibly `PrefixSumLineMetrics`) an O(1)
 `lineIndex(containingOffset:)` override, with a verified boundary-safe formula that
 provably equals the binary search at exact `y == i·lineHeight` boundaries so the
 equivalence oracle stays green. Small, clean slice; lower product value than A but it
-retires the only remaining fallback-bound common provider (P3 #2).
+retires the only remaining fallback-bound common provider (P3 #1).
 
 ### Option C: Geometry-bearing vertical query (Slice 27/28 carry-forward)
 
@@ -536,11 +529,12 @@ provider-doc P3 (`join2`/`join3` naming) is finally retired, and the change hold
 every hard constraint: Foundation-free, zero-dependency, O(1) core memory, and
 cross-target verified.
 
-The review found **no P0, P1, or P2 issues** against the merged result. The two P3s
-are minor: an evidence-precision nuance (the cited PR-head run is one docs-only commit
-behind PR #53's final head — transparent, and the merged-code push run is the
-authoritative anchor) and the deliberate decision to keep uniform providers on the
-generic fallback. With the vertical `lineAt` path now asymptotically optimal and
+The review found **no P0, P1, or P2 issues** and **no evidence-accuracy defect**
+against the merged result: PR #53's final head `6764fa1` has its own full heavy-path
+green run (`28236592208`), and the merged-code push run `28264342225` is the
+authoritative anchor. The single P3 is minor — the deliberate decision to keep uniform
+providers on the generic fallback (Decision 5). With the vertical `lineAt` path now
+asymptotically optimal and
 CI-protected, and **no governance debt** left behind, Slice 29 closes the
 vertical-query optimization arc for `lineAt` and hands off to a clean choice — most
 naturally extending the same provider-native search into `compute`, the last
