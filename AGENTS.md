@@ -44,19 +44,20 @@ path takes a `ViewportInput`; the
 variable-height path takes a `VariableViewportInput` + a `LineMetricsSource`
 (provider supplies `offset(ofLine:)`, the cumulative top y). Variable compute is
 **O(log N)** queries / **O(1)** core memory: its visible-start and visible-end
-searches dispatch to the same provider-native prefix-search hooks `lineAt` uses
-(`lineIndex(containingOffset:)` and
-`firstLineIndex(withOffsetAtOrAbove:startingAtLine:)`), so a balanced-tree
-provider answers each in one O(log N) descent and other providers use the
-generic binary-search fallback over offsets; the geometry cursors stream
-per-line `LineGeometry` over the buffer range in O(buffer). The variable path
-provably equals the fixed path for uniform metrics (equivalence oracle test) —
-keep it that way.
+searches dispatch to provider-native prefix-search hooks: visible start uses
+`lineIndex(containingOffset:)`, the same containing-offset hook `lineAt` uses,
+and visible end uses
+`firstLineIndex(withOffsetAtOrAbove:startingAtLine:)`. A balanced-tree provider
+answers each compute boundary search in one O(log N) descent, while other
+providers use the generic binary-search fallback over offsets; the geometry
+cursors stream per-line `LineGeometry` over the buffer range in O(buffer). The
+variable path provably equals the fixed path for uniform metrics (equivalence
+oracle test) — keep it that way.
 `ViewportVirtualizer.lineAt(y:metrics:)` is the inverse query - y -> line - over
-the same `LineMetricsSource`, O(1) core memory, sharing the provider-native
-prefix-search hooks with `compute` when available and the generic O(log N)
-binary-search fallback otherwise; out-of-range `y` clamps with a
-`LineLocation.clamp` flag.
+the same `LineMetricsSource`, O(1) core memory, using the shared
+`lineIndex(containingOffset:)` provider-native hook when available and the
+generic O(log N) binary-search fallback otherwise; out-of-range `y` clamps with
+a `LineLocation.clamp` flag.
 
 ## Package layout
 
