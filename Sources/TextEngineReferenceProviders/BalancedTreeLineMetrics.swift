@@ -112,28 +112,30 @@ public struct BalancedTreeLineMetrics: LineMetricsSource {
 
         var current = root
         var baseIndex = 0
-        var remaining = y
+        var baseOffset = 0.0
         var visits = 0
 
         while current != -1 {
             visits += 1
             let node = nodes[current]
             let leftSum = nodeSum(node.left)
-            if remaining < leftSum {
+            let leftCount = nodeCount(node.left)
+            let nodeTop = baseOffset + leftSum
+            if y < nodeTop {
                 current = node.left
                 continue
             }
 
-            remaining -= leftSum
-            let leftCount = nodeCount(node.left)
-            if remaining < node.height {
-                if remaining == 0 {
-                    return (baseIndex + leftCount, visits)
-                }
+            if y == nodeTop {
+                return (baseIndex + leftCount, visits)
+            }
+
+            let nodeBottom = baseOffset + (leftSum + node.height)
+            if y <= nodeBottom {
                 return (baseIndex + leftCount + 1, visits)
             }
 
-            remaining -= node.height
+            baseOffset = nodeBottom
             baseIndex += leftCount + 1
             current = node.right
         }

@@ -181,6 +181,29 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         }
     }
 
+    private func assertNativeAtOrAbovePreservesExactTops(
+        _ tree: BalancedTreeLineMetrics,
+        _ message: @autoclosure () -> String = "",
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for index in 0..<tree.lineCount {
+            let y = tree.offset(ofLine: index)
+            XCTAssertEqual(
+                tree.firstLineIndex(withOffsetAtOrAbove: y, startingAtLine: 0),
+                index,
+                "firstLineIndex exact top y=\(y) index=\(index) \(message())",
+                file: file, line: line
+            )
+            XCTAssertEqual(
+                tree.firstLineIndexAndVisitCount(withOffsetAtOrAbove: y).lineIndex,
+                index,
+                "firstLineIndexAndVisitCount exact top y=\(y) index=\(index) \(message())",
+                file: file, line: line
+            )
+        }
+    }
+
     func testOffsetMatchesPrefixSumOracleOnBuild() {
         let heights = sampleHeights(1_000)
         let tree = BalancedTreeLineMetrics(heights: heights)
@@ -213,6 +236,15 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         let heights = sampleHeights(1_000)
         let tree = BalancedTreeLineMetrics(heights: heights)
         assertNativeAtOrAboveMatchesOracle(tree, heights, "initial build")
+    }
+
+    func testNativeFirstLineIndexAtOrAbovePreservesFractionalExactLineTops() {
+        var tree = BalancedTreeLineMetrics(heights: [27.4, 17.3, 38.0])
+        assertNativeAtOrAbovePreservesExactTops(tree, "initial fractional tree")
+
+        tree.insertLine(at: 1, height: 11.2)
+        tree.setHeight(ofLine: 2, to: 19.7)
+        assertNativeAtOrAbovePreservesExactTops(tree, "after fractional mutations")
     }
 
     func testNativeFirstLineIndexAtOrAboveIgnoresHintButHonorsIt() {
