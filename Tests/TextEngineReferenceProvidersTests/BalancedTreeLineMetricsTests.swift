@@ -297,6 +297,45 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         }
     }
 
+    func testComputeOverBalancedTreeMatchesPrefixSumOracleAcrossScrollSweep() {
+        let heights = sampleHeights(5_000)
+        let tree = BalancedTreeLineMetrics(heights: heights)
+        let oracle = PrefixSumLineMetrics(heights: heights)
+        let total = oracle.offset(ofLine: oracle.lineCount)
+
+        // Scroll offsets: negative, exact line tops, interiors, fractional,
+        // top, near-bottom, exactly bottom, and past bottom.
+        var scrollOffsets: [Double] = [-50.0, 0.0, 1.5, total, total + 100.0]
+        for line in [1, 2, 499, 2_500, 4_998, 4_999] {
+            let top = oracle.offset(ofLine: line)
+            scrollOffsets.append(top)
+            scrollOffsets.append(top + 0.5)
+            scrollOffsets.append(top.nextDown)
+        }
+
+        let viewportHeights: [Double] = [0.0, 16.0, 80.0 * 16.0, total + 10.0]
+        let overscans: [(Int, Int)] = [(0, 0), (5, 5), (3, 9)]
+
+        for scroll in scrollOffsets {
+            for viewportHeight in viewportHeights {
+                for (before, after) in overscans {
+                    let input = VariableViewportInput(
+                        scrollOffsetY: scroll,
+                        viewportHeight: viewportHeight,
+                        overscanLinesBefore: before,
+                        overscanLinesAfter: after
+                    )
+                    let treeRange = expectSuccess(ViewportVirtualizer.compute(input, metrics: tree))
+                    let oracleRange = expectSuccess(ViewportVirtualizer.compute(input, metrics: oracle))
+                    XCTAssertEqual(
+                        treeRange, oracleRange,
+                        "scroll=\(scroll) vh=\(viewportHeight) overscan=(\(before),\(after))"
+                    )
+                }
+            }
+        }
+    }
+
     func testNativeLineIndexMatchesOracleAfterSingleAndBulkMutations() {
         var array = sampleHeights(120)
         var tree = BalancedTreeLineMetrics(heights: array)
