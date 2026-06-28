@@ -1,3 +1,4 @@
 .build/
 .worktrees/
 .vscode/
+.DS_Store
