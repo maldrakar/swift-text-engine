@@ -147,6 +147,40 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         }
     }
 
+    // Independent oracle for "first line top at or above y": a linear scan over
+    // the prefix-sum offsets, NOT the production binary search.
+    private func bruteFirstAtOrAbove(_ oracle: PrefixSumLineMetrics, _ y: Double) -> Int {
+        for i in 0...oracle.lineCount where oracle.offset(ofLine: i) >= y {
+            return i
+        }
+        return oracle.lineCount
+    }
+
+    private func assertNativeAtOrAboveMatchesOracle(
+        _ tree: BalancedTreeLineMetrics,
+        _ array: [Double],
+        _ message: @autoclosure () -> String = "",
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let oracle = PrefixSumLineMetrics(heights: array)
+        for y in sampledSearchOffsets(oracle) {
+            let expected = bruteFirstAtOrAbove(oracle, y)
+            XCTAssertEqual(
+                tree.firstLineIndex(withOffsetAtOrAbove: y, startingAtLine: 0),
+                expected,
+                "firstLineIndex y=\(y) \(message())",
+                file: file, line: line
+            )
+            XCTAssertEqual(
+                tree.firstLineIndexAndVisitCount(withOffsetAtOrAbove: y).lineIndex,
+                expected,
+                "firstLineIndexAndVisitCount y=\(y) \(message())",
+                file: file, line: line
+            )
+        }
+    }
+
     func testOffsetMatchesPrefixSumOracleOnBuild() {
         let heights = sampleHeights(1_000)
         let tree = BalancedTreeLineMetrics(heights: heights)
@@ -173,6 +207,44 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         let tree = BalancedTreeLineMetrics(heights: heights)
 
         assertNativeSearchMatchesOracle(tree, heights, "initial build")
+    }
+
+    func testNativeFirstLineIndexAtOrAboveMatchesOracleAtBoundaries() {
+        let heights = sampleHeights(1_000)
+        let tree = BalancedTreeLineMetrics(heights: heights)
+        assertNativeAtOrAboveMatchesOracle(tree, heights, "initial build")
+    }
+
+    func testNativeFirstLineIndexAtOrAboveIgnoresHintButHonorsIt() {
+        let heights = sampleHeights(500)
+        let tree = BalancedTreeLineMetrics(heights: heights)
+        let oracle = PrefixSumLineMetrics(heights: heights)
+        // For a y whose answer is index a, any lowerBound <= a returns the same a.
+        let y = oracle.offset(ofLine: 300) + 1.0 // interior of line 300 -> answer 301
+        XCTAssertEqual(tree.firstLineIndex(withOffsetAtOrAbove: y, startingAtLine: 0), 301)
+        XCTAssertEqual(tree.firstLineIndex(withOffsetAtOrAbove: y, startingAtLine: 301), 301)
+        XCTAssertEqual(tree.firstLineIndex(withOffsetAtOrAbove: y, startingAtLine: 200), 301)
+    }
+
+    func testNativeFirstLineIndexAtOrAboveMatchesOracleAfterMutations() {
+        var array = sampleHeights(120)
+        var tree = BalancedTreeLineMetrics(heights: array)
+
+        tree.setHeight(ofLine: 0, to: 40.0); array[0] = 40.0
+        assertNativeAtOrAboveMatchesOracle(tree, array, "after setHeight first")
+
+        tree.insertLine(at: 10, height: 19.0); array.insert(19.0, at: 10)
+        assertNativeAtOrAboveMatchesOracle(tree, array, "after insertLine")
+
+        tree.removeLine(at: 3); array.remove(at: 3)
+        assertNativeAtOrAboveMatchesOracle(tree, array, "after removeLine")
+
+        let inserted = [17.0, 29.0, 31.0, 37.0]
+        tree.insertLines(at: 20, heights: inserted); array.insert(contentsOf: inserted, at: 20)
+        assertNativeAtOrAboveMatchesOracle(tree, array, "after insertLines")
+
+        tree.removeLines(at: 5, count: 4); array.removeSubrange(5..<9)
+        assertNativeAtOrAboveMatchesOracle(tree, array, "after removeLines")
     }
 
     func testLineAtWithBalancedTreeMatchesPrefixSumOracle() {
@@ -509,6 +581,25 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
             for y in samples {
                 let measured = tree.lineIndexAndVisitCount(containingOffset: y)
                 XCTAssertEqual(measured.lineIndex, oracle.lineIndex(containingOffset: y), "n=\(n) y=\(y)")
+                XCTAssertLessThanOrEqual(measured.visits, 4 * (floorLog2(n) + 1), "n=\(n) y=\(y)")
+                XCTAssertGreaterThan(measured.visits, 0, "n=\(n) y=\(y)")
+            }
+        }
+    }
+
+    func testNativeFirstLineIndexAtOrAboveVisitCountIsLogarithmic() {
+        for n in [1_000, 100_000, 1_000_000] {
+            let heights = sampleHeights(n)
+            let tree = BalancedTreeLineMetrics(heights: heights)
+            let oracle = PrefixSumLineMetrics(heights: heights)
+            let samples = [
+                0.0,
+                oracle.offset(ofLine: n / 2) + 1.0,
+                oracle.offset(ofLine: n).nextDown
+            ]
+            for y in samples {
+                let measured = tree.firstLineIndexAndVisitCount(withOffsetAtOrAbove: y)
+                XCTAssertEqual(measured.lineIndex, bruteFirstAtOrAbove(oracle, y), "n=\(n) y=\(y)")
                 XCTAssertLessThanOrEqual(measured.visits, 4 * (floorLog2(n) + 1), "n=\(n) y=\(y)")
                 XCTAssertGreaterThan(measured.visits, 0, "n=\(n) y=\(y)")
             }
