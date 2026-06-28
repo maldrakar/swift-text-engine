@@ -9,7 +9,7 @@ Verified code head: 74bcee4ef90d7f1ba6ec003449d2828a09857c0d
 - Variable `compute` routes visible-start through `lineIndex(containingOffset:)` and visible-end through `firstLineIndex(withOffsetAtOrAbove:startingAtLine:)`, while preserving the generic fallback for providers that do not override the hooks.
 - `BalancedTreeLineMetrics` answers visible-end lookup with a native subtree-sum descent; the structural and bulk structural gates exercise `compute` over this balanced-tree provider.
 - Equivalence proof is covered by the balanced-tree compute oracle test and the existing uniform fixed/variable equivalence suite.
-- Full local verification passed: host tests/build, every benchmark gate, memory-shape invariant, Foundation-free scans, cross-target self-test, and iOS/WASM cross-target compile.
+- Full local verification passed: host tests/build, every Task 6 benchmark gate, memory-shape invariant, Foundation-free scans, cross-target self-test, and iOS/WASM cross-target compile.
 
 ## Local Commands
 
@@ -182,6 +182,46 @@ This is a one-off timing observation only. No benchmark mode was added and all
 benchmark budgets are unchanged. Structural and bulk checksum comparisons were
 clean (`diff -u` produced no output, exit 0), so the native compute routing
 preserves the same benchmark result checksums.
+
+### Checksum comparisons
+
+Structural checksum extraction and comparison:
+
+```terminal
+$ awk '/^mode=/ { for (i = 1; i <= NF; i++) { if ($i ~ /^scenario=/) scenario=$i; if ($i ~ /^checksum=/) checksum=$i } print scenario, checksum }' /private/tmp/slice30-compute-native-prefix-verification/gate-structural-mutation-baseline.txt > /private/tmp/slice30-compute-native-prefix-verification/structural-baseline-checksums.txt
+$ awk '/^mode=/ { for (i = 1; i <= NF; i++) { if ($i ~ /^scenario=/) scenario=$i; if ($i ~ /^checksum=/) checksum=$i } print scenario, checksum }' /private/tmp/slice30-compute-native-prefix-verification/gate-structural-mutation-current.txt > /private/tmp/slice30-compute-native-prefix-verification/structural-current-checksums.txt
+$ cat /private/tmp/slice30-compute-native-prefix-verification/structural-baseline-checksums.txt
+scenario=1k_lines_20_visible_overscan_0 checksum=200106952336
+scenario=100k_lines_80_visible_overscan_5 checksum=89494497658324
+scenario=1m_lines_200_visible_overscan_50 checksum=3379593298396981
+$ cat /private/tmp/slice30-compute-native-prefix-verification/structural-current-checksums.txt
+scenario=1k_lines_20_visible_overscan_0 checksum=200106952336
+scenario=100k_lines_80_visible_overscan_5 checksum=89494497658324
+scenario=1m_lines_200_visible_overscan_50 checksum=3379593298396981
+$ diff -u /private/tmp/slice30-compute-native-prefix-verification/structural-baseline-checksums.txt /private/tmp/slice30-compute-native-prefix-verification/structural-current-checksums.txt
+no output; exit 0
+```
+
+Bulk structural checksum extraction and comparison:
+
+```terminal
+$ awk '/^mode=/ { for (i = 1; i <= NF; i++) { if ($i ~ /^scenario=/) scenario=$i; if ($i ~ /^checksum=/) checksum=$i } print scenario, checksum }' /private/tmp/slice30-compute-native-prefix-verification/gate-bulk-structural-mutation-baseline.txt > /private/tmp/slice30-compute-native-prefix-verification/bulk-baseline-checksums.txt
+$ awk '/^mode=/ { for (i = 1; i <= NF; i++) { if ($i ~ /^scenario=/) scenario=$i; if ($i ~ /^checksum=/) checksum=$i } print scenario, checksum }' /private/tmp/slice30-compute-native-prefix-verification/gate-bulk-structural-mutation-current.txt > /private/tmp/slice30-compute-native-prefix-verification/bulk-current-checksums.txt
+$ cat /private/tmp/slice30-compute-native-prefix-verification/bulk-baseline-checksums.txt
+scenario=1k_lines_batch_64 checksum=82740062444
+scenario=100k_lines_batch_64 checksum=36564666309410
+scenario=1m_lines_batch_64 checksum=1317343499882000
+scenario=100k_lines_batch_4096 checksum=2285022074625
+scenario=1m_lines_batch_4096 checksum=82203678997143
+$ cat /private/tmp/slice30-compute-native-prefix-verification/bulk-current-checksums.txt
+scenario=1k_lines_batch_64 checksum=82740062444
+scenario=100k_lines_batch_64 checksum=36564666309410
+scenario=1m_lines_batch_64 checksum=1317343499882000
+scenario=100k_lines_batch_4096 checksum=2285022074625
+scenario=1m_lines_batch_4096 checksum=82203678997143
+$ diff -u /private/tmp/slice30-compute-native-prefix-verification/bulk-baseline-checksums.txt /private/tmp/slice30-compute-native-prefix-verification/bulk-current-checksums.txt
+no output; exit 0
+```
 
 ### structural-mutation --gate
 
