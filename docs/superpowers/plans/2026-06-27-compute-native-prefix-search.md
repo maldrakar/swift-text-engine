@@ -489,28 +489,30 @@ In `Sources/TextEngineReferenceProviders/BalancedTreeLineMetrics.swift`, add imm
 
         var current = root
         var baseIndex = 0
-        var remaining = y
+        var baseOffset = 0.0
         var visits = 0
 
         while current != -1 {
             visits += 1
             let node = nodes[current]
             let leftSum = nodeSum(node.left)
-            if remaining < leftSum {
+            let leftCount = nodeCount(node.left)
+            let nodeTop = baseOffset + leftSum
+            if y < nodeTop {
                 current = node.left
                 continue
             }
 
-            remaining -= leftSum
-            let leftCount = nodeCount(node.left)
-            if remaining < node.height {
-                if remaining == 0 {
-                    return (baseIndex + leftCount, visits)       // y exactly on this line's top
-                }
-                return (baseIndex + leftCount + 1, visits)       // y strictly inside -> next line's top
+            if y == nodeTop {
+                return (baseIndex + leftCount, visits)           // y exactly on this line's top
             }
 
-            remaining -= node.height
+            let nodeBottom = baseOffset + (leftSum + node.height)
+            if y <= nodeBottom {
+                return (baseIndex + leftCount + 1, visits)       // y inside this line or at next top
+            }
+
+            baseOffset = nodeBottom
             baseIndex += leftCount + 1
             current = node.right
         }
@@ -693,7 +695,7 @@ git commit -m "docs: record compute-native prefix search verification"
 - Decision 1 (route visible-start through `lineIndex`) → Task 2.
 - Decision 2 (defaulted end-exclusive requirement, protocol body, `lowerBound` hint) → Task 1.
 - Decision 3 (shared `firstLineIndexAtOrAbove` helper; `lowerBound` preserved) → Task 1.
-- Decision 4 (balanced-tree native descent, ignores hint, `remaining == 0` boundary, internal visit-count variant) → Task 3.
+- Decision 4 (balanced-tree native descent, ignores hint, absolute `nodeTop`/`nodeBottom` boundary, internal visit-count variant) → Task 3.
 - Decision 5 (reuse gates; compute-equivalence oracle; one-off timing; fallback gates green) → Tasks 4, 6.
 - Decision 6 (keep edge-guard wrappers; visible-end forwards `lowerBound`) → Task 2.
 - Testing Strategy (default fallback, dispatch, equivalence oracle, native boundary/mutation/visit-count) → Tasks 1, 2, 3, 4.

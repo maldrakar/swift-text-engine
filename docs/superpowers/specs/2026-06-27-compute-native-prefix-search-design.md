@@ -250,26 +250,28 @@ a single root-to-line O(log N) walk, and its global result is provably
 `>= lowerBound` (Decision 2), so narrowing would not change the answer or the
 asymptotics. The walk:
 
-- Track the current node, the accumulated in-order base index, and the remaining
-  `y` offset inside the current subtree.
-- Compare `remaining` with the left subtree sum; if `remaining < leftSum`, descend
-  left; otherwise subtract `leftSum`.
-- At the node whose line span contains `y` (`remaining < node.height`):
-  - if `remaining == 0` exactly, `y` is exactly this line's top -> return
-    `baseIndex + leftCount` (this line).
-  - otherwise `y` is strictly inside this line -> the first top at or above `y`
-    is the next line -> return `baseIndex + leftCount + 1`.
-- Otherwise subtract `node.height`, advance `baseIndex` by `leftCount + 1`, and
-  descend right.
+- Track the current node, the accumulated in-order base index, and the
+  accumulated absolute top of the current subtree (`baseOffset`).
+- Compute `leftSum`, `leftCount`, and the current node's absolute top
+  `nodeTop = baseOffset + leftSum`. If `y < nodeTop`, descend left.
+- If `y == nodeTop`, `y` is exactly this line's top -> return
+  `baseIndex + leftCount` (this line).
+- Compute `nodeBottom = baseOffset + (leftSum + node.height)`. If
+  `y <= nodeBottom`, `y` is inside this line or exactly at its bottom/top of the
+  next line -> return `baseIndex + leftCount + 1`.
+- Otherwise advance `baseOffset = nodeBottom`, advance `baseIndex` by
+  `leftCount + 1`, and descend right.
 
-The `remaining == 0` test compares against the same accumulated subtree sums in
-the same order as `offset(ofLine:)`, so it is bit-consistent with the generic
-`offset(ofLine: i) >= y` comparison - the native and fallback paths return
-identical indices. For valid in-range `y` the containing-line case always fires
-before the walk exhausts (a trailing `preconditionFailure` guards the impossible
-exhaustion, matching Slice 29). It reuses `nodeSum`/`nodeCount`, allocates
-nothing, does not mutate the tree, does not add core-owned memory, and does not
-touch `lastMutationNodeVisits`. An internal `...AndVisitCount` variant exposes the
+The exact-boundary check compares `y` to the absolute node top rather than to a
+subtractive remainder. That keeps the native path bit-consistent with
+`offset(ofLine:)` for ordinary fractional heights: both paths accumulate the same
+subtree sums in the same shape for a tree-produced line top. The native and
+fallback paths therefore return identical indices at exact tops and inside line
+spans. For valid in-range `y` the containing-line case always fires before the
+walk exhausts (a trailing `preconditionFailure` guards the impossible exhaustion,
+matching Slice 29). It reuses `nodeSum`/`nodeCount`, allocates nothing, does not
+mutate the tree, does not add core-owned memory, and does not touch
+`lastMutationNodeVisits`. An internal `...AndVisitCount` variant exposes the
 visit count for white-box tests only (reached via `@testable import`; not public
 API).
 
@@ -389,10 +391,12 @@ through the default.
 ### Native and fallback end-exclusive boundary behavior could drift
 
 The primary risk is exact-boundary drift between the generic `>=` binary search
-and the tree descent's `remaining == 0` rule. Mitigation: the oracle tests
-include exact line-top boundaries (-> that line) and line-end / interior cases
-(-> next line, including the last-line-interior -> `lineCount` case), and the
-descent uses the same accumulation order as `offset(ofLine:)`.
+and the tree descent's native boundary rule. Mitigation: the oracle tests include
+exact line-top boundaries (-> that line), line-end / interior cases (-> next
+line, including the last-line-interior -> `lineCount` case), and fractional
+line-top regressions built from `tree.offset(ofLine:)`. The descent compares
+against absolute `nodeTop`/`nodeBottom` values accumulated in the same shape as
+`offset(ofLine:)`, instead of testing a subtractive remainder for zero.
 
 ### Fallback hook and `compute` could drift
 
