@@ -73,11 +73,7 @@ extension ViewportVirtualizer {
         if target >= totalHeight {
             return lineCount
         }
-        return binarySearchLineIndex(
-            containingOffset: target,
-            metrics: metrics,
-            lineCount: lineCount
-        )
+        return metrics.lineIndex(containingOffset: target)
     }
 
     // Smallest i in [lowerBound, lineCount] with offset(i) >= target (the first
@@ -95,18 +91,6 @@ extension ViewportVirtualizer {
         if target >= totalHeight {
             return lineCount
         }
-        var low = lowerBound
-        var high = lineCount - 1
-        var result = lineCount
-        while low <= high {
-            let mid = low + (high - low) / 2
-            if metrics.offset(ofLine: mid) >= target {
-                result = mid
-                high = mid - 1
-            } else {
-                low = mid + 1
-            }
-        }
-        return result
+        return metrics.firstLineIndex(withOffsetAtOrAbove: target, startingAtLine: lowerBound)
     }
 }
