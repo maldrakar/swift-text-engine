@@ -341,6 +341,38 @@ WASM + embedded WASM observation (non-blocking) passed.
 
 ### Post-merge anchor
 
-- Post-merge push run on the `main` merge commit: **Pending** (record after PR
-  #56 merges, as the merged-code evidence anchor, following the Slice 29
-  two-step pattern).
+PR #56 was merged to `main` by `maldrakar` at 2026-06-29T12:26:59Z as merge
+commit `fac19d6cdd81569b0a66a14ac108751b917e63cb` (parents
+`a98d29a` + the verified PR head `5c142b6`). The merged-code push run is the
+authoritative evidence anchor for Slice 30, verified live via `gh` at the
+**step** level on 2026-06-29.
+
+- Post-merge `push` run: `28371924603` (event `push`, branch `main`, head
+  `fac19d6`, conclusion `success`)
+- All three required jobs `success`: Host tests and benchmark gate
+  (`84051567581`), iOS cross-target compile (`84051567607`), WASM cross-target
+  observation (`84051567603`)
+
+Host job `84051567581` ran the full heavy path on merged code (step 5
+`Complete docs-only PR` `skipped`; all six blocking latency gates ran):
+
+```terminal
+5  Complete docs-only PR             -> skipped
+7  Run host tests                    -> success
+8  Run synthetic benchmark gate      -> success
+9  Run variable-height benchmark gate            -> success
+10 Run variable-height mutation benchmark gate   -> success
+11 Run structural mutation benchmark gate        -> success
+12 Run bulk structural mutation benchmark gate   -> success
+13 Run line query benchmark gate     -> success
+14 Run memory shape diagnostic       -> success
+15 Run RSS memory observation diagnostic         -> success
+16 Observe realistic provider relative performance -> skipped
+```
+
+Step 16 `Observe realistic provider relative performance` is correctly
+`skipped` on the `push` event (it is the PR-only `continue-on-error`
+observation), versus `success` on the PR-head run — the documented
+push-vs-PR behavior. iOS job `84051567607` compiled `TextEngineCore` and
+`TextEngineReferenceProviders` for device + simulator (`success`); WASM job
+`84051567603` observed WASM + embedded WASM (`success`).
