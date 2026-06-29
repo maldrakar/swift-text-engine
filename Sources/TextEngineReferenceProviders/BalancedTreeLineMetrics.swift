@@ -101,6 +101,48 @@ public struct BalancedTreeLineMetrics: LineMetricsSource {
         preconditionFailure("BalancedTreeLineMetrics.lineIndex search exhausted")
     }
 
+    public func firstLineIndex(withOffsetAtOrAbove y: Double, startingAtLine lowerBound: Int) -> Int {
+        // The hint is ignored: this descent already returns the global smallest
+        // index with offset >= y, which is provably >= lowerBound.
+        firstLineIndexAndVisitCount(withOffsetAtOrAbove: y).lineIndex
+    }
+
+    internal func firstLineIndexAndVisitCount(withOffsetAtOrAbove y: Double) -> (lineIndex: Int, visits: Int) {
+        precondition(root != -1, "BalancedTreeLineMetrics.firstLineIndex requires a non-empty tree")
+
+        var current = root
+        var baseIndex = 0
+        var baseOffset = 0.0
+        var visits = 0
+
+        while current != -1 {
+            visits += 1
+            let node = nodes[current]
+            let leftSum = nodeSum(node.left)
+            let leftCount = nodeCount(node.left)
+            let nodeTop = baseOffset + leftSum
+            if y < nodeTop {
+                current = node.left
+                continue
+            }
+
+            if y == nodeTop {
+                return (baseIndex + leftCount, visits)
+            }
+
+            let nodeBottom = baseOffset + (leftSum + node.height)
+            if y <= nodeBottom {
+                return (baseIndex + leftCount + 1, visits)
+            }
+
+            baseOffset = nodeBottom
+            baseIndex += leftCount + 1
+            current = node.right
+        }
+
+        preconditionFailure("BalancedTreeLineMetrics.firstLineIndex search exhausted")
+    }
+
     // MARK: - Height mutation
 
     // Sets the line at `index` to `newHeight` and adds the height delta to
