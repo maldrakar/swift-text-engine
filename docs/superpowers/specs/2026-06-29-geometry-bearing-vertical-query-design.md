@@ -75,8 +75,16 @@ horizontal axis, no wrap, no provider change, no change to `lineAt` / `compute`.
 - **Index + clamp parity with `lineAt` by construction** — `lineGeometryAt`
   delegates to `lineAt` for the located line and clamp, so the two can never drift
   on boundary/clamp conventions.
-- **O(log N)** queries, **O(1)** core memory — the same envelope as `lineAt`,
-  reusing the existing primitives (no new search, no provider protocol change).
+- **O(log N) provider calls, O(1) core memory** — a constant number of
+  `offset(ofLine:)` probes plus `lineAt`'s own (native, since Slice 29) index
+  search, reusing the existing primitives (no new search, no provider protocol
+  change). Wall-clock is `O(log N x offsetCost)` and is **O(log N) for every
+  provider the core ships**: O(1)-offset providers run an O(log N) binary search
+  over O(1) probes; `BalancedTreeLineMetrics` runs a *constant* number of O(log N)
+  tree descents (the two added geometry probes are a constant factor, **not** a log
+  factor — there is no O(log^2 N) path, unlike Slice 27's pre-native `lineAt`). A
+  native one-walk geometry hook (Future Slices) would cut that constant, not the
+  asymptotic class.
 - Validation parity with `lineAt`/`compute`: up-front, return-based (no `throws`),
   Foundation-free, reusing the existing `ViewportValidationError`.
 - An **equivalence oracle**: over `BalancedTreeLineMetrics`, `lineGeometryAt`'s
@@ -249,15 +257,22 @@ Notes:
 | **clamp** (`y < 0` or `y >= total`) | `4` — `lineAt`'s `offset(0)` + total `= 2`, plus the two geometry probes |
 | **in-range**, 1M lines | `lineAt`'s `2 + (ceilLog2(n) + 1)` + `2` geometry probes; and `< 100` |
 
-So the query count stays **`O(log N)`** (one binary search inside `lineAt` plus a
-constant number of probes) and core memory stays **`O(1)`**. Wall-clock is
-`O(log N x offsetCost)`: O(log N) for `UniformLineMetrics` / `PrefixSumLineMetrics`
-(O(1) offsets), O(log^2 N) for `BalancedTreeLineMetrics` (O(log N) offsets) — the
-same envelope `lineAt` carried at Slice 27, before its Slice 29 native descent.
-(`lineAt`'s in-range index probe is provider-native O(log N) over the balanced tree
-since Slice 29; the two added geometry `offset` probes remain generic O(log N) tree
-descents — a native one-walk variant is the deferred optimization in Future
-Slices.)
+So the query count stays **`O(log N)`** (a constant number of `offset(ofLine:)`
+probes plus `lineAt`'s single index search) and core memory stays **`O(1)`**.
+Wall-clock is `O(log N x offsetCost)`, which is **O(log N) for every provider** the
+core ships:
+
+- `UniformLineMetrics` / `PrefixSumLineMetrics` answer `offset` in O(1) and run
+  `lineAt`'s index search as an O(log N) binary search over O(1) probes → O(log N).
+- `BalancedTreeLineMetrics` answers `offset` in O(log N) (one tree descent,
+  `BalancedTreeLineMetrics.swift:47`) and answers `lineAt`'s index search with its
+  Slice 29 **native** O(log N) descent. `lineGeometryAt` therefore runs a *constant*
+  number of O(log N) descents (~ `offset(0)`, total, native index, `offset(i)`,
+  `offset(i+1)`) → **O(log N)**. The two added geometry probes are a constant
+  factor, **not** a log factor, so there is no O(log^2 N) path here — unlike
+  Slice 27's pre-native `lineAt`. A native one-walk `(index, top, bottom)` descent
+  (Future Slices) would cut that constant (~5 descents → ~2), not the asymptotic
+  class.
 
 ### Decision 5 — Local gate now, CI promotion deferred (established rhythm)
 
@@ -299,11 +314,32 @@ co-located.
 `LineQuery` / `LineLocation` / `LineGeometry` definitions, so the public vocabulary
 stays in one file. No change to existing types.
 
-### No provider change, no search change
+### No search change; provider code untouched (one doc-comment update)
 
-`TextEngineReferenceProviders`, `LineMetricsSource`, and
-`VariableViewportVirtualizer` are untouched. `lineGeometryAt` only consumes the
-existing `lineAt` + `offset(ofLine:)` surface.
+`VariableViewportVirtualizer` and the `TextEngineReferenceProviders` providers are
+untouched — no signature or behavior change. `lineGeometryAt` only consumes the
+existing `lineAt` + `offset(ofLine:)` surface and adds **no** `LineMetricsSource`
+requirement. The single provider-protocol touch is a **doc-comment** update to the
+`offset(ofLine:)` stability precondition — see Documentation Updates.
+
+## Documentation Updates
+
+- **`Sources/TextEngineCore/LineMetricsSource.swift` stability precondition.** The
+  `offset(ofLine:)` stability precondition currently scopes its
+  "stable for one layout/query operation" guarantee to "a `compute`, a `lineAt`, and
+  any `VariableLineGeometryCursor` traversal derived from a range it produced".
+  `lineGeometryAt` issues several `offset(ofLine:)` queries (via `lineAt` plus the
+  two geometry probes) that must observe one consistent snapshot. Add
+  `lineGeometryAt` to the enumeration: "... a `compute`, a `lineAt`, a
+  `lineGeometryAt`, and any `VariableLineGeometryCursor` traversal ...". Comment
+  only; no signature or behavior change. (Slice 27 made the identical update when it
+  added `lineAt`.)
+- **`AGENTS.md`.** Add `lineGeometryAt` to the architecture paragraph as the
+  geometry-bearing companion to `lineAt` — the y→(line index + box + within-line
+  fraction) query — and add the `--line-geometry-query` /
+  `--line-geometry-query --gate` commands and flag to the Commands and
+  benchmark-flags lists. The CI section is unchanged (no workflow change,
+  Decision 5).
 
 ## Testing Strategy
 
@@ -356,6 +392,21 @@ the construction guarantee, pinned as a regression test.
 exact `offset(ofLine:)` counts per path from the Decision 4 table — non-finite `0`,
 empty `1`, clamp `4`, in-range `<= 2 + (ceilLog2(n)+1) + 2` and `< 100`. Proves the
 O(log N) query / O(1) memory envelope and that no accidental linear scan crept in.
+(Over `CountingLineMetrics`, whose `lineIndex` falls back to the binary search, the
+in-range count includes the `ceilLog2(n)+1` fallback probes.)
+
+**Native-hook dispatch + order test** (`NativeSearchMetrics`, the existing ordered
+event-log harness behind `testLineAtDispatchesToNativeHookAfterValidationProbes`,
+`LineAtQueryCountTests.swift:138`). Proves `lineGeometryAt` reuses `lineAt`'s
+**native** index dispatch and then takes exactly the two geometry probes, in order.
+For an in-range `y` over a small `NativeSearchMetrics`
+(offsets `[0, 10, 30, 35, 80]`, `y = 31` → line 2), assert the event log is
+`[.offset(0), .offset(4), .native(31.0), .offset(2), .offset(3)]` — i.e. `lineAt`'s
+`offset(0)` + total-height probes, its native index search, then `offset(i)` /
+`offset(i+1)` for the box. This is the load-bearing proof (the Slice 29 lesson) that
+the composed query does **not** silently fall back to a generic search or re-search
+redundantly — and it directly exhibits the Decision 4 constant-descent-count
+(hence O(log N), not O(log^2 N)) shape over a native provider.
 
 ### Reference-provider equivalence oracle (`Tests/TextEngineReferenceProvidersTests`)
 
@@ -392,9 +443,11 @@ New file `Sources/ViewportBenchmarks/LineGeometryQueryBenchmark.swift`, modeled 
   program, and `.lineGeometryQuery` to the `--gate`-valid set.
 - **Scenarios**: large synthetic docs (`1k`, `100k`, `1m`), each with `p95`/`p99`
   budgets, reusing the `--line-query` scenario shape. **Must include at least one
-  `provider=balanced_tree` scenario** (the O(log^2 N) realistic path — uniform-only
-  would under-measure the two added tree `offset` probes), plus a uniform / O(1)
-  baseline.
+  `provider=balanced_tree` scenario** (the realistic O(log N)-`offset` path: still
+  O(log N) overall, but with a higher per-query constant than the O(1)-offset
+  providers because each of the descents — including the two added geometry probes —
+  pays a tree walk; a uniform-only suite would under-measure that constant and the
+  future native-hook win), plus a uniform / O(1) baseline.
 - **Workload**: per operation derive a deterministic `y` spanning in-range and
   both out-of-range clamp branches (reuse `deterministicScrollOffset` / a
   deterministic fraction of `totalHeight`, with a slice pushed below 0 and above
@@ -456,6 +509,10 @@ Recorded in
 6. The query-count tests pass with the exact per-path `offset(ofLine:)` counts in
    the Decision 4 table (non-finite `0`, empty `1`, clamp `4`,
    in-range `<= 2 + (ceilLog2(n)+1) + 2` and `< 100`).
+6a. The native-hook dispatch + order test passes: in-range `lineGeometryAt` over
+   `NativeSearchMetrics` produces the event log
+   `[.offset(0), .offset(lineCount), .native(y), .offset(i), .offset(i+1)]`,
+   proving native index dispatch + exactly two ordered geometry probes.
 7. `--line-geometry-query` benchmark runs; `--line-geometry-query --gate` enforces
    budgets and is rejected only where the other gateable modes are accepted;
    `--gate` stays rejected with `--range-only`/`--memory-shape`/`--memory-observation`;
@@ -469,16 +526,18 @@ Recorded in
 
 ## Risks And Gaps
 
-### Two extra `offset` probes on the located path (deferred native descent)
+### Two extra `offset` probes on the located path (constant factor, deferred native hook)
 
 `lineGeometryAt` issues two more `offset(ofLine:)` probes than `lineAt`. For O(1)-
 offset providers this is free; for `BalancedTreeLineMetrics` it is two extra
-O(log N) tree descents, leaving the geometry path at O(log^2 N) wall-clock even
-though `lineAt`'s index is already a single native descent. A future slice can add
-a provider-native one-walk `(index, top, bottom)` hook (default = the composed
-form) and override it on the balanced tree, dropping the geometry path to O(log N)
-— the exact Slice 27 → Slice 29 pattern. The balanced-tree benchmark scenario is
-what makes that future win measurable. Out of scope here (Non-Goals).
+O(log N) tree descents — a **constant factor** on top of `lineAt`'s descents, so the
+geometry path stays **O(log N)** wall-clock (it does **not** become O(log^2 N): the
+probes are a fixed count, not a binary search whose every step pays an `offset`).
+A future slice can still add a provider-native one-walk `(index, top, bottom)` hook
+(default = the composed form) overridden on the balanced tree, folding the ~5
+descents into ~2 — a constant-factor win, the Slice 27 → Slice 29 pattern applied to
+geometry, made measurable by the balanced-tree benchmark scenario. Out of scope here
+(Non-Goals).
 
 ### Budgets are macOS-calibrated and local-only
 
@@ -506,11 +565,12 @@ method + new types, not a new `LineQuery` case), per the Slice 27 extension rule
 - **Slice 32 (recommended next): promote `--line-geometry-query --gate` to a
   blocking hosted CI gate**, completing the functional → promotion pair, exactly as
   Slices 15 / 21 / 24 / 26 / 28 did for the prior five modes.
-- **Provider-native geometry-bearing descent (drop O(log^2 N) → O(log N))**: an
-  optional `LineMetricsSource` hook returning `(index, top, bottom)` in one tree
+- **Provider-native geometry-bearing descent (constant-factor: ~5 descents → ~2)**:
+  an optional `LineMetricsSource` hook returning `(index, top, bottom)` in one tree
   walk, default-implemented as today's composed form, overridden by
   `BalancedTreeLineMetrics` — the Slice 29/30 defaulted-hook + provider-override +
-  dispatch-test recipe applied to geometry.
+  dispatch-test recipe applied to geometry. This trims the constant, **not** the
+  asymptotic class (the composed path is already O(log N)).
 - **Verified closed-form uniform override** (carried Slice 29/30 P3): O(1) overrides
   for the uniform/prefix-sum providers' native hooks, boundary-safe against the
   equivalence oracles.
