@@ -75,16 +75,14 @@ horizontal axis, no wrap, no provider change, no change to `lineAt` / `compute`.
 - **Index + clamp parity with `lineAt` by construction** — `lineGeometryAt`
   delegates to `lineAt` for the located line and clamp, so the two can never drift
   on boundary/clamp conventions.
-- **O(log N) provider calls, O(1) core memory** — a constant number of
-  `offset(ofLine:)` probes plus `lineAt`'s own (native, since Slice 29) index
-  search, reusing the existing primitives (no new search, no provider protocol
-  change). Wall-clock is `O(log N x offsetCost)` and is **O(log N) for every
-  provider the core ships**: O(1)-offset providers run an O(log N) binary search
-  over O(1) probes; `BalancedTreeLineMetrics` runs a *constant* number of O(log N)
-  tree descents (the two added geometry probes are a constant factor, **not** a log
-  factor — there is no O(log^2 N) path, unlike Slice 27's pre-native `lineAt`). A
-  native one-walk geometry hook (Future Slices) would cut that constant, not the
-  asymptotic class.
+- **O(log N) provider calls, O(1) core memory.** `lineGeometryAt` adds only a
+  *constant* number of `offset(ofLine:)` probes (the box top/bottom) on top of
+  `lineAt`'s index search — no new search, no provider protocol change — so it never
+  adds a log factor and its per-provider wall-clock **equals `lineAt`'s**: O(log N)
+  for O(1)-offset providers and for the balanced tree (Slice 29 native index
+  descent), but O(log^2 N) for `FenwickLineMetrics` (O(log N) `offset` + generic
+  fallback index search, inherited from `lineAt`). See Decision 4 for the full
+  per-provider breakdown.
 - Validation parity with `lineAt`/`compute`: up-front, return-based (no `throws`),
   Foundation-free, reusing the existing `ViewportValidationError`.
 - An **equivalence oracle**: over `BalancedTreeLineMetrics`, `lineGeometryAt`'s
@@ -259,20 +257,30 @@ Notes:
 
 So the query count stays **`O(log N)`** (a constant number of `offset(ofLine:)`
 probes plus `lineAt`'s single index search) and core memory stays **`O(1)`**.
-Wall-clock is `O(log N x offsetCost)`, which is **O(log N) for every provider** the
-core ships:
+Wall-clock is `O(log N x offsetCost)`. Crucially, `lineGeometryAt`'s two extra
+probes are a **constant factor**, so its per-provider asymptotic class is exactly
+`lineAt`'s — the geometry probes never introduce a log factor:
 
 - `UniformLineMetrics` / `PrefixSumLineMetrics` answer `offset` in O(1) and run
-  `lineAt`'s index search as an O(log N) binary search over O(1) probes → O(log N).
+  `lineAt`'s index search as an O(log N) binary search over O(1) probes →
+  **O(log N)**.
 - `BalancedTreeLineMetrics` answers `offset` in O(log N) (one tree descent,
-  `BalancedTreeLineMetrics.swift:47`) and answers `lineAt`'s index search with its
-  Slice 29 **native** O(log N) descent. `lineGeometryAt` therefore runs a *constant*
-  number of O(log N) descents (~ `offset(0)`, total, native index, `offset(i)`,
-  `offset(i+1)`) → **O(log N)**. The two added geometry probes are a constant
-  factor, **not** a log factor, so there is no O(log^2 N) path here — unlike
-  Slice 27's pre-native `lineAt`. A native one-walk `(index, top, bottom)` descent
-  (Future Slices) would cut that constant (~5 descents → ~2), not the asymptotic
-  class.
+  `BalancedTreeLineMetrics.swift:47`) but answers `lineAt`'s index search with its
+  Slice 29 **native** O(log N) descent, so the whole query is a *constant* number of
+  O(log N) descents (~ `offset(0)`, total, native index, `offset(i)`,
+  `offset(i+1)`) → **O(log N)**. (Unlike Slice 27's pre-native `lineAt`, there is no
+  O(log^2 N) path for the balanced tree.)
+- `FenwickLineMetrics` answers `offset` in O(log N)
+  (`FenwickLineMetrics.swift:45`) and does **not** override
+  `lineIndex(containingOffset:)`, so `lineAt`'s index search is the generic binary
+  search (`LineMetricsSource.swift:47`) paying an O(log N) `offset` per probe →
+  **O(log^2 N)**. This is inherited from `lineAt`/`compute`'s existing Fenwick cost;
+  the two added geometry probes contribute only O(log N) more (a constant factor),
+  not the log factor.
+
+A native one-walk `(index, top, bottom)` descent (Future Slices) would cut the
+balanced tree's constant (~5 descents → ~2); a Fenwick native index override is the
+separate, already-known route that would take *its* path to O(log N).
 
 ### Decision 5 — Local gate now, CI promotion deferred (established rhythm)
 
@@ -445,9 +453,14 @@ New file `Sources/ViewportBenchmarks/LineGeometryQueryBenchmark.swift`, modeled 
   budgets, reusing the `--line-query` scenario shape. **Must include at least one
   `provider=balanced_tree` scenario** (the realistic O(log N)-`offset` path: still
   O(log N) overall, but with a higher per-query constant than the O(1)-offset
-  providers because each of the descents — including the two added geometry probes —
-  pays a tree walk; a uniform-only suite would under-measure that constant and the
-  future native-hook win), plus a uniform / O(1) baseline.
+  providers because each descent — including the two added geometry probes — pays a
+  tree walk; a uniform-only suite would under-measure that constant and the future
+  native-hook win), plus a uniform / O(1) baseline. Optionally add a
+  `provider=fenwick` scenario to also exercise the **O(log^2 N)** generic-fallback
+  path (Fenwick's `offset` is O(log N) and it has no native index override) — this
+  is `lineAt`/`compute`'s existing Fenwick cost, inherited and not new to this slice,
+  so it is recommended-not-required, mirroring `--line-query` (which likewise
+  benchmarks uniform + balanced_tree only).
 - **Workload**: per operation derive a deterministic `y` spanning in-range and
   both out-of-range clamp branches (reuse `deterministicScrollOffset` / a
   deterministic fraction of `totalHeight`, with a slice pushed below 0 and above
@@ -533,6 +546,8 @@ offset providers this is free; for `BalancedTreeLineMetrics` it is two extra
 O(log N) tree descents — a **constant factor** on top of `lineAt`'s descents, so the
 geometry path stays **O(log N)** wall-clock (it does **not** become O(log^2 N): the
 probes are a fixed count, not a binary search whose every step pays an `offset`).
+For `FenwickLineMetrics` the path *is* O(log^2 N), but that is `lineAt`'s inherited
+generic-fallback cost (Decision 4), not something these two probes introduce.
 A future slice can still add a provider-native one-walk `(index, top, bottom)` hook
 (default = the composed form) overridden on the balanced tree, folding the ~5
 descents into ~2 — a constant-factor win, the Slice 27 → Slice 29 pattern applied to
