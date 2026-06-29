@@ -1,7 +1,16 @@
 # Compute-Native Prefix Search Verification
-Date: 2026-06-28
+Date: 2026-06-28 (local sweep); hosted evidence appended 2026-06-29
 Branch: slice-30-compute-native-prefix-search
-Verified code head: 74bcee4ef90d7f1ba6ec003449d2828a09857c0d
+Local verification code head: 74bcee4ef90d7f1ba6ec003449d2828a09857c0d
+Current PR #56 head: aa3b755c58f84fb14b5d0cd85a12841da6cffd09
+
+The three commits between the local-sweep head and the current PR head
+(`d80edf0` docs, `22cc38a` docs, `aa3b755` chore) touch only docs and
+`.gitignore` — no Swift source, tests, or `Package.swift` — so the local
+source-level evidence captured at `74bcee4` still represents the source on the
+current PR head. Confirmed with
+`git diff --name-only 74bcee4..aa3b755 -- Sources Tests Package.swift` (empty).
+The hosted run below executed against `aa3b755`.
 
 ## Summary
 
@@ -279,12 +288,59 @@ mode=bulk_structural_mutation provider=balanced_tree scenario=1m_lines_batch_409
 
 ## Hosted Evidence
 
-Pending for the follow-up PR/hosted-evidence step. This task records local
-verification only.
+PR-head hosted evidence, verified live via `gh` at the **step** level (per the
+project lesson that a green job can hide a dead `continue-on-error` step) on
+2026-06-29. All three required Swift CI job contexts passed on the exact current
+PR head `aa3b755`.
 
-- PR: Pending
-- Full-code PR head: Pending
-- Swift CI pull_request run: Pending
-- Host tests and benchmark gate job: Pending
-- iOS cross-target compile job: Pending
-- WASM cross-target observation job: Pending
+- PR: [#56 — Slice 30: compute-native prefix search](https://github.com/maldrakar/swift-text-engine/pull/56) (state `OPEN`, mergeable `CLEAN`)
+- Full-code PR head: `aa3b755c58f84fb14b5d0cd85a12841da6cffd09`
+- Swift CI `pull_request` run: `28334474924` (event `pull_request`, branch
+  `slice-30-compute-native-prefix-search`, conclusion `success`)
+
+### Host tests and benchmark gate — job `83938177803` (`success`)
+
+Ran the full heavy path on the source-bearing PR (step 5 `Complete docs-only PR`
+`skipped`, so the PR is correctly classified as **not** docs-only):
+
+```terminal
+4  Detect PR change scope            -> success
+5  Complete docs-only PR             -> skipped
+7  Run host tests                    -> success
+8  Run synthetic benchmark gate      -> success
+9  Run variable-height benchmark gate            -> success
+10 Run variable-height mutation benchmark gate   -> success
+11 Run structural mutation benchmark gate        -> success
+12 Run bulk structural mutation benchmark gate   -> success
+13 Run line query benchmark gate     -> success
+14 Run memory shape diagnostic       -> success
+15 Run RSS memory observation diagnostic         -> success
+16 Observe realistic provider relative performance -> success
+```
+
+All six blocking latency gates (steps 8→13) ran and passed on hosted Linux.
+
+### iOS cross-target compile — job `83938177816` (`success`)
+
+```terminal
+4 Complete docs-only PR              -> skipped
+6 Compile cross-target packages for iOS -> success
+```
+
+iOS device + simulator compile for `TextEngineCore` and
+`TextEngineReferenceProviders` (blocking) passed.
+
+### WASM cross-target observation — job `83938177800` (`success`)
+
+```terminal
+4 Complete docs-only PR              -> skipped
+7 Observe cross-target packages for WASM -> success
+```
+
+WASM + embedded WASM observation (non-blocking) passed.
+
+### Post-merge anchor
+
+- Post-merge push run on the `main` merge commit: **Pending** (record after PR
+  #56 merges, as the merged-code evidence anchor, following the Slice 29
+  two-step pattern).
