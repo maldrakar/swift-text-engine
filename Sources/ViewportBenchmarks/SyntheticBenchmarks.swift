@@ -125,6 +125,8 @@ func runScenario(
                 preconditionFailure("bulk structural mutation mode uses runBulkStructuralMutationScenario")
             case .lineQuery:
                 preconditionFailure("line query mode uses runLineQueryScenario")
+            case .lineGeometryQuery:
+                preconditionFailure("line geometry query mode uses runLineGeometryQueryScenario")
             case .memoryShape:
                 preconditionFailure("memory shape mode uses runMemoryShapeDiagnostics")
             case .memoryObservation:

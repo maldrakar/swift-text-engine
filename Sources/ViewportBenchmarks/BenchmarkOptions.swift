@@ -7,6 +7,7 @@ enum BenchmarkMode {
     case structuralMutation
     case bulkStructuralMutation
     case lineQuery
+    case lineGeometryQuery
     case memoryShape
     case memoryObservation
 
@@ -28,6 +29,8 @@ enum BenchmarkMode {
             return "bulk_structural_mutation"
         case .lineQuery:
             return "line_query"
+        case .lineGeometryQuery:
+            return "line_geometry_query"
         case .memoryShape:
             return "memory_shape"
         case .memoryObservation:
@@ -47,7 +50,7 @@ struct BenchmarkOptions {
     let enforceGate: Bool
 
     static let usage = """
-    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--bulk-structural-mutation] [--line-query] [--memory-shape] [--memory-observation] [--help]
+    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--bulk-structural-mutation] [--line-query] [--line-geometry-query] [--memory-shape] [--memory-observation] [--help]
 
     Options:
       --range-only          Run only viewport range recompute benchmark.
@@ -58,6 +61,7 @@ struct BenchmarkOptions {
       --structural-mutation  Run insert/delete+recompute benchmark (balanced-tree provider). Combine with --gate to enforce budgets.
       --bulk-structural-mutation  Run bulk insert/delete-range+recompute benchmark (balanced-tree provider). Combine with --gate to enforce budgets.
       --line-query          Run y->line position-query benchmark. Combine with --gate to enforce budgets.
+      --line-geometry-query Run y->line+box+fraction geometry query benchmark. Combine with --gate to enforce budgets.
       --memory-shape        Run deterministic core-owned memory-shape diagnostics.
       --memory-observation  Run host RSS observation diagnostics.
       --help                Print this help.
@@ -110,6 +114,11 @@ struct BenchmarkOptions {
                     return .failure("--line-query cannot be combined with another mode")
                 }
                 mode = .lineQuery
+            case "--line-geometry-query":
+                if mode != .pipeline {
+                    return .failure("--line-geometry-query cannot be combined with another mode")
+                }
+                mode = .lineGeometryQuery
             case "--memory-shape":
                 if mode != .pipeline {
                     return .failure("--memory-shape cannot be combined with another mode")
