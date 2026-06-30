@@ -118,3 +118,26 @@ public struct LineLocation: Equatable {
         case clampedToBottom
     }
 }
+
+public enum LineGeometryQuery: Equatable {
+    case geometry(LineGeometryLocation)
+    case empty
+    case failure(ViewportValidationError)
+}
+
+public struct LineGeometryLocation: Equatable {
+    /// The located line's box: lineIndex, top y, height.
+    public let geometry: LineGeometry
+    /// Where `y` falls within the line: `0.0` at the line top and when clamped to
+    /// top; `(y - geometry.y) / geometry.height` in `[0, 1)` for an in-range
+    /// query; `1.0` when clamped to bottom.
+    public let fractionInLine: Double
+    /// Whether the query landed inside the document or past an edge (from `lineAt`).
+    public let clamp: LineLocation.Clamp
+
+    public init(geometry: LineGeometry, fractionInLine: Double, clamp: LineLocation.Clamp) {
+        self.geometry = geometry
+        self.fractionInLine = fractionInLine
+        self.clamp = clamp
+    }
+}

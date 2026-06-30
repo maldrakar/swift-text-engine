@@ -45,4 +45,40 @@ extension ViewportVirtualizer {
         let index = metrics.lineIndex(containingOffset: y)
         return .line(LineLocation(lineIndex: index, clamp: .inRange))
     }
+
+    /// The geometry-bearing companion to `lineAt(y:metrics:)`: returns the located
+    /// line's box (`LineGeometry`) plus the within-line `fractionInLine` and the
+    /// same clamp flag.
+    ///
+    /// Composes over `lineAt` — index, clamp, and the validation ladder come
+    /// straight from it (parity by construction) — then reads `offset(ofLine: i)`
+    /// and `offset(ofLine: i + 1)` to build the box. Adds only a constant number of
+    /// `offset(ofLine:)` probes over `lineAt`, so it never adds a log factor and its
+    /// per-provider cost class equals `lineAt`'s. O(1) core memory. `.empty` /
+    /// `.failure` pass straight through from `lineAt`.
+    public static func lineGeometryAt<Metrics: LineMetricsSource>(
+        y: Double,
+        metrics: Metrics
+    ) -> LineGeometryQuery {
+        switch lineAt(y: y, metrics: metrics) {
+        case let .failure(error):
+            return .failure(error)
+        case .empty:
+            return .empty
+        case let .line(location):
+            let top = metrics.offset(ofLine: location.lineIndex)
+            let bottom = metrics.offset(ofLine: location.lineIndex + 1)
+            let box = LineGeometry(lineIndex: location.lineIndex, y: top, height: bottom - top)
+            let fraction: Double
+            switch location.clamp {
+            case .clampedToTop:
+                fraction = 0.0
+            case .clampedToBottom:
+                fraction = 1.0
+            case .inRange:
+                fraction = (y - top) / box.height
+            }
+            return .geometry(LineGeometryLocation(geometry: box, fractionInLine: fraction, clamp: location.clamp))
+        }
+    }
 }

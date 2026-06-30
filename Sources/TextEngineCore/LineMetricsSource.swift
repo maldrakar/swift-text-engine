@@ -13,7 +13,8 @@ public protocol LineMetricsSource {
     /// chain). The core never queries outside `0...lineCount`.
     ///
     /// Stability precondition: `lineCount` and `offset(ofLine:)` must be stable
-    /// for one layout/query operation - a `compute`, a `lineAt`, and any
+    /// for one layout/query operation - a `compute`, a `lineAt`, a `lineGeometryAt`,
+    /// and any
     /// `VariableLineGeometryCursor` traversal derived from a range it produced -
     /// so the range, the located line, and the geometry come from one consistent
     /// snapshot.
