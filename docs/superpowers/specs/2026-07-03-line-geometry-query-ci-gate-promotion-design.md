@@ -32,7 +32,11 @@ a local-only benchmark gate:
 
 - `--line-geometry-query` benchmark mode (output `line_geometry_query`) over
   **five** scenarios: `uniform_1k` / `uniform_100k` / `uniform_1m` on the
-  O(1)-offset `UniformLineMetrics` provider, and `balanced_tree_100k` /
+  O(1)-offset `UniformLineMetrics` provider (its `offset(ofLine:)` is O(1), but its
+  located-index search still uses the generic O(log N) binary-search fallback —
+  `UniformLineMetrics` has no native `lineIndex` override — so the overall uniform
+  query is O(log N), not O(1), until a future closed-form override, Slice 31 review
+  Option D), and `balanced_tree_100k` /
   `balanced_tree_1m` on the mutable `BalancedTreeLineMetrics` provider (the
   realistic O(log N)-offset path, where each `offset(ofLine:)` probe is itself
   O(log N) and the located index uses the Slice 29 native descent);
@@ -74,8 +78,12 @@ the one-shot PR-head run is what produces the Linux budget-fit evidence.
 Like Slice 28, this is a **very low-risk** promotion. The line-geometry-query
 benchmark composes over `lineAt` (the line-query path just hardened in Slice 28)
 plus a constant two `offset(ofLine:)` probes, so its per-operation cost class is
-`lineAt`'s and its local headroom is comparably generous — **~1900×–5400×** (see
-the budget table below). The one-shot rollout does not lean on a thin margin, and
+`lineAt`'s and its local headroom is generous — **~1900×–5400×** (see the budget
+table below). That headroom is in fact *wider* than line-query's was at its Slice 28
+promotion (~325×–3000×), especially on the balanced-tree end: Slices 29/30 turned
+balanced-tree `lineAt` into a single native O(log N) descent, so the balanced-tree
+scenarios now run at ~133–191 ns (vs the ~860–1838 ns Slice 28 measured on the old
+O(log²N) generic path). The one-shot rollout does not lean on a thin margin, and
 Decision 3 (stop-and-retune on a failing hosted run) is the standing safety net.
 
 ### Current host CI shape (relevant excerpt)
@@ -98,8 +106,11 @@ The benchmark mode already carries executable-owned budgets
 (`Sources/ViewportBenchmarks/LineGeometryQueryBenchmark.swift`), deliberately
 identical to the `--line-query` budgets. Recorded Slice 31 local observation
 (macOS arm64); the Slice 31 review reran the gate, matched the deterministic
-per-scenario checksums byte-for-byte, and stayed passing (timing rows vary run to
-run and were not bit-identical):
+per-scenario checksums byte-for-byte, and stayed passing. The observed p95/p99
+columns below are **approximate and non-reproducible** — timing varies run to run and
+was not bit-identical; the deterministic paper-trail anchor is the per-scenario
+checksum set (below) plus the executable-printed `budget_p95_ns`/`budget_p99_ns`, not
+these timing rows:
 
 | Scenario | Observed p95 ns | Budget p95 ns | Headroom | Budget p99 ns |
 | --- | ---: | ---: | ---: | ---: |
@@ -109,9 +120,10 @@ run and were not bit-identical):
 | balanced_tree_100k  | ~133 | 300,000   | ~2,250× | 600,000   |
 | balanced_tree_1m    | ~191 | 600,000   | ~3,140× | 1,200,000 |
 
-Every scenario sits well over ~1,900× under budget locally — comparable to the
-line-query gate's headroom at its Slice 28 promotion, and over two orders of
-magnitude more headroom than the tightest gate the series has promoted (the bulk
+Every scenario sits well over ~1,900× under budget locally — *wider* than the
+line-query gate's headroom at its Slice 28 promotion (~325×–3000×; the balanced-tree
+end is now O(log N) native, not the O(log²N) Slice 28 measured), and over two orders
+of magnitude more headroom than the tightest gate the series has promoted (the bulk
 gate at ~6.7× in Slice 26). The deterministic
 per-scenario checksums recorded in the Slice 31 verification are `160641440000`,
 `267505512960`, `799841600000`, `223985600000`, `852321495040`.
@@ -232,7 +244,7 @@ Add the step directly as a blocking gate in one PR, rather than first landing a
 `continue-on-error` observation step and flipping it later. (User-selected
 rollout.)
 
-Rationale: the budgets span ~1,900×–5,400× macOS headroom — comparable to the
+Rationale: the budgets span ~1,900×–5,400× macOS headroom — *wider* than the
 line-query gate at its Slice 28 promotion and over two orders of magnitude above
 the tightest gate the series has promoted (the bulk gate at ~6.7×). The PR-head CI
 run executes the step on hosted Linux
@@ -275,9 +287,12 @@ the existing budgets, implementation must **stop** and update this design with t
 new hosted numbers, then re-derive Linux-appropriate budgets in
 `LineGeometryQueryBenchmark.swift`. It must **not** hide the failure with
 `continue-on-error`, a workflow-only threshold, or a silent budget widening. The
-two `balanced_tree` scenarios (the O(log N)-offset mutable-provider path, tightest
-at ~2,250×) are the ones to watch, though even they would have to regress by more
-than three orders of magnitude to breach budget.
+two `balanced_tree` scenarios are the ones to watch — not because they hold the
+least multiplicative headroom (that is `uniform_1k` at ~1,900×), but because they
+are the realistic O(log N)-offset path with the largest absolute latency
+(~133–191 ns vs uniform's ~16–22 ns), where a hosted-Linux constant-factor slowdown
+would surface first. Even so, the tighter balanced-tree scenario (~2,250×) would
+have to regress by more than three orders of magnitude to breach budget.
 
 ### Decision 4 — Keep the host job order
 
@@ -296,7 +311,12 @@ The line-geometry-query gate sits immediately after the line-query gate:
 11. PR-only realistic relative observation
 
 This keeps all seven blocking latency gates contiguous and fails before
-lower-priority diagnostics if the geometry-bearing query path regresses.
+lower-priority diagnostics if the geometry-bearing query path regresses. Placing it
+directly after the line-query gate also buys differential diagnosis: because
+`lineGeometryAt` composes over `lineAt`, a line-query **pass** with a
+line-geometry-query **fail** localizes the regression to the geometry delta — the two
+`offset(ofLine:)` probes, the box construction, and the fraction arithmetic — rather
+than to `lineAt` itself.
 
 ### Decision 5 — Do not change required context names
 
@@ -378,22 +398,31 @@ rg -n "Foundation" Sources/TextEngineCore
 
 Plus a **workflow-invariant assertion** that goes beyond a bare YAML parse —
 asserting the new step exists, invokes `--line-geometry-query --gate`, is not
-`continue-on-error`, and sits in the required order
-(line-query → line-geometry-query → memory-shape). For example:
+`continue-on-error`, carries the same `docs_only_pr` guard as its sibling gates
+(Decision 6), sits in the required order (line-query → line-geometry-query →
+memory-shape), and that the three required job context names are unchanged
+(Decision 5). For example:
 
 ```bash
 ruby -ryaml -e '
   wf = YAML.load_file(".github/workflows/swift-ci.yml")
-  steps = wf["jobs"]["host-tests-and-benchmark-gate"]["steps"]
+  jobs = wf["jobs"]
+  steps = jobs["host-tests-and-benchmark-gate"]["steps"]
   names = steps.map { |s| s["name"] }
   lgq = steps.find { |s| s["name"] == "Run line geometry query benchmark gate" }
+  lq  = steps.find { |s| s["name"] == "Run line query benchmark gate" }
   raise "missing line-geometry-query gate step" unless lgq
+  raise "missing line-query gate step" unless lq
   raise "gate not invoking --line-geometry-query --gate" unless lgq["run"].include?("--line-geometry-query --gate")
   raise "line-geometry-query gate must not be continue-on-error" if lgq["continue-on-error"]
+  raise "line-geometry-query gate must share its siblings docs-only guard" unless lgq["if"] == lq["if"]
   i_lq  = names.index("Run line query benchmark gate")
   i_lgq = names.index("Run line geometry query benchmark gate")
   i_mem = names.index("Run memory shape diagnostic")
   raise "bad gate ordering" unless i_lq && i_lgq && i_mem && i_lq < i_lgq && i_lgq < i_mem
+  required = ["Host tests and benchmark gate", "iOS cross-target compile", "WASM cross-target observation"]
+  actual = jobs.values.map { |j| j["name"] }
+  raise "required job context name(s) changed" unless required.all? { |n| actual.include?(n) }
   puts "workflow_assertions_ok"
 '
 ```
