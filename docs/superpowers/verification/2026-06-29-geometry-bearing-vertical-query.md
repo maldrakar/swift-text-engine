@@ -107,6 +107,79 @@ iOS device + simulator are blocking-green for both `TextEngineCore` and
 
 ## Hosted verification
 
-Pending — to be filled by the post-merge follow-up per the project's verification
-convention: record the PR-head hosted run ID (green at step level) and the
-post-merge `push` run ID anchoring proof in merged code.
+PR-head and post-merge hosted evidence, verified live via `gh` at the **step**
+level (per the project lesson that a green job can hide a dead
+`continue-on-error` step) on 2026-07-02. All three required Swift CI job contexts
+passed on the source-bearing PR head and again on merged code.
+
+- PR: [#59 — Slice 31: geometry-bearing vertical query](https://github.com/maldrakar/swift-text-engine/pull/59) (state `MERGED`)
+- Full-code PR head: `dff83f63bf34c3374bddad42b5c2324a86c95a89`
+- Swift CI `pull_request` run: `28473489678` (event `pull_request`, branch
+  `slice-31-geometry-bearing-vertical-query`, conclusion `success`)
+
+### Host tests and benchmark gate — job `84391993880` (`success`)
+
+Ran the full heavy path on the source-bearing PR (step `Complete docs-only PR`
+`skipped`, so the PR is correctly classified as **not** docs-only):
+
+```terminal
+Detect PR change scope                            -> success
+Complete docs-only PR                             -> skipped
+Run host tests                                    -> success
+Run synthetic benchmark gate                      -> success
+Run variable-height benchmark gate                -> success
+Run variable-height mutation benchmark gate       -> success
+Run structural mutation benchmark gate            -> success
+Run bulk structural mutation benchmark gate       -> success
+Run line query benchmark gate                     -> success
+Run memory shape diagnostic                       -> success
+Run RSS memory observation diagnostic             -> success
+Observe realistic provider relative performance   -> success
+```
+
+All six blocking latency gates ran and passed on hosted Linux. The new
+`--line-geometry-query` gate stays **local only** this slice (CI promotion
+deferred to Slice 32, mirroring line-query → Slice 28), so the hosted gate list
+is unchanged.
+
+### iOS cross-target compile — job `84391993901` (`success`)
+
+iOS device + simulator compile for `TextEngineCore` and
+`TextEngineReferenceProviders` (blocking) passed.
+
+### WASM cross-target observation — job `84391993891` (`success`)
+
+WASM + embedded WASM observation (non-blocking) passed.
+
+### Post-merge anchor
+
+PR #59 was merged to `main` by `maldrakar` at 2026-07-02T11:42:45Z as merge
+commit `f364b452603c809611e0657144b826b27e1f179c` (parents `56d4af2` +
+the verified PR head `dff83f6`). The merged-code push run is the authoritative
+evidence anchor for Slice 31, verified live via `gh` at the **step** level on
+2026-07-02.
+
+- Post-merge `push` run: `28587326869` (event `push`, branch `main`, head
+  `f364b45`, conclusion `success`)
+- All three required jobs `success`: Host tests and benchmark gate
+  (`84762068561`), iOS cross-target compile (`84762068516`), WASM cross-target
+  observation (`84762068490`)
+
+Host job `84762068561` ran the full heavy path on merged code (step
+`Complete docs-only PR` `skipped`; all six blocking latency gates ran; the
+PR-only realistic-provider observation step is correctly `skipped` on the `push`
+event):
+
+```terminal
+Complete docs-only PR                             -> skipped
+Run host tests                                    -> success
+Run synthetic benchmark gate                      -> success
+Run variable-height benchmark gate                -> success
+Run variable-height mutation benchmark gate       -> success
+Run structural mutation benchmark gate            -> success
+Run bulk structural mutation benchmark gate       -> success
+Run line query benchmark gate                     -> success
+Run memory shape diagnostic                       -> success
+Run RSS memory observation diagnostic             -> success
+Observe realistic provider relative performance   -> skipped
+```
