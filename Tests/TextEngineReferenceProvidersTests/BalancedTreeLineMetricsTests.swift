@@ -297,6 +297,45 @@ final class BalancedTreeLineMetricsTests: XCTestCase {
         }
     }
 
+    private func assertLineGeometryAtMatchesOracle(
+        _ tree: BalancedTreeLineMetrics,
+        _ array: [Double],
+        _ message: @autoclosure () -> String = "",
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let oracle = PrefixSumLineMetrics(heights: array)
+        var samples = sampledSearchOffsets(oracle)
+        let total = oracle.offset(ofLine: oracle.lineCount)
+        samples.append(-1.0)
+        samples.append(total)
+        samples.append(total + 100.0)
+        for y in samples {
+            XCTAssertEqual(
+                ViewportVirtualizer.lineGeometryAt(y: y, metrics: tree),
+                ViewportVirtualizer.lineGeometryAt(y: y, metrics: oracle),
+                "lineGeometryAt y=\(y) \(message())",
+                file: file, line: line
+            )
+        }
+    }
+
+    func testLineGeometryAtWithBalancedTreeMatchesPrefixSumOracle() {
+        var array = sampleHeights(1_000)
+        var tree = BalancedTreeLineMetrics(heights: array)
+        assertLineGeometryAtMatchesOracle(tree, array, "initial")
+
+        tree.setHeight(ofLine: 0, to: 40.0); array[0] = 40.0
+        assertLineGeometryAtMatchesOracle(tree, array, "after setHeight")
+
+        let inserted = [17.0, 29.0, 31.0]
+        tree.insertLines(at: 20, heights: inserted); array.insert(contentsOf: inserted, at: 20)
+        assertLineGeometryAtMatchesOracle(tree, array, "after insertLines")
+
+        tree.removeLines(at: 5, count: 4); array.removeSubrange(5..<9)
+        assertLineGeometryAtMatchesOracle(tree, array, "after removeLines")
+    }
+
     func testComputeOverBalancedTreeMatchesPrefixSumOracleAcrossScrollSweep() {
         let heights = sampleHeights(5_000)
         let tree = BalancedTreeLineMetrics(heights: heights)

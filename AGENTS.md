@@ -58,6 +58,11 @@ the same `LineMetricsSource`, O(1) core memory, using the shared
 `lineIndex(containingOffset:)` provider-native hook when available and the
 generic O(log N) binary-search fallback otherwise; out-of-range `y` clamps with
 a `LineLocation.clamp` flag.
+`ViewportVirtualizer.lineGeometryAt(y:metrics:)` is the geometry-bearing companion:
+it composes over `lineAt`, returning the located line's `LineGeometry` box (top y +
+height) plus the within-line `fractionInLine` and the same clamp flag, adding only a
+constant number of `offset(ofLine:)` probes (O(1) core memory), so its per-provider
+cost class equals `lineAt`'s.
 
 ## Package layout
 
@@ -84,6 +89,7 @@ swift run -c release ViewportBenchmarks -- --variable-height-mutation --gate   #
 swift run -c release ViewportBenchmarks -- --structural-mutation --gate   # structural insert/delete local gate
 swift run -c release ViewportBenchmarks -- --bulk-structural-mutation --gate   # bulk insert/delete-range local gate
 swift run -c release ViewportBenchmarks -- --line-query --gate   # y->line position-query local gate
+swift run -c release ViewportBenchmarks -- --line-geometry-query --gate   # y->line+box+fraction local gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --help            # all flags
@@ -95,12 +101,12 @@ swift run -c release ViewportBenchmarks -- --help            # all flags
 
 Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
 `--variable-height-mutation`, `--structural-mutation`,
-`--bulk-structural-mutation`, `--line-query`, `--memory-shape`,
-`--memory-observation`, `--gate`. Only one mode flag at a time. `--gate` is
-valid with the default pipeline, `--realistic-provider`, `--variable-height`,
-`--variable-height-mutation`, `--structural-mutation`,
-`--bulk-structural-mutation`, and `--line-query` modes; it is **rejected** with
-`--range-only`, `--memory-shape`, `--memory-observation`.
+`--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
+`--memory-shape`, `--memory-observation`, `--gate`. Only one mode flag at a time.
+`--gate` is valid with the default pipeline, `--realistic-provider`,
+`--variable-height`, `--variable-height-mutation`, `--structural-mutation`,
+`--bulk-structural-mutation`, `--line-query`, and `--line-geometry-query` modes; it
+is **rejected** with `--range-only`, `--memory-shape`, `--memory-observation`.
 
 Local WASM build (needs a matching Swift SDK installed):
 `swift build --swift-sdk <id> --target TextEngineCore` for both `wasm` and
