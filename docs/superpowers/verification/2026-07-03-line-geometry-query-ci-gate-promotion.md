@@ -2,12 +2,20 @@
 
 Date: 2026-07-03
 Branch: `slice-32-line-geometry-query-ci-gate-promotion`
-Local verification HEAD: `9ff696c`
+Local benchmark/test verification suite HEAD: `9ff696c`
+Branch-scope freshness refresh HEAD: `6102265`
 
 ## Change Scope
 
-`git diff --name-only main...HEAD` - only `.github/workflows/swift-ci.yml`,
-`AGENTS.md`, and `docs/**`. No benchmark or core Swift source changed.
+Branch-scope freshness was refreshed at `6102265` after committing this
+verification record. `git diff --name-only main...HEAD` lists only
+`.github/workflows/swift-ci.yml`, `AGENTS.md`, and `docs/**`. No benchmark or
+core Swift source changed.
+
+```text
+$ git rev-parse --short HEAD
+6102265
+```
 
 ```text
 $ git diff --name-only main...HEAD
@@ -15,6 +23,7 @@ $ git diff --name-only main...HEAD
 AGENTS.md
 docs/superpowers/plans/2026-07-03-line-geometry-query-ci-gate-promotion.md
 docs/superpowers/specs/2026-07-03-line-geometry-query-ci-gate-promotion-design.md
+docs/superpowers/verification/2026-07-03-line-geometry-query-ci-gate-promotion.md
 ```
 
 ```text
@@ -37,9 +46,10 @@ workflow_assertions_ok
 
 ## Line-Geometry-Query Gate (local)
 
-Five local gate rows passed. The deterministic checksums match the Slice 31
-record: `160641440000`, `267505512960`, `799841600000`, `223985600000`, and
-`852321495040`.
+The full local benchmark/test verification suite below was run at `9ff696c`,
+before committing this verification record. Five local gate rows passed. The
+deterministic checksums match the Slice 31 record: `160641440000`,
+`267505512960`, `799841600000`, `223985600000`, and `852321495040`.
 
 ```text
 $ swift run -c release ViewportBenchmarks -- --line-geometry-query --gate
