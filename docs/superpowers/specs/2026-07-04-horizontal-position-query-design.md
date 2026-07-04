@@ -68,7 +68,9 @@ Add a single public, stateless query to `TextEngineCore`:
 > inside the line or past an edge.
 
 Plus a new standalone metrics protocol, the result types, its closed-form oracle
-and unit tests, a `UniformColumnMetrics` reference provider, a `--column-query`
+and unit tests, a `UniformColumnMetrics` provider **in the core** (the oracle
+target, beside `UniformLineMetrics`) and a `PrefixSumColumnMetrics`
+variable/proportional provider in `TextEngineReferenceProviders`, a `--column-query`
 benchmark mode with a **local** `--gate`, and the slice paper trail. No rendering,
 no shaping, no `pointAt(x:y:)` composite yet, no wrap, no geometry-bearing
 horizontal result.
@@ -92,8 +94,15 @@ horizontal result.
   a product-built sweep of exactly-representable widths — the horizontal analog of
   the vertical uniform oracle, **not** a numerically-fragile raw
   `floor(x / columnWidth)`.
-- A `UniformColumnMetrics` reference provider in `TextEngineReferenceProviders`
-  (uniform in both dimensions; no per-line storage), mirroring `UniformLineMetrics`.
+- A `UniformColumnMetrics` provider **in `TextEngineCore`** (uniform advances; no
+  per-line storage), beside `UniformLineMetrics` in the core exactly as its vertical
+  mirror sits there, so the core equivalence-oracle test can drive it without a
+  reference-provider dependency (Decision 8).
+- A `PrefixSumColumnMetrics` variable/proportional provider in
+  `TextEngineReferenceProviders` (per-line prefix sums, provider-side storage),
+  mirroring `PrefixSumLineMetrics` — the realistic non-uniform-advance case, giving
+  the unit tests and the benchmark a real variable provider rather than only
+  hand-built doubles.
 - A `--column-query` benchmark mode + local `--gate` with macOS-calibrated budgets,
   following the established functional-slice rhythm.
 - Foundation-free, Embedded-compatible, zero-dependency; iOS/WASM cross-target
@@ -109,10 +118,17 @@ horizontal result.
   `columnGeometryAt` companion (the `lineGeometryAt` analog) is a future slice.
 - **No shaping / rasterization / glyph metrics.** Per-cell advances are supplied
   by the provider, exactly as line heights are. The core does inverse search only.
-- **No wrap / visual rows.** The unit stays the logical line's cells.
-- **No provider-native horizontal descent.** `UniformColumnMetrics` uses the
-  binary-search default (like `UniformLineMetrics`); an O(1) monospace override
-  and a variable/prefix-sum horizontal provider are deferred (the Slice 29 analog).
+- **No wrap / visual rows.** The unit stays the single (unwrapped) line's cells.
+- **No logical↔visual reordering (bidi) and no glyph clustering.** Cells are the
+  provider's already-resolved **visual-order** advance slots (see Decision 6);
+  mapping a bidi run's logical characters to visual cells, and merging zero-advance
+  glyphs (combining marks, ZWJ, ligature components) into their base cell, are the
+  provider's job, not the core's. `columnIndex` is therefore a **visual** cell index.
+- **No provider-native horizontal descent.** Both shipped providers
+  (`UniformColumnMetrics`, `PrefixSumColumnMetrics`) use the generic binary-search
+  default (like `Uniform`/`PrefixSum` `LineMetricsSource`); an O(1) monospace
+  override and a balanced-tree / mutable horizontal provider with a native O(log M)
+  descent are deferred (the Slice 29 analog).
 - **No `inLine` validation.** `inLine` is a documented precondition (a valid line
   for the source), not validated — the same posture the vertical primitives take
   toward their query domain. See Decision 5.
@@ -147,8 +163,14 @@ public protocol LineHorizontalMetricsSource {
     ///
     /// Contract precondition (mirror of `offset(ofLine:)`): for every `c` in
     /// `0..<columnCount(inLine: line)`, `columnOffset(_, column: c)` and
-    /// `columnOffset(_, column: c + 1)` are finite and strictly increasing. The
-    /// core never queries outside `0...columnCount(inLine: line)`.
+    /// `columnOffset(_, column: c + 1)` are finite and strictly increasing. Unlike
+    /// line heights (always positive), raw glyph advances can be **zero** (combining
+    /// marks, ZWJ, ligature components), so "strictly increasing" is a real
+    /// modelling constraint here, not a free one: a *cell* is a positive-advance,
+    /// caret-positionable unit in **visual (left-to-right) order**, and the provider
+    /// must fold zero-advance glyphs into their base cell to honour it. See
+    /// Decision 6 for the cell definition. The core never queries outside
+    /// `0...columnCount(inLine: line)`.
     ///
     /// Stability precondition: `columnCount(inLine:)` and `columnOffset(inLine:column:)`
     /// for a given line must be stable for one `columnAt` query, so the located
@@ -234,10 +256,15 @@ do — adding **two** axis-specific cases and reusing one axis-neutral case:
 - reuse the existing `case nonFiniteValue` for a non-finite `x` (already
   axis-neutral; `lineAt` uses it for non-finite `y`).
 
-`ViewportValidationError` is a non-frozen `Equatable` enum; appending cases is
-source-compatible for the library's own exhaustive switches (all in-repo).
-Extending the shared enum keeps the failure vocabulary single-sourced, matching how
-the vertical position queries reuse it rather than minting a parallel error type.
+**Migration note (parity with variable-height Decision 4).** Adding an enum case is
+a source break for any consumer doing an exhaustive `switch` over
+`ViewportValidationError` without a `default`. This package contains no such switch
+(the in-repo switches are updated here, and errors are otherwise only compared by
+value), so the addition is safe in-repo; the break is called out only for a future
+or external defaultless exhaustive switch, which must add the new cases or a
+`default`. Extending the shared enum — rather than minting a parallel error type —
+is a deliberate choice to keep the failure vocabulary single-sourced, matching how
+the vertical position queries reuse it.
 
 ### Decision 4 — Half-open boundary + clamp semantics (mirror of vertical Decision 4)
 
@@ -267,6 +294,11 @@ Notes:
   cell's half-open span), resolving to `count - 1`.
 - The explicit `width` non-finite / `<= 0` check is defensive parity with `lineAt`'s
   total-height check against a contract-violating provider.
+- On a **blank line** (`count == 0`) the `columnOffset(_, column: 0)` probe still
+  runs first and must return `0.0` per contract; only then does the `count == 0`
+  branch short-circuit to `.empty`. A blank line whose column-0 offset is non-zero
+  is `.invalidColumnMetrics`, not `.empty` — the probe precedes the empty
+  short-circuit exactly as on the vertical axis.
 
 ### Decision 5 — `inLine` is a precondition, not validated; validation order is parity with `lineAt`
 
@@ -285,15 +317,36 @@ queried outside `0...lineCount`, not defended at runtime). The standalone
 can nor should re-authorize the line index; the eventual `pointAt(x:y:)` always
 feeds `columnAt` a line already validated by `lineAt`.
 
-### Decision 6 — Cell model, sub-cell position deferred (mirror of vertical Decision 7)
+### Decision 6 — Cell model: caret-stop unit in visual order; sub-cell position deferred (mirror of vertical Decision 7)
 
-The result is `columnIndex` + `clamp` only — no cell `x`/width, no
-`fractionInColumn`, no caret left/right snapping. A caller wanting sub-cell position
-gets it from a future geometry-bearing companion (`columnGeometryAt`, the
-`lineGeometryAt` analog) — added as a **new method / result type**, never by
-appending a case to `ColumnQuery` (source-breaking for client switches over a
-non-frozen enum). Keeping the primitive minimal avoids widening the public type and
-an extra `columnOffset` query on the hot path for callers that only need the cell.
+**What a cell is.** A *cell* is one positive-advance, caret-positionable unit —
+grapheme-cluster / caret-stop granularity — occupying the half-open span
+`[columnOffset(c), columnOffset(c+1))`, laid out in **visual (left-to-right)
+order**. This definition is load-bearing for the whole primitive:
+
+- It justifies the strictly-increasing `columnOffset` contract (Decision 1):
+  positive advance *between caret stops* holds by construction, so the provider must
+  fold zero-advance glyphs (combining marks, ZWJ, ligature components) into their
+  base cell.
+- Visual order is what makes the binary search valid: `columnOffset` is monotone in
+  the cell index only if cells run left-to-right, so for a bidi run the provider
+  supplies cells already in visual order and `columnIndex` is a **visual** index
+  (logical↔visual mapping is out of core scope — see Non-Goals).
+
+**Terminology.** "Column" and "cell" are used synonymously in this slice; the API
+keeps the `column*` names to pair with the vertical `line*` axis, while "cell" is
+the precise concept — a variable-advance visual slot, **not** necessarily a
+monospace grid column. `columnCount` / `columnOffset` / `columnIndex` / `columnAt`
+all mean cells in this sense.
+
+**Sub-cell position deferred.** The result is `columnIndex` + `clamp` only — no cell
+`x`/width, no `fractionInColumn`, no caret left/right snapping. A caller wanting
+sub-cell position gets it from a future geometry-bearing companion
+(`columnGeometryAt`, the `lineGeometryAt` analog) — added as a **new method / result
+type**, never by appending a case to `ColumnQuery` (source-breaking for client
+switches over a non-frozen enum). Keeping the primitive minimal avoids widening the
+public type and an extra `columnOffset` query on the hot path for callers that only
+need the cell.
 
 ### Decision 7 — Local gate now, CI promotion deferred (established rhythm)
 
@@ -311,6 +364,29 @@ is a **denylist** (`--gate` rejected only with `.rangeOnly` / `.memoryShape` /
 `.columnQuery` mode needs no edit there. `AGENTS.md` gains the new local command and
 the `--column-query` flag; its CI section is unchanged because the workflow is
 unchanged.
+
+### Decision 8 — Provider placement: uniform in the core, variable in reference providers
+
+`UniformColumnMetrics` lives in **`TextEngineCore`**, beside `UniformLineMetrics`
+(`LineMetricsSource.swift`), **not** in `TextEngineReferenceProviders`. This is the
+faithful mirror: `UniformLineMetrics` is itself a core type, placed there precisely
+because it is the equivalence-oracle target and the core test target imports only
+`TextEngineCore` — variable-height Decision 4 says as much ("both a convenience and
+the equivalence oracle"). The `ColumnAt*` oracle lives in `TextEngineCoreTests`,
+which depends only on `TextEngineCore` (`Package.swift`), so the oracle's uniform
+provider must be a core type; otherwise the plan either fails to compile or silently
+grows `TextEngineCoreTests`'s dependency on the reference-provider product. Keeping
+it in the core avoids both.
+
+`PrefixSumColumnMetrics` — the variable/proportional provider — lives in
+`TextEngineReferenceProviders`, mirroring `PrefixSumLineMetrics`. Proportional
+advance (not a monospace grid) is the *common* horizontal case, so a variable
+reference provider is what makes the containing-cell search meaningful on unequal
+spans and gives the benchmark a realistic scenario (Benchmark Mode). It stores
+per-line prefix sums — provider-side storage outside the core, exactly like
+`PrefixSumLineMetrics`, and therefore outside the core-memory invariant. Its
+`columnAt` coverage lives in `TextEngineReferenceProvidersTests` (which imports both
+products), never in the core test target (Testing Strategy).
 
 ## Component Design
 
@@ -387,12 +463,15 @@ existing `LineQuery` / `LineLocation`, so the public query vocabulary stays in o
 file. Two cases (`negativeColumnCount`, `invalidColumnMetrics`) added to
 `ViewportValidationError` (Decision 3).
 
-### New file: `Sources/TextEngineReferenceProviders/UniformColumnMetrics.swift`
+### `Sources/TextEngineCore/LineHorizontalMetricsSource.swift` (with the protocol): `UniformColumnMetrics`
 
-The faithful mirror of `UniformLineMetrics` — a uniform grid, O(1) metric, **no
-per-line storage** (so it cannot violate the core-memory invariant), relying on the
+The faithful mirror of `UniformLineMetrics` — which likewise lives in the core,
+inside `LineMetricsSource.swift`. A uniform grid, O(1) metric, **no per-line
+storage** (so it cannot violate the core-memory invariant), relying on the
 binary-search default for the inverse (no `columnIndex` override, exactly as
-`UniformLineMetrics` provides no `lineIndex` override):
+`UniformLineMetrics` provides no `lineIndex` override). Placed in the core so the
+`ColumnAt*` equivalence oracle in `TextEngineCoreTests` can drive it without a
+reference-provider dependency (Decision 8):
 
 ```swift
 public struct UniformColumnMetrics: LineHorizontalMetricsSource {
@@ -411,6 +490,42 @@ public struct UniformColumnMetrics: LineHorizontalMetricsSource {
 }
 ```
 
+### New file: `Sources/TextEngineReferenceProviders/PrefixSumColumnMetrics.swift`
+
+The variable/proportional provider, the faithful mirror of `PrefixSumLineMetrics`:
+per-line cumulative offsets precomputed as prefix-sum arrays. `columnOffset` is
+O(1); provider-side per-line storage sits outside the core-memory invariant
+(Decision 8). It relies on the binary-search default for the inverse (no
+`columnIndex` override — a native descent is a future slice). This is the realistic
+non-uniform-advance case that exercises the containing-cell search on unequal spans:
+
+```swift
+public struct PrefixSumColumnMetrics: LineHorizontalMetricsSource {
+    /// One prefix-sum array per line: `prefix[line][c]` is the left offset of cell
+    /// `c`, with `prefix[line][0] == 0` and `prefix[line].count == cells + 1`.
+    public let prefix: [[Double]]
+
+    /// `advancesPerLine[line]` is that line's per-cell advances (widths).
+    public init(advancesPerLine: [[Double]]) {
+        prefix = advancesPerLine.map { advances in
+            var sums: [Double] = [0.0]
+            sums.reserveCapacity(advances.count + 1)
+            var running = 0.0
+            for advance in advances {
+                running += advance
+                sums.append(running)
+            }
+            return sums
+        }
+    }
+
+    public func columnCount(inLine line: Int) -> Int { prefix[line].count - 1 }
+    public func columnOffset(inLine line: Int, column: Int) -> Double {
+        prefix[line][column]
+    }
+}
+```
+
 ### No change to the vertical axis
 
 `LineMetricsSource`, `PositionQuery.swift` (`lineAt`), `VariableLineGeometryCursor`,
@@ -421,7 +536,14 @@ refactor of an existing gate-covered path — a strictly additive slice.
 
 ## Testing Strategy
 
-XCTest only, in `Tests/TextEngineCoreTests`, TDD failing-first.
+XCTest only, TDD failing-first. The core `ColumnAt*` tests (oracle, failures, clamp,
+boundary, query-count) live in `Tests/TextEngineCoreTests` and use only core types
+(`UniformColumnMetrics` + hand-built sources), so the core test target keeps its
+`TextEngineCore`-only dependency (`Package.swift`, Decision 8). The one test that
+drives the shipped `PrefixSumColumnMetrics` through `columnAt` lives in
+`Tests/TextEngineReferenceProvidersTests` (which already imports both products),
+exactly as the vertical reference providers are tested there — never by widening
+`TextEngineCoreTests`'s dependencies.
 
 ### Closed-form equivalence oracle (load-bearing)
 
@@ -464,9 +586,13 @@ the search and the expected index agree exactly, and the boundary case
   `clampedToRight` at last cell; `x == 0` → `inRange` at cell 0; `x == width` →
   `clampedToRight`.
 - **Exact-boundary resolution**: `x == columnOffset(c)` → cell `c` (`inRange`).
-- **Non-uniform metrics**: a hand-built source with varied advances (e.g.
+- **Non-uniform metrics** (core, hand-built source): varied advances (e.g.
   `[10, 30, 5, 50]` for a line) — verify each boundary and mid-span `x` maps to the
-  correct cell, independent of the uniform oracle.
+  correct cell, independent of the uniform oracle. The shipped
+  `PrefixSumColumnMetrics` is exercised by a companion test in
+  `TextEngineReferenceProvidersTests` (same advance vectors), so the real variable
+  provider is covered without pulling a reference-provider dependency into the core
+  test target.
 - **Single-cell line** (`columnCount == 1`): every in-range `x` → cell 0 `inRange`;
   `x < 0` / `x >= width` → the clamp flags.
 - **Per-line addressing**: a hand-built source whose lines have *different* advance
@@ -488,8 +614,21 @@ count per path — not a wall-clock measurement:
 | **non-finite `x`** | exactly `0` — returns before any `columnOffset` probe |
 
 Also assert the in-range path routes through `columnIndex(containingOffset:inLine:)`
-(a counting override that records it was called), so a future provider-native
-override is guaranteed to be reachable.
+using an **ordered event log**, not a boolean "was it called" — matching the vertical
+`LineAtQueryCountTests` (`Tests/TextEngineCoreTests/LineAtQueryCountTests.swift`,
+which asserts `events == [.offset(0), .offset(4), .native(31.0)]`). A
+`CountingColumnMetrics` records each probe as `.offset(line, column)` and each hook
+call as `.native(line, x)`, and the tests assert:
+
+- **in-range**: `events == [.offset(line, 0), .offset(line, count), .native(line, x)]`
+  — the two validation probes in order, then exactly one native dispatch, with the
+  correct `inLine` threaded through every event;
+- **blank / clamp / non-finite**: **no** `.native(...)` event at all (blank ends at
+  `[.offset(line, 0)]`; clamp at `[.offset(line, 0), .offset(line, count)]`;
+  non-finite at `[]`).
+
+This proves both the exact dispatch order and that a future provider-native override
+is reachable only on the in-range path.
 
 ### No behavior-preservation burden
 
@@ -509,14 +648,17 @@ New file `Sources/ViewportBenchmarks/ColumnQueryBenchmark.swift`, modeled on
   `.columnQuery` arm wherever `.lineQuery` is matched
   (`SyntheticBenchmarks.swift:126`, `BenchmarkProgram.swift:16`).
 - **Scenarios**: `UniformColumnMetrics` at increasing `columnsPerLine` — proposed
-  `uniform_1k`, `uniform_100k`, `uniform_1m` cells — each with `p95`/`p99` budgets,
-  purely as a **binary-search-depth / log-scaling probe** (real lines are short;
-  large cell counts exist only to exercise search depth). Because
-  `UniformColumnMetrics.columnOffset` is O(1), the generic binary search over it is
-  O(log M) wall-clock; there is **no** balanced-tree horizontal provider yet, so —
-  unlike `--line-query`, which needed a `balanced_tree` scenario to catch the
-  O(log²N) path — this suite is uniform-only by construction, and that limitation is
-  recorded (Risks And Gaps).
+  `uniform_1k`, `uniform_100k`, `uniform_1m` cells — **plus** a
+  `PrefixSumColumnMetrics` variable-advance scenario at matching sizes (proposed
+  `prefixsum_100k`, `prefixsum_1m`, built from deterministic varied advances), each
+  with `p95`/`p99` budgets. Large cell counts exist only to exercise search depth
+  (real lines are short); the prefix-sum scenarios add the realistic proportional
+  case so the gate covers non-uniform spans, not only the uniform grid. Both
+  providers answer `columnOffset` in O(1), so the generic binary search over either
+  is O(log M) wall-clock. There is still **no** balanced-tree / mutable horizontal
+  provider whose own `columnOffset` is O(log M), so — unlike `--line-query`, which
+  needed a `balanced_tree` scenario to catch the O(log²N) path — this suite does not
+  yet exercise an O(log²M) provider; that remaining gap is recorded (Risks And Gaps).
 - **Workload**: per operation, derive a deterministic `x` spanning in-range and
   out-of-range values (reusing `deterministicScrollOffset` / a deterministic
   fraction of the line width, with a slice of samples pushed below `0` and at/above
@@ -558,7 +700,8 @@ Recorded in `docs/superpowers/verification/2026-07-04-horizontal-position-query.
   `Sources/TextEngineReferenceProviders` → empty (exit 1).
 - `./.github/scripts/cross-target-compile.sh --self-test`, then the iOS (blocking)
   and WASM (observational) cross-target paths for both `TextEngineCore` and
-  `TextEngineReferenceProviders` (the new `UniformColumnMetrics` must cross-compile).
+  `TextEngineReferenceProviders` (the new `UniformColumnMetrics` in the core and
+  `PrefixSumColumnMetrics` in the reference providers must both cross-compile).
 - Hosted PR run + post-merge push run IDs, verified at **step level**, recorded in
   the post-merge follow-up (per the standing stale-on-write lesson: record the
   PR-head proof against the stable final head in the post-merge doc, never against a
@@ -579,20 +722,38 @@ Recorded in `docs/superpowers/verification/2026-07-04-horizontal-position-query.
 4. The query-count tests pass with the exact per-path `columnOffset` counts in the
    Testing Strategy table (in-range `<= 2 + (ceilLog2(count) + 1)` and `< 100`;
    blank `= 1`; clamp `= 2`; non-finite `x` `= 0`), and the in-range path is proven
-   to dispatch through `columnIndex(containingOffset:inLine:)`.
+   to dispatch through `columnIndex(containingOffset:inLine:)` via an **ordered event
+   log** (`[.offset(line, 0), .offset(line, count), .native(line, x)]`), with **no**
+   `.native` event on the blank / clamp / non-finite paths.
 5. The slice is strictly additive: the entire existing suite passes unchanged in
    count and result, and all seven existing gates pass with identical checksums.
-6. `--column-query` benchmark runs; `--column-query --gate` enforces budgets and is
-   rejected only where the other gateable modes are (never — it joins the gateable
-   set); `--gate` stays rejected with
+6. `--column-query` benchmark runs (uniform **and** prefix-sum scenarios);
+   `--column-query --gate` enforces budgets and joins the gateable set (never
+   rejected), while `--gate` stays rejected with
    `--range-only`/`--memory-shape`/`--memory-observation`.
-7. `UniformColumnMetrics` conforms to `LineHorizontalMetricsSource`, stores no
-   per-line data, and cross-compiles for iOS (blocking) and WASM (observational).
+7. `UniformColumnMetrics` (in `TextEngineCore`, no per-line storage) and
+   `PrefixSumColumnMetrics` (in `TextEngineReferenceProviders`, per-line prefix sums)
+   both conform to `LineHorizontalMetricsSource` and cross-compile for iOS (blocking)
+   and WASM (observational).
 8. Foundation-free scans empty; `--memory-shape` invariant `pass`.
 9. Full paper trail (spec, plan, verification, post-slice review) on a
    `slice-33-horizontal-position-query` branch; one PR; conventional commits.
 
 ## Risks And Gaps
+
+### The strictly-increasing contract assumes provider-side cell resolution
+
+Unlike line heights (always positive), raw glyph advances can be zero (combining
+marks, ZWJ, ligature components) and, in a bidi run, logical order is not visual
+order. The `columnOffset` contract (strictly increasing, visual order) therefore
+pushes two real responsibilities onto the provider: fold zero-advance glyphs into
+their base cell, and present cells in visual (left-to-right) order (Decision 6). A
+provider that feeds raw per-glyph advances or logical-order cells violates the
+contract, and the core cannot detect it (it never scans all offsets — Decision 5).
+This is the horizontal analog of the vertical "contract-trusting" posture, but a
+*stronger* ask than the vertical axis makes, so it is called out explicitly rather
+than left implicit. `columnIndex` is a visual cell index; a consumer needing logical
+character positions must apply the provider's own visual↔logical map.
 
 ### Result carries no geometry (deferred richness)
 
@@ -604,15 +765,18 @@ adds the richness **as a new method/result type**, never by appending a case to
 `ColumnQuery` (source-breaking for client switches over a non-frozen enum). Chosen
 now for minimal surface (Decision 6).
 
-### Benchmark is uniform-only (no O(log²N) horizontal path exists yet)
+### Benchmark covers uniform + proportional, but no O(log²M) horizontal path exists yet
 
-`--line-query` needed a `balanced_tree` scenario because a mutable tree provider's
-`offset(ofLine:)` is itself O(log N), making the generic search O(log²N). There is
-**no** balanced-tree horizontal provider in this slice, so `--column-query` is
-uniform-only and measures only the O(log M) baseline. When a
-variable/tree-structured horizontal provider is added (Future Slices), the benchmark
-must gain a matching scenario before it can claim to cover that provider's real hot
-path — the same lesson the vertical benchmark encodes.
+This slice ships both a uniform (`UniformColumnMetrics`) and a variable/proportional
+(`PrefixSumColumnMetrics`) provider, and the benchmark exercises both — so it covers
+the realistic non-uniform-advance case, not only a monospace grid. What it still
+cannot cover is an O(log²M) path: `--line-query` needed a `balanced_tree` scenario
+because a mutable tree provider's `offset(ofLine:)` is itself O(log N), making the
+generic search O(log²N). Both horizontal providers here answer `columnOffset` in
+O(1), so the suite measures only the O(log M) baseline. When a balanced-tree /
+mutable horizontal provider is added (Future Slices), the benchmark must gain a
+matching scenario before it can claim to cover that provider's real hot path — the
+same lesson the vertical benchmark encodes.
 
 ### `inLine` is trusted, not validated
 
@@ -650,8 +814,10 @@ provider mid-line. Consistent with the existing vertical path's contract posture
 - **Geometry-bearing `columnGeometryAt(x:inLine:)`**: the cell's box +
   `fractionInColumn` + clamp, the horizontal `lineGeometryAt` analog, enabling caret
   left/right snapping. New method/result type (see Risks).
-- **Provider-native horizontal descent + variable horizontal provider**: an O(1)
-  monospace `columnIndex` override and a variable/prefix-sum horizontal provider
-  (the Slice 29 analog for the horizontal axis), with a matching benchmark scenario.
+- **Provider-native horizontal descent + mutable horizontal provider**: an O(1)
+  monospace `columnIndex` override and a balanced-tree / mutable horizontal provider
+  with a native O(log M) descent (the Slice 29 analog for the horizontal axis; the
+  variable/prefix-sum provider itself ships in this slice), plus a matching
+  balanced-tree benchmark scenario to catch the O(log²M) path.
 - **Wrap-aware visual rows** remain the larger future capability flagged by the
   Slice 32 review; needs its own brainstorm, and interacts with both axes.
