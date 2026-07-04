@@ -63,6 +63,18 @@ it composes over `lineAt`, returning the located line's `LineGeometry` box (top 
 height) plus the within-line `fractionInLine` and the same clamp flag, adding only a
 constant number of `offset(ofLine:)` probes (O(1) core memory), so its per-provider
 cost class equals `lineAt`'s.
+`ViewportVirtualizer.columnAt(x:inLine:metrics:)` opens the horizontal axis: the
+within-line inverse query — x -> cell — over a **separate**
+`LineHorizontalMetricsSource` (provider supplies `columnCount(inLine:)` and the
+cumulative `columnOffset(inLine:column:)`), O(log M) queries / O(1) core memory via
+the shared `columnIndex(containingOffset:inLine:)` hook (binary-search default,
+provider-overridable), cell model with half-open spans in **visual order**;
+out-of-range `x` clamps with a `ColumnLocation.clamp`
+(`.clampedToLeft`/`.clampedToRight`) flag and a blank line is `.empty`. `inLine` is a
+precondition (the source carries no `lineCount`). Its two providers are
+`UniformColumnMetrics` (in the core, beside `UniformLineMetrics`) and
+`PrefixSumColumnMetrics` (reference providers); `--column-query` is its **local**
+(not-yet-CI) gate.
 
 ## Package layout
 
@@ -90,6 +102,7 @@ swift run -c release ViewportBenchmarks -- --structural-mutation --gate   # stru
 swift run -c release ViewportBenchmarks -- --bulk-structural-mutation --gate   # bulk insert/delete-range local gate
 swift run -c release ViewportBenchmarks -- --line-query --gate   # y->line position-query local gate
 swift run -c release ViewportBenchmarks -- --line-geometry-query --gate   # y->line+box+fraction local gate
+swift run -c release ViewportBenchmarks -- --column-query --gate   # x->cell within-line position-query local gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --help            # all flags
@@ -102,11 +115,12 @@ swift run -c release ViewportBenchmarks -- --help            # all flags
 Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
 `--variable-height-mutation`, `--structural-mutation`,
 `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
-`--memory-shape`, `--memory-observation`, `--gate`. Only one mode flag at a time.
-`--gate` is valid with the default pipeline, `--realistic-provider`,
+`--column-query`, `--memory-shape`, `--memory-observation`, `--gate`. Only one mode
+flag at a time. `--gate` is valid with the default pipeline, `--realistic-provider`,
 `--variable-height`, `--variable-height-mutation`, `--structural-mutation`,
-`--bulk-structural-mutation`, `--line-query`, and `--line-geometry-query` modes; it
-is **rejected** with `--range-only`, `--memory-shape`, `--memory-observation`.
+`--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`, and
+`--column-query` modes; it is **rejected** with `--range-only`, `--memory-shape`,
+`--memory-observation`.
 
 Local WASM build (needs a matching Swift SDK installed):
 `swift build --swift-sdk <id> --target TextEngineCore` for both `wasm` and

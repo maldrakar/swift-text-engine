@@ -71,6 +71,8 @@ public enum ViewportValidationError: Equatable {
     case negativeViewportHeight
     case negativeOverscan
     case invalidLineMetrics
+    case negativeColumnCount
+    case invalidColumnMetrics
 }
 
 public enum ViewportComputation: Equatable {
@@ -139,5 +141,27 @@ public struct LineGeometryLocation: Equatable {
         self.geometry = geometry
         self.fractionInLine = fractionInLine
         self.clamp = clamp
+    }
+}
+
+public enum ColumnQuery: Equatable {
+    case column(ColumnLocation)           // a real cell was located
+    case empty                            // blank line: columnCount(inLine:) == 0
+    case failure(ViewportValidationError) // invalid input / metrics
+}
+
+public struct ColumnLocation: Equatable {
+    public let columnIndex: Int
+    public let clamp: Clamp
+
+    public init(columnIndex: Int, clamp: Clamp) {
+        self.columnIndex = columnIndex
+        self.clamp = clamp
+    }
+
+    public enum Clamp: Equatable {
+        case inRange          // x was inside [0, lineWidth)
+        case clampedToLeft    // x < 0;          resolved to cell 0
+        case clampedToRight   // x >= lineWidth;  resolved to last cell
     }
 }
