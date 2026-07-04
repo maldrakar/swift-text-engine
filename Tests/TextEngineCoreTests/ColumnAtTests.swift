@@ -89,6 +89,18 @@ final class ColumnAtTests: XCTestCase {
         )
     }
 
+    // A blank line (columnCount == 0) whose columnOffset(_, column: 0) != 0 must
+    // fail with .invalidColumnMetrics, NOT short-circuit to .empty — this pins the
+    // "probe before empty short-circuit" ladder order (the "Do not reorder"
+    // invariant in HorizontalPositionQuery.swift).
+    func testInvalidFirstOffsetOnBlankLineFailsBeforeEmpty() {
+        let metrics = ArrayColumnMetrics(offsetsPerLine: [[5.0]]) // columnCount 0, columnOffset(_,0) == 5
+        XCTAssertEqual(
+            ViewportVirtualizer.columnAt(x: 0.0, inLine: 0, metrics: metrics),
+            .failure(.invalidColumnMetrics)
+        )
+    }
+
     func testZeroWidthFails() {
         let metrics = ArrayColumnMetrics(offsetsPerLine: [[0.0, 0.0]]) // width 0
         XCTAssertEqual(
