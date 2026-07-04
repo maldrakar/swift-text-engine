@@ -39,6 +39,15 @@ verification doc) plus 28 new tests added across Slice 33's tasks:
 `ColumnAtQueryCountTests`, and `PrefixSumColumnMetricsTests`. The "0 tests in 0
 suites" line is the expected empty Swift Testing harness, not a failure.
 
+**Post-final-review addendum:** after the whole-branch review, one additional
+test — `ColumnAtTests.testInvalidFirstOffsetOnBlankLineFailsBeforeEmpty` (commit
+`f5cf3aa`) — was added to pin the "probe before empty short-circuit" ladder
+ordering invariant (a blank line with a non-zero first offset must fail with
+`.invalidColumnMetrics`, not short-circuit to `.empty`). This brings the branch
+total to **189** tests, 0 failures. The transcript above reflects the 188-test
+state at commit `cd08bb3`; the post-merge verification will re-run against the
+final head and record the 189 count.
+
 Command:
 
 ```bash
