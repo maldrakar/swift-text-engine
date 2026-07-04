@@ -6,12 +6,63 @@ Local verification HEAD: `a8b1028f26ba862bd298a61e873bc9fd27122023` (`a8b1028`)
 
 ## Hosted Proof
 
-Pending. Per the project's standing stale-on-write lesson, hosted proof (PR-head
-run and post-merge push run) is recorded in the post-merge follow-up against the
-stable final head, not against a pre-final commit.
+Recorded in the post-merge follow-up against the stable final head, per the
+project's standing stale-on-write lesson (a verification doc committed before the
+PR's final head would otherwise cite a run ID that doesn't correspond to the merged
+code).
 
-- PR-head run ID: Pending
-- Post-merge push run ID: Pending
+- **PR #65** (`slice-33-horizontal-position-query` → `main`): merged
+  2026-07-04T19:12:55Z by `maldrakar` as merge commit
+  `4e35091da5f7d6c79f6306ec7e27eb4f7d9d6a06` (`4e35091`).
+- **Merge parentage** (`git rev-list --parents -n 1 4e35091`):
+  `4e35091 ca34ac5 c234ce0` — parent 1 is the prior `main` (Slice 32 post-slice
+  review merge `ca34ac5`), parent 2 is the verified PR head `c234ce0`, so the proof
+  below anchors the actually-merged head.
+- **PR-head run ID: `28713959866`** (head `c234ce0`, event `pull_request`).
+- **Post-merge push run ID: `28716790653`** (merge commit `4e35091`, event `push`,
+  branch `main`) — the merged-code evidence anchor.
+
+Both runs verified live via `gh api`, at **step level** (not just the job
+conclusion), per the project's "a green job can hide a dead `continue-on-error`
+step" lesson. All three required job contexts succeeded on both runs.
+
+### PR-head run `28713959866` (head `c234ce0`, `pull_request`)
+
+Conclusion `success`; all three required jobs `success`:
+
+- **Host tests and benchmark gate** (job `85152022353`): step 5 `Complete docs-only
+  PR` = `skipped` (correctly **not** docs-only — the PR changes Swift source), step
+  7 `Run host tests` = `success` (the 189-test suite), steps 8–14 the seven blocking
+  latency gates all `success`, step 15 `Run memory shape diagnostic` = `success`,
+  step 16 RSS observation = `success`, and step 17 `Observe realistic provider
+  relative performance` = `success` (it runs on the PR event).
+- **iOS cross-target compile** (job `85152022337`): `success` (step 6 `Compile
+  cross-target packages for iOS`).
+- **WASM cross-target observation** (job `85152022341`): `success` (step 7 `Observe
+  cross-target packages for WASM`).
+
+### Post-merge push run `28716790653` (merge commit `4e35091`, `push`, `main`)
+
+Conclusion `success`; all three required jobs `success`:
+
+- **Host tests and benchmark gate** (job `85159509822`): step 5 `Complete docs-only
+  PR` = `skipped`, step 7 `Run host tests` = `success`, steps 8–14 the seven
+  blocking latency gates all `success`, step 15 memory-shape = `success`, step 16
+  RSS observation = `success`, and step 17 realistic-provider observation =
+  `skipped` (correctly — it is the PR-only `continue-on-error` observation, skipped
+  on the `push` event). This is the merged-code evidence anchor: the host tests and
+  all seven blocking gates ran and passed on the actually-merged code.
+- **iOS cross-target compile** (job `85159509827`): `success`.
+- **WASM cross-target observation** (job `85159509804`): `success`.
+
+Note: the Host job's blocking gate steps are the **seven** pre-existing gates
+(synthetic, variable-height, variable-height mutation, structural mutation, bulk
+structural mutation, line-query, line-geometry-query). The new `--column-query
+--gate` is intentionally **not** a hosted step this slice (local-only, Decision 7);
+the workflow was not changed, so no host-job step exercises it — CI promotion is the
+recommended follow-up slice. Correctness of `columnAt` is nonetheless enforced
+hosted through `Run host tests` (the `ColumnAt*` suite is part of the 189-test
+run).
 
 ## Host Tests And Release Build
 
