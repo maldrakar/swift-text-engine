@@ -3,18 +3,19 @@
 Date: 2026-07-03
 Branch: `slice-32-line-geometry-query-ci-gate-promotion`
 Local benchmark/test verification suite HEAD: `9ff696c`
-Branch-scope freshness refresh HEAD: `6102265`
+Final pre-merge branch HEAD (scope evidence): `6942ea4`
 
 ## Change Scope
 
-Branch-scope freshness was refreshed at `6102265` after committing this
-verification record. `git diff --name-only main...HEAD` lists only
-`.github/workflows/swift-ci.yml`, `AGENTS.md`, and `docs/**`. No benchmark or
-core Swift source changed.
+This verification record was first committed at `6102265`; the branch-scope
+evidence below was then refreshed in the follow-up commit `6942ea4`, the final
+pre-merge tip of `slice-32-line-geometry-query-ci-gate-promotion`. `git diff
+--name-only main...HEAD` lists only `.github/workflows/swift-ci.yml`,
+`AGENTS.md`, and `docs/**`. No benchmark or core Swift source changed.
 
 ```text
 $ git rev-parse --short HEAD
-6102265
+6942ea4
 ```
 
 ```text
@@ -154,5 +155,75 @@ core exit: 1
 
 ## Hosted Proof
 
-Pending - recorded in the post-merge follow-up (Task 4) against the final stable
-PR-head SHA and the merge commit, to avoid a stale-on-write hosted record.
+Recorded in this post-merge follow-up (branch
+`slice-32-post-merge-verification`) against the final stable PR-head SHA and the
+merge commit. Both runs were verified at the **step** level (not just the job
+conclusion), per the project's "a green job can hide a dead `continue-on-error`
+step" lesson.
+
+PR #62 (*"Slice 32: promote line-geometry-query benchmark to a blocking hosted
+gate"*), head `6942ea4`, merged to `main` as `86cd14a`
+(`Merge pull request #62 …`) at 2026-07-04T07:21:09Z.
+
+### PR-head run `28646126162` (head `6942ea4`, event `pull_request`)
+
+Conclusion `success`; all three required jobs `success`:
+
+```text
+84953008029 success Host tests and benchmark gate
+84953008041 success iOS cross-target compile
+84953008021 success WASM cross-target observation
+```
+
+Host job `84953008029` ran the full heavy path — `Complete docs-only PR`
+`skipped` (correctly **not** docs-only; the PR changes workflow YAML), and the
+new `Run line geometry query benchmark gate` step ran (**not** skipped, **not**
+`continue-on-error`) and concluded `success`, positioned line-query →
+line-geometry-query → memory-shape. All seven blocking latency gates `success`.
+
+Hosted Linux x86_64 `line_geometry_query` rows (the Linux budget-fit evidence) —
+five scenarios, all `gate=pass`, checksums byte-identical to the local record:
+
+```text
+mode=line_geometry_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=31 p99_ns=62 failures=0 budget_p95_ns=30000 budget_p99_ns=60000 gate=pass checksum=160641440000
+mode=line_geometry_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=41 p99_ns=74 failures=0 budget_p95_ns=60000 budget_p99_ns=120000 gate=pass checksum=267505512960
+mode=line_geometry_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=47 p99_ns=79 failures=0 budget_p95_ns=120000 budget_p99_ns=240000 gate=pass checksum=799841600000
+mode=line_geometry_query provider=balanced_tree scenario=balanced_tree_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=368 p99_ns=400 failures=0 budget_p95_ns=300000 budget_p99_ns=600000 gate=pass checksum=223985600000
+mode=line_geometry_query provider=balanced_tree scenario=balanced_tree_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=424 p99_ns=458 failures=0 budget_p95_ns=600000 budget_p99_ns=1200000 gate=pass checksum=852321495040
+```
+
+Every scenario fits budget with wide headroom (tightest: `balanced_tree_100k`
+p95=368 ns vs 300,000 ns budget, ~815×). Hosted Linux is slower than local macOS
+arm64 as expected, well within the ~1,900×–5,400× local headroom.
+
+### Post-merge push run `28698965663` (merge commit `86cd14a`, event `push`)
+
+The merged-code evidence anchor. Conclusion `success`; all three required jobs
+`success`:
+
+```text
+85113612405 success Host tests and benchmark gate
+85113612417 success iOS cross-target compile
+85113612451 success WASM cross-target observation
+```
+
+Host job `85113612405` ran the full heavy path on merged code — `Complete
+docs-only PR` `skipped`; all seven blocking latency gates `success`, including
+`Run line geometry query benchmark gate` (ran, not skipped, not
+`continue-on-error`). Hosted Linux x86_64 `line_geometry_query` rows — five
+scenarios, all `gate=pass`, checksums byte-identical to the PR-head and local
+records:
+
+```text
+mode=line_geometry_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=31 p99_ns=62 failures=0 budget_p95_ns=30000 budget_p99_ns=60000 gate=pass checksum=160641440000
+mode=line_geometry_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=73 p99_ns=110 failures=0 budget_p95_ns=60000 budget_p99_ns=120000 gate=pass checksum=267505512960
+mode=line_geometry_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=47 p99_ns=78 failures=0 budget_p95_ns=120000 budget_p99_ns=240000 gate=pass checksum=799841600000
+mode=line_geometry_query provider=balanced_tree scenario=balanced_tree_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=371 p99_ns=399 failures=0 budget_p95_ns=300000 budget_p99_ns=600000 gate=pass checksum=223985600000
+mode=line_geometry_query provider=balanced_tree scenario=balanced_tree_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=430 p99_ns=448 failures=0 budget_p95_ns=600000 budget_p99_ns=1200000 gate=pass checksum=852321495040
+```
+
+This confirms the blocking line-geometry-query gate is live on `main`: the
+merged workflow runs it on hosted Linux and it fails the job on regression. The
+macOS-calibrated budgets fit hosted Linux x86_64 with wide headroom, closing the
+Slice 31 regression-protection gap for the geometry-bearing vertical
+position-query path.
