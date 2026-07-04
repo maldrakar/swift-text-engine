@@ -17,6 +17,8 @@ func runBenchmarks(options: BenchmarkOptions) -> Bool {
         return runLineQueryBenchmarks(enforceGate: options.enforceGate)
     case .lineGeometryQuery:
         return runLineGeometryQueryBenchmarks(enforceGate: options.enforceGate)
+    case .columnQuery:
+        return runColumnQueryBenchmarks(enforceGate: options.enforceGate)
     case .memoryShape:
         return runMemoryShapeDiagnostics()
     case .memoryObservation:
