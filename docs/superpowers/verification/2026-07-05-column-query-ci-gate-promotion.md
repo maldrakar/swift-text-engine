@@ -184,5 +184,64 @@ No matches — `Sources/TextEngineCore` remains Foundation-free.
 
 ## Hosted Proof
 
-Pending — recorded in the post-merge follow-up (Task 4) against the final stable
-PR-head SHA and the merge commit, to avoid a stale-on-write hosted record.
+Recorded post-merge against the stable final PR-head SHA and the merge commit.
+
+- **PR:** #68 (`slice-34-column-query-ci-gate` → `main`), MERGED 2026-07-06,
+  merge commit `2281f00`.
+- **Final PR-head run:** `28818762407` (event `pull_request`, head `e55dfc0`) —
+  all three required contexts `success` (Host tests and benchmark gate 8m9s,
+  iOS 35s, WASM 36s).
+- **Post-merge push run:** `28819411144` (event `push`, head `2281f00` = merge
+  commit) — `success`; all three required jobs `success`.
+
+### Step-Level Proof (not just job conclusion)
+
+Verified via `gh run view --json jobs` on both runs' `Host tests and benchmark
+gate` job. The `Run column query benchmark gate` step is a real, blocking,
+non-skipped step in the correct position:
+
+| Run | Step #14 | Step #15 | Step #16 | docs-only step #5 |
+| --- | --- | --- | --- | --- |
+| PR-head `28818762407` | Run line geometry query benchmark gate → success | **Run column query benchmark gate → success** | Run memory shape diagnostic → success | Complete docs-only PR → skipped |
+| push `28819411144` | Run line geometry query benchmark gate → success | **Run column query benchmark gate → success** | Run memory shape diagnostic → success | Complete docs-only PR → skipped |
+
+The column-query gate ran (not skipped), is ordered line-geometry-query →
+column-query → memory-shape, and carries no `continue-on-error` (a failure would
+fail the job). The `Complete docs-only PR` short-circuit was correctly **skipped**
+on both runs because the merged change touches `.github/workflows/**` (source-
+bearing), so the full eight-gate heavy path executed.
+
+### Hosted Linux `column_query` Rows — budget-fit evidence (PR-head run `28818762407`)
+
+All five scenarios `gate=pass`, `failures=0`, on hosted Linux x86_64
+(`swift:6.2.1-bookworm`). Checksums byte-identical to the Slice 33 record,
+proving the benchmark workload is unchanged across the promotion.
+
+| Scenario | Observed p95 ns | Observed p99 ns | Budget p95 ns | Hosted headroom (budget ÷ p95) | Budget p99 ns | Checksum |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| uniform_1k     | 26 | 31  | 30,000  | 1153.8× | 60,000  | 641440000    |
+| uniform_100k   | 38 | 67  | 60,000  | 1578.9× | 120,000 | 63985556480  |
+| uniform_1m     | 44 | 73  | 120,000 | 2727.3× | 240,000 | 639841600000 |
+| prefixsum_100k | 55 | 94  | 60,000  | 1090.9× | 120,000 | 63985600000  |
+| prefixsum_1m   | 63 | 110 | 120,000 | 1904.8× | 240,000 | 639841560320 |
+
+The `prefixsum_1m` watch-scenario (spec Decision 3 — the realistic
+proportional-advance path at the largest cell count) clears its p95 budget by
+1904.8× and its p99 budget (120→240k) by a comparable margin on hosted Linux;
+the macOS-calibrated budgets fit Linux with wide headroom, so no retune is
+needed. (`prefixsum_100k` holds the numerically tightest hosted headroom at
+1090.9×, still ~1090× under budget.)
+
+### Merged-Behavior Anchor (push run `28819411144`, merge commit `2281f00`)
+
+The merge commit's own run re-executes the gate with identical checksums and all
+rows `gate=pass`, anchoring the merged workflow behavior (timings differ run to
+run, as expected; the deterministic anchor is the checksum set):
+
+| Scenario | p95 ns | p99 ns | Budget p95 ns | Checksum | gate |
+| --- | ---: | ---: | ---: | --- | --- |
+| uniform_1k     | 24 | 54  | 30,000  | 641440000    | pass |
+| uniform_100k   | 35 | 66  | 60,000  | 63985556480  | pass |
+| uniform_1m     | 40 | 72  | 120,000 | 639841600000 | pass |
+| prefixsum_100k | 57 | 93  | 60,000  | 63985600000  | pass |
+| prefixsum_1m   | 79 | 122 | 120,000 | 639841560320 | pass |
