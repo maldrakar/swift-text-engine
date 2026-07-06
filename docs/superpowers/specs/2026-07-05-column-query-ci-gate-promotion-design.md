@@ -182,10 +182,16 @@ Like Slices 28 and 32 — and unlike Slice 26, which folded in the
 `deterministicIndex` overflow hardening the Slice 25 review had flagged — the
 Slice 33 review found **no P0/P1/P2 and no actionable P3 items** in the promoted
 benchmark. The column-query benchmark builds its sample `x` values from
-non-negative `sample % 8` arithmetic and the existing shared
-`deterministicScrollOffset` helper; it derives no array index from a wrapping
-signed multiply, so it carries no analogous crash class. This slice therefore
-promotes the existing benchmark **unchanged** and touches no benchmark source.
+non-negative `sample % 8` / `sample % 1_000` arithmetic (`sample` is always
+`>= 0`) and the existing shared `deterministicScrollOffset` helper — whose
+`(sample * 37) % 1_000` is a plain, bounded signed multiply that returns a
+`Double` offset, never an array index — and it does **not** call the
+overflow-hardened `deterministicIndex`. The single wrapping multiply in the file
+(`variableAdvances`' `index &* 31`) is bounded (`index <= 1_000_000`, so
+`<= 31_000_000`, no wrap) and feeds a `% 4` bucket `switch`, never an array index.
+So the benchmark derives no array index from a wrapping signed multiply and
+carries no analogous crash class. This slice therefore promotes the existing
+benchmark **unchanged** and touches no benchmark source.
 
 ## Goals
 
@@ -240,10 +246,11 @@ Add the step directly as a blocking gate in one PR, rather than first landing a
 `continue-on-error` observation step and flipping it later. (User-selected
 rollout.)
 
-Rationale: the budgets span ~1000×–5000× macOS headroom — the same generous
-margin the `--line-query` / `--line-geometry-query` siblings carried at their
-Slice 28 / 32 promotions, and over two orders of magnitude above the tightest gate
-the series has promoted (the bulk gate at ~6.7×). The PR-head CI run executes the
+Rationale: the budgets span ~1000×–5000× macOS headroom — a margin
+comparable-to-wider than the `--line-query` / `--line-geometry-query` siblings
+carried at their Slice 28 / 32 promotions (line-query was ~325×–3000×, tighter at
+the low end; line-geometry-query ~1900×–5400×), and over two orders of magnitude
+above the tightest gate the series has promoted (the bulk gate at ~6.7×). The PR-head CI run executes the
 step on hosted Linux x86_64 and prints `p95_ns` / `p99_ns` / budget fields whether
 or not it passes, so a single blocking step both enforces and produces the hosted
 evidence. The most comparable prior promotions — Slices 24, 26, 28, and 32, which
@@ -289,6 +296,16 @@ multiplicative headroom, but because it is the realistic proportional-advance pa
 at the largest cell count (1,000,000), so a hosted-Linux constant-factor slowdown
 would surface there first. Even so, given the ~1000×–5000× local headroom it would
 have to regress by three orders of magnitude to breach budget.
+
+Unlike the Slice 32 twin, this spec carries only the aggregate ~1000×–5000× range
+(the Slice 33 review's figure), not a per-scenario headroom table, so it cannot
+yet name which scenario holds the *least* headroom versus which carries the
+largest absolute latency. The verification record must close that gap: tabulate
+per-scenario observed p95 and headroom (p95 budget ÷ observed p95) for all five
+scenarios, both locally and on the hosted PR-head run, so "`prefixsum_1m` is the
+one to watch" and "least multiplicative headroom" are grounded in numbers rather
+than narrative — and so any future Linux re-baseline (Option E) starts from a
+recorded per-scenario baseline.
 
 ### Decision 4 — Keep the host job order
 
@@ -398,6 +415,16 @@ git diff --check
 rg -n "Foundation" Sources/TextEngineCore
 ```
 
+Because this slice's central Non-Goal is *no benchmark source change*, the local
+`--column-query --gate` run is also the cheapest possible proof of that Non-Goal:
+record that all five per-scenario `column_query` checksums are **byte-identical**
+to the values Slice 33 established (`641440000`, `63985556480`, `639841600000`,
+`63985600000`, `639841560320`). A checksum drift would mean the benchmark
+workload changed — which this slice forbids — so the equality is a free integrity
+check even though no *new* checksum is being established. Capture the observed
+per-scenario p95/p99 as well, so the headroom this spec cites (below) is
+grounded in this slice's own numbers, not only carried from the Slice 33 record.
+
 Plus a **workflow-invariant assertion** that goes beyond a bare YAML parse —
 asserting the new step exists, invokes `--column-query --gate`, is not
 `continue-on-error`, carries the same `docs_only_pr` guard as its sibling gates
@@ -436,6 +463,10 @@ Hosted verification should include:
 - host job step `Run column query benchmark gate` `success`, with its hosted Linux
   x86_64 `column_query` rows (all five scenarios) showing `gate=pass`,
   `budget_p95_ns`, and `budget_p99_ns` (the Linux budget-fit evidence);
+- a per-scenario hosted headroom line for all five scenarios (observed `p95_ns` /
+  `p99_ns` and headroom = budget ÷ observed), so the Linux budget-fit is recorded
+  quantitatively and the `prefixsum_1m` watch-scenario (Decision 3) has a concrete
+  hosted number;
 - proof the column-query step is not `continue-on-error`;
 - post-merge push run ID for the merge commit (this slice changes workflow YAML,
   so the merge is not docs-only and will not be skipped by `push.paths-ignore`).
@@ -467,7 +498,11 @@ just the job conclusion (a green job can hide a dead `continue-on-error` step).
 - Local column-query gate passes with `gate=pass` for all five scenarios; all
   seven pre-existing latency gates and `swift test` still pass.
 - Hosted PR-head CI runs the column-query gate step and succeeds, with recorded
-  Linux p95/p99 for all five scenarios as budget-fit evidence.
+  Linux p95/p99 and per-scenario headroom (budget ÷ observed) for all five
+  scenarios as budget-fit evidence.
+- Local verification records that the five per-scenario `column_query` checksums
+  are byte-identical to the Slice 33 values, proving the benchmark workload is
+  unchanged.
 - Post-merge push CI on `main` anchors the merged workflow behavior.
 
 ## Risks And Gaps
@@ -519,5 +554,7 @@ workflow-invariant assertion showing there is no blocking column-query gate step
 before the YAML change, and a true blocking gate (with `--column-query --gate`,
 without `continue-on-error`, ordered line-geometry-query → column-query →
 memory-shape) after it. Because this slice touches no benchmark source, there is
-no checksum-equality proof to carry — the verification leans on the workflow
-assertion plus the hosted budget-fit run.
+no *new* checksum to establish — but the verification should still confirm the
+five per-scenario checksums are byte-identical to the Slice 33 values as a free
+"benchmark unchanged" integrity check, and otherwise leans on the workflow
+assertion plus the hosted per-scenario budget-fit run.
