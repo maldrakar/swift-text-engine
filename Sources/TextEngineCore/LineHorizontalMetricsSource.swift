@@ -18,7 +18,7 @@ public protocol LineHorizontalMetricsSource {
     /// queries outside `0...columnCount(inLine: line)`.
     ///
     /// Stability precondition: `columnCount(inLine:)` and `columnOffset(inLine:column:)`
-    /// for a given line must be stable for one `columnAt` query.
+    /// for a given line must be stable for one `columnAt` / `columnGeometryAt` query.
     func columnOffset(inLine line: Int, column: Int) -> Double
 
     /// Provider-native inverse-search hook (mirror of `lineIndex(containingOffset:)`).

@@ -165,3 +165,38 @@ public struct ColumnLocation: Equatable {
         case clampedToRight   // x >= lineWidth;  resolved to last cell
     }
 }
+
+public struct ColumnGeometry: Equatable {
+    public let columnIndex: Int
+    public let x: Double        // cell left edge (columnOffset of columnIndex)
+    public let width: Double    // advance width (columnOffset(i+1) - columnOffset(i))
+
+    public init(columnIndex: Int, x: Double, width: Double) {
+        self.columnIndex = columnIndex
+        self.x = x
+        self.width = width
+    }
+}
+
+public enum ColumnGeometryQuery: Equatable {
+    case geometry(ColumnGeometryLocation) // a real cell was located, with its box
+    case empty                            // blank line: columnCount(inLine:) == 0
+    case failure(ViewportValidationError) // invalid input / metrics
+}
+
+public struct ColumnGeometryLocation: Equatable {
+    /// The located cell's box: columnIndex, left x, advance width.
+    public let geometry: ColumnGeometry
+    /// Where `x` falls within the cell: `0.0` at the cell left edge and when clamped
+    /// to left; `(x - geometry.x) / geometry.width` in `[0, 1)` for an in-range
+    /// query; `1.0` when clamped to right.
+    public let fractionInColumn: Double
+    /// Whether the query landed inside the line or past an edge (from `columnAt`).
+    public let clamp: ColumnLocation.Clamp
+
+    public init(geometry: ColumnGeometry, fractionInColumn: Double, clamp: ColumnLocation.Clamp) {
+        self.geometry = geometry
+        self.fractionInColumn = fractionInColumn
+        self.clamp = clamp
+    }
+}
