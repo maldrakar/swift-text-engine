@@ -299,6 +299,22 @@ is `O(log M x offsetCost)`. `columnGeometryAt`'s two extra probes are a **consta
 factor**, so its per-provider asymptotic class is exactly `columnAt`'s — the geometry
 probes never introduce a log factor.
 
+Note that on the located branch **~1 of the 2 geometry probes re-reads a value
+`columnAt` (or its search) already computed** — so the clamp path's `4` is not four
+*independent* reads: `clampedToRight`'s `right = columnOffset(_, count)` is exactly the
+`width` `columnAt` already probed, and `clampedToLeft`'s `left = columnOffset(_, 0)` is
+the contract probe `columnAt` already ran (`= 0`); on the in-range path the search has
+usually already touched `columnOffset(_, i)`. Composing over the **public** `columnAt`
+(which returns only `(columnIndex, clamp)` and discards the offsets/width it computed)
+is what forces the re-read. It is accepted here for the same reason Slice 31 accepted
+it on the vertical axis — where the re-reads were *O(log N)* balanced-tree descents, i.e.
+strictly costlier than the O(1) probes here — and because for both shipped providers
+`columnOffset` is O(1), so the re-read is unmeasurable. A protocol-free internal refactor
+(an internal helper that returns the already-computed `width`/offsets alongside the
+located cell) could remove ~half the re-reads *without* a `LineHorizontalMetricsSource`
+change; the heavier provider-native one-walk `(index, left, right)` hook is the separate
+deferred optimization (Non-Goals, Future Slices). Neither is this slice.
+
 Per shipped provider — and here the horizontal story is **simpler than the vertical
 one**: unlike the vertical axis (`BalancedTreeLineMetrics` with a Slice 29 native
 O(log N) descent, plus `FenwickLineMetrics` at O(log²N)), **both** shipped horizontal
@@ -431,6 +447,12 @@ match — the construction guarantee, pinned as a regression test.
 - **Fraction at exact cell left edge** `x == columnOffset(i)` → `frac == 0.0`,
   `inRange`, box left `== columnOffset(i)`.
 - **Fraction mid-cell** → `frac == 0.5` for an `x` at the span midpoint.
+- **Reconstruction invariant** (opposite direction from the equivalence oracle, which
+  recomputes `frac` via the same `(x - left) / width` formula): for several *interior,
+  non-half* in-range `x`, assert `abs(geometry.x + fractionInColumn * geometry.width - x)
+  <= eps` — i.e. the box + fraction round-trip back to the query `x`. This pins the
+  Decision 3 relation `x == left + fractionInColumn * width` directly rather than by
+  re-deriving the same ratio.
 - **Clamp fractions**: `x < 0` → `0.0` + cell 0 box; `x >= lineWidth` → `1.0` + last
   cell box; `x == 0` → `inRange`, `frac 0.0`; `x == lineWidth` → `clampedToRight`,
   `frac 1.0`.
@@ -466,9 +488,20 @@ constant-descent-count shape.
 ### Reference-provider equivalence oracle (`Tests/TextEngineReferenceProvidersTests/ColumnGeometryAtEquivalenceTests.swift`)
 
 Mirrors the `columnAt` reference equivalence and the vertical
-`LineGeometryAtEquivalenceTests`. Build the same advances into a
-`PrefixSumColumnMetrics`; across an `x` sweep (left, right, interior, exact cell
-edges, fractional offsets, out-of-range left/right) assert:
+`LineGeometryAtEquivalenceTests`. Note the axis difference: the vertical
+`LineGeometryAtEquivalenceTests` cross-checks `lineGeometryAt` over one provider
+(`BalancedTreeLineMetrics`) against a *second, independently-implemented*
+(`PrefixSumLineMetrics`) oracle. There is only **one** variable horizontal provider so
+far (`PrefixSumColumnMetrics`; a balanced-tree horizontal provider is the deferred
+Option D), so this oracle drives `columnGeometryAt` over `PrefixSumColumnMetrics` and
+checks its `geometry` against **that same provider's** `columnOffset` — i.e. it is a
+**self-consistency** proof (the composed geometry reads its own offsets back exactly),
+the strongest available for the variable path until a second variable provider exists.
+The genuinely *independent* check is the **structural uniform oracle** above, which
+computes the expected box/fraction from `k * columnWidth` products with no reference to
+the provider's binary search. Build the same advances into a `PrefixSumColumnMetrics`;
+across an `x` sweep (left, right, interior, exact cell edges, fractional offsets,
+out-of-range left/right) assert:
 
 - `columnGeometryAt(...).clamp == columnAt(...).clamp` and the indices match;
 - `geometry == ColumnGeometry(i, provider.columnOffset(_, i), provider.columnOffset(_, i+1) - provider.columnOffset(_, i))`;
@@ -609,6 +642,19 @@ round it toward `1.0`. The core does not special-case this (consistent with how 
 engine trusts the `columnOffset` contract elsewhere); `1.0` as a *clamp* sentinel and
 a `1.0` produced by extreme-edge rounding are not distinguished. Documented, accepted
 (the exact vertical `lineGeometryAt` posture).
+
+### Non-monotone interior is contract-trusted (undetected NaN/inf fraction)
+
+`columnAt` validates only `columnOffset(_, 0) == 0` and the *total* `width > 0`; it never
+scans every offset (that would break the O(log M) envelope). A contract-violating provider
+that is non-monotone *in the interior* — two equal consecutive offsets on the located cell
+— yields `geometry.width = right - left == 0`, so `fractionInColumn = (x - left) / 0`
+becomes NaN/inf, and the core does not detect it. Decision 3's "`width > 0` by contract"
+holds only for a valid provider. This is the identical contract-trust posture the vertical
+`lineGeometryAt` takes toward `height = bottom - top > 0` (also unvalidated), with
+equivalent exposure — the search reads interior offsets but never asserts monotonicity on
+either axis. Defending it is impossible without an O(M) scan; named here rather than left
+implicit. Accepted.
 
 ### Additive public surface
 
