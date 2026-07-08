@@ -75,6 +75,13 @@ precondition (the source carries no `lineCount`). Its two providers are
 `UniformColumnMetrics` (in the core, beside `UniformLineMetrics`) and
 `PrefixSumColumnMetrics` (reference providers); `--column-query` is its blocking
 host-job CI gate.
+`ViewportVirtualizer.columnGeometryAt(x:inLine:metrics:)` is the geometry-bearing
+companion to `columnAt`: it composes over `columnAt`, returning the located cell's
+`ColumnGeometry` box (left `x` + advance `width`) plus the within-cell
+`fractionInColumn` and the same clamp flag, adding only a constant number of
+`columnOffset(inLine:column:)` probes (O(1) core memory), so its per-provider cost
+class equals `columnAt`'s; caret snapping stays a caller concern. Its
+`--column-geometry-query --gate` is **local (not-yet-CI)**.
 
 ## Package layout
 
@@ -103,6 +110,7 @@ swift run -c release ViewportBenchmarks -- --bulk-structural-mutation --gate   #
 swift run -c release ViewportBenchmarks -- --line-query --gate   # y->line position-query local gate
 swift run -c release ViewportBenchmarks -- --line-geometry-query --gate   # y->line+box+fraction local gate
 swift run -c release ViewportBenchmarks -- --column-query --gate   # x->cell within-line position-query local gate
+swift run -c release ViewportBenchmarks -- --column-geometry-query --gate   # x->cell+box+fraction within-line local gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --help            # all flags
@@ -115,11 +123,13 @@ swift run -c release ViewportBenchmarks -- --help            # all flags
 Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
 `--variable-height-mutation`, `--structural-mutation`,
 `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
-`--column-query`, `--memory-shape`, `--memory-observation`, `--gate`. Only one mode
+`--column-query`, `--column-geometry-query`, `--memory-shape`,
+`--memory-observation`, `--gate`. Only one mode
 flag at a time. `--gate` is valid with the default pipeline, `--realistic-provider`,
 `--variable-height`, `--variable-height-mutation`, `--structural-mutation`,
-`--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`, and
-`--column-query` modes; it is **rejected** with `--range-only`, `--memory-shape`,
+`--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
+`--column-query`, and `--column-geometry-query` modes; it is **rejected** with
+`--range-only`, `--memory-shape`,
 `--memory-observation`.
 
 Local WASM build (needs a matching Swift SDK installed):

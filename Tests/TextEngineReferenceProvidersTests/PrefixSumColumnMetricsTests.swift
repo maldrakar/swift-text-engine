@@ -32,6 +32,34 @@ final class PrefixSumColumnMetricsTests: XCTestCase {
         }
     }
 
+    func testColumnGeometryAtOverPrefixSumMatchesProviderOffsets() {
+        // advances [10,30,5,50] -> offsets [0,10,40,45,95], width 95.
+        let metrics = PrefixSumColumnMetrics(advancesPerLine: [[10.0, 30.0, 5.0, 50.0]])
+
+        // Self-consistency: geometry read back from the provider's own columnOffset,
+        // and fraction recomputed under the Decision 3 contract, must equal the result.
+        let xs: [Double] = [-2.0, 0.0, 5.0, 10.0, 22.0, 40.0, 44.0, 45.0, 94.0, 95.0, 200.0]
+        for x in xs {
+            guard case let .column(col) = ViewportVirtualizer.columnAt(x: x, inLine: 0, metrics: metrics) else {
+                return XCTFail("expected .column for x=\(x)")
+            }
+            let left = metrics.columnOffset(inLine: 0, column: col.columnIndex)
+            let right = metrics.columnOffset(inLine: 0, column: col.columnIndex + 1)
+            let expectedFraction: Double
+            switch col.clamp {
+            case .clampedToLeft: expectedFraction = 0.0
+            case .clampedToRight: expectedFraction = 1.0
+            case .inRange: expectedFraction = (x - left) / (right - left)
+            }
+            let expected = ColumnGeometryQuery.geometry(ColumnGeometryLocation(
+                geometry: ColumnGeometry(columnIndex: col.columnIndex, x: left, width: right - left),
+                fractionInColumn: expectedFraction,
+                clamp: col.clamp
+            ))
+            XCTAssertEqual(ViewportVirtualizer.columnGeometryAt(x: x, inLine: 0, metrics: metrics), expected, "x=\(x)")
+        }
+    }
+
     func testPerLineAddressing() {
         let metrics = PrefixSumColumnMetrics(advancesPerLine: [[10.0, 30.0], [8.0, 8.0]])
         // line 0 offsets [0,10,40]; line 1 offsets [0,8,16]. x = 9:
