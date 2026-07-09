@@ -340,23 +340,82 @@ source, test, benchmark, or CI files were modified by any command above.
   PR's final head would otherwise cite a run ID that doesn't correspond to
   the merged code).
 
-## Hosted Proof — Pending
+## Hosted Proof
 
-**Pending.** To be filled in by the post-merge follow-up, anchored against
-the stable final PR head and the merge commit (the Slice 26 stale-on-write
-lesson):
+Recorded post-merge against the stable final PR-head SHA and the merge commit
+(the Slice 26 stale-on-write lesson: the source-bearing PR left this section as
+an explicit `Pending` placeholder; the real run IDs were filled in only once the
+final head was stable).
 
-- PR number, title, merge commit SHA.
-- Final PR-head hosted `pull_request` run ID, verified at **step level**
-  (all three required job contexts: Host tests and benchmark gate, iOS
-  cross-target compile, WASM cross-target observation).
-- Post-merge `push` run ID on `main` (merge commit head), verified at
-  **step level**.
-- Confirmation that the Host job's blocking gate steps remain the
-  pre-existing **eight** gates (synthetic, variable-height,
+- **PR:** #71 (`slice-35-horizontal-geometry-query` → `main`), title *"Slice 35:
+  horizontal geometry query (columnGeometryAt)"*, MERGED 2026-07-08T16:01:32Z by
+  `maldrakar`, merge commit `5da380b`
+  (`5da380b64308aae1d049e9f4a7bce36a578d3144`). Merge parentage confirmed via
+  `git rev-list --parents`: `5da380b`'s parents are the base `60e2c14` and the
+  tested PR head `a1ef979` (`5da380b^2 == a1ef979`), so this proof anchors the
+  actually-merged code.
+- **Final PR-head run:** `28893267949` (event `pull_request`, head `a1ef979`) —
+  conclusion `success`; all three required contexts `success` (Host tests and
+  benchmark gate 8m6s, iOS cross-target compile 1m4s, WASM cross-target
+  observation 39s).
+- **Post-merge push run:** `28956968583` (event `push`, head `5da380b` = merge
+  commit) — conclusion `success`; all three required jobs `success` (Host tests
+  and benchmark gate 5m17s, iOS 1m22s, WASM 34s).
+
+### Step-Level Proof (not just job conclusion)
+
+Verified via `gh run view --json jobs` on both runs' `Host tests and benchmark
+gate` job (the project's "a green job can hide a dead `continue-on-error` step"
+lesson). The pre-existing **eight** blocking gates all ran (not skipped, not
+`continue-on-error`) in order, and — per Decision 5 — there is **no** hosted
+`Run column geometry query benchmark gate` step in either run:
+
+| Host-job step | PR-head `28893267949` | push `28956968583` |
+| --- | --- | --- |
+| #5  Complete docs-only PR                       | skipped | skipped |
+| #7  Run host tests                              | success | success |
+| #8  Run synthetic benchmark gate                | success | success |
+| #9  Run variable-height benchmark gate          | success | success |
+| #10 Run variable-height mutation benchmark gate | success | success |
+| #11 Run structural mutation benchmark gate      | success | success |
+| #12 Run bulk structural mutation benchmark gate | success | success |
+| #13 Run line query benchmark gate               | success | success |
+| #14 Run line geometry query benchmark gate      | success | success |
+| #15 Run column query benchmark gate             | success | success |
+| #16 Run memory shape diagnostic                 | success | success |
+| #17 Run RSS memory observation diagnostic       | success | success |
+| #18 Observe realistic provider relative performance | success (PR event) | skipped (push event) |
+
+Confirmations, matching the checklist this section replaces:
+
+- **The eight blocking latency gates (steps #8–#15) are intact and green** on
+  both the PR-head and merged-code runs — synthetic, variable-height,
   variable-height-mutation, structural-mutation, bulk-structural-mutation,
-  line-query, line-geometry-query, column-query) — the new
-  `--column-geometry-query --gate` is intentionally **not** a hosted step
-  this slice (local-only, Decision 5); correctness of `columnGeometryAt` is
-  nonetheless enforced hosted through `Run host tests` (the
-  `ColumnGeometryAt*` suites are part of the 213-test run).
+  line-query, line-geometry-query, column-query. This additive slice regressed
+  none of them, consistent with the byte-identical checksum table above.
+- **The new `--column-geometry-query --gate` is not a hosted step** — no such
+  step exists in either run's host job, confirming Decision 5 (local-only gate;
+  CI promotion is a deferred follow-up slice, the ninth blocking gate).
+- **`columnGeometryAt` correctness is nonetheless enforced hosted** through step
+  #7 `Run host tests`, which executes the full 213-test suite including the new
+  `ColumnGeometryAt*` core suites (structural uniform oracle, `columnAt` parity,
+  unit/failure/clamp/reconstruction, query-count, native-hook dispatch order) and
+  the `PrefixSumColumnMetrics` reference-equivalence oracle; it is `success` on
+  both runs.
+- **`Complete docs-only PR` (step #5) was correctly `skipped`** on both runs —
+  the merged change is source-bearing (Swift + tests + benchmark), so the full
+  heavy path executed, not the docs-only short-circuit.
+- **Step #18 realistic-provider observation** ran `success` on the PR-head
+  (`pull_request`) run and was correctly `skipped` on the merged-code (`push`)
+  run — it is the PR-only `continue-on-error` observation, unchanged by this
+  slice.
+
+### Merged-Behavior Anchor (push run `28956968583`, merge commit `5da380b`)
+
+The post-merge push run on merge commit `5da380b` (second parent = the tested PR
+head `a1ef979`) re-executed the entire host job — the 213-test suite and all
+eight blocking gates — to `success`, anchoring the merged workflow behavior
+against the stable final head. No hosted `--column-geometry-query` timings are
+recorded here because that gate is intentionally local-only this slice
+(Decision 5); its hosted-CI numbers will be captured by the future promotion
+slice, exactly as `--column-query`'s were by Slice 34.
