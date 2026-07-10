@@ -119,6 +119,10 @@ jobs:
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --column-query --gate
 
+      - name: Run column geometry query benchmark gate
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --column-geometry-query --gate
+
       - name: Run memory shape diagnostic
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-shape
