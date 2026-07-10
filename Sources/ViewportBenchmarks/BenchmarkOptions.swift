@@ -10,6 +10,7 @@ enum BenchmarkMode {
     case lineGeometryQuery
     case columnQuery
     case columnGeometryQuery
+    case pointQuery
     case memoryShape
     case memoryObservation
 
@@ -37,6 +38,8 @@ enum BenchmarkMode {
             return "column_query"
         case .columnGeometryQuery:
             return "column_geometry_query"
+        case .pointQuery:
+            return "point_query"
         case .memoryShape:
             return "memory_shape"
         case .memoryObservation:
@@ -56,7 +59,7 @@ struct BenchmarkOptions {
     let enforceGate: Bool
 
     static let usage = """
-    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--bulk-structural-mutation] [--line-query] [--line-geometry-query] [--column-query] [--column-geometry-query] [--memory-shape] [--memory-observation] [--help]
+    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--bulk-structural-mutation] [--line-query] [--line-geometry-query] [--column-query] [--column-geometry-query] [--point-query] [--memory-shape] [--memory-observation] [--help]
 
     Options:
       --range-only          Run only viewport range recompute benchmark.
@@ -70,6 +73,7 @@ struct BenchmarkOptions {
       --line-geometry-query Run y->line+box+fraction geometry query benchmark. Combine with --gate to enforce budgets.
       --column-query        Run x->cell within-line position-query benchmark. Combine with --gate to enforce budgets.
       --column-geometry-query  Run x->cell+box+fraction within-line geometry query benchmark. Combine with --gate to enforce budgets.
+      --point-query         Run (x,y)->(line,cell) 2D composite position-query benchmark. Combine with --gate to enforce budgets.
       --memory-shape        Run deterministic core-owned memory-shape diagnostics.
       --memory-observation  Run host RSS observation diagnostics.
       --help                Print this help.
@@ -137,6 +141,11 @@ struct BenchmarkOptions {
                     return .failure("--column-geometry-query cannot be combined with another mode")
                 }
                 mode = .columnGeometryQuery
+            case "--point-query":
+                if mode != .pipeline {
+                    return .failure("--point-query cannot be combined with another mode")
+                }
+                mode = .pointQuery
             case "--memory-shape":
                 if mode != .pipeline {
                     return .failure("--memory-shape cannot be combined with another mode")
