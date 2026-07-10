@@ -481,21 +481,30 @@ New file `Sources/ViewportBenchmarks/PointQueryBenchmark.swift`, modeled on
   `--point-query` to `BenchmarkOptions.parse` / usage, a `.pointQuery` arm in
   `BenchmarkProgram.runBenchmarks`, and a `.pointQuery` arm wherever the synthetic
   switch matches the other query modes (`SyntheticBenchmarks.swift`).
-- **Scenarios**: pair a `LineMetricsSource` with a `LineHorizontalMetricsSource` at
-  increasing sizes — proposed `uniform_100k` (`UniformLineMetrics` ×
-  `UniformColumnMetrics`), `uniform_1m`, and a variable pairing
-  `prefixsum_100k` / `prefixsum_1m` (`PrefixSumLineMetrics` ×
-  `PrefixSumColumnMetrics`, deterministic varied heights/advances) — each with
-  `p95`/`p99` budgets. Large line/cell counts exist only to exercise combined
-  search depth. These pairings cover the O(1) native-arithmetic vertical path
-  (`UniformLineMetrics`) and the generic O(log N) binary-search fallback
-  (`PrefixSumLineMetrics`); the balanced-tree native-descent path
-  (`BalancedTreeLineMetrics`) is **deliberately not** re-measured here because the
-  point gate's unique job is composition overhead, and that path is already guarded
-  by `--line-query`. Because the composite's cost is the *sum* of the two 1D queries, the
-  budgets are set with headroom over the observed combined latency (roughly the sum
-  of the corresponding `--line-query` and `--column-query` scenarios), following the
-  project's customary margin.
+- **Scenarios**: pair a `LineMetricsSource` (vertical) with a **line-agnostic**
+  `LineHorizontalMetricsSource` (horizontal) at increasing document sizes —
+  proposed `uniform_100k` / `uniform_1m` (`UniformLineMetrics` ×
+  `UniformColumnMetrics`) and `prefixsum_100k` / `prefixsum_1m`
+  (`PrefixSumLineMetrics`, deterministic varied heights × `UniformColumnMetrics`) —
+  each with `p95`/`p99` budgets. **The horizontal provider is `UniformColumnMetrics`
+  in every point scenario, by necessity, not laziness.** `pointAt` feeds the
+  vertically-located line index into `columnAt`, so the horizontal source must define
+  cells for *every* line in `0..<lineCount`; `PrefixSumColumnMetrics` stores per-line
+  prefix sums, so pairing it with a 100k/1M-line document is O(N·M) storage
+  (infeasible — you cannot make both axes deep at once with per-line horizontal
+  storage). `UniformColumnMetrics` is line-agnostic (same cells for every line), O(1)
+  memory, valid for any located line, and still performs a real O(log M) binary
+  search per line (a fixed `columnsPerLine`, e.g. 256, gives genuine search depth).
+  Varying **only the vertical provider** covers the O(1) native-arithmetic vertical
+  path (`UniformLineMetrics`) and the generic O(log N) binary-search fallback
+  (`PrefixSumLineMetrics`). Two paths are **deliberately not** re-measured here
+  because the point gate's unique job is composition overhead and each is already
+  guarded by its own axis gate: the balanced-tree native-descent vertical path
+  (`BalancedTreeLineMetrics`) by `--line-query`, and variable-advance horizontal
+  spans (`PrefixSumColumnMetrics`) by `--column-query`. Because the composite's cost
+  is the *sum* of the two 1D queries, the budgets are set with headroom over the
+  observed combined latency (roughly the sum of the corresponding `--line-query` and
+  `--column-query` scenarios), following the project's customary margin.
 - **Workload**: per operation, derive a deterministic `(x, y)` spanning in-range and
   out-of-range values on both axes (reusing `deterministicScrollOffset` and a
   deterministic fraction of the line width, with a slice of samples pushed
