@@ -80,8 +80,8 @@ companion to `columnAt`: it composes over `columnAt`, returning the located cell
 `ColumnGeometry` box (left `x` + advance `width`) plus the within-cell
 `fractionInColumn` and the same clamp flag, adding only a constant number of
 `columnOffset(inLine:column:)` probes (O(1) core memory), so its per-provider cost
-class equals `columnAt`'s; caret snapping stays a caller concern. Its
-`--column-geometry-query --gate` is **local (not-yet-CI)**.
+class equals `columnAt`'s; caret snapping stays a caller concern.
+`--column-geometry-query` is its blocking host-job CI gate.
 
 ## Package layout
 
@@ -146,12 +146,14 @@ Three jobs:
   (blocking) → `--structural-mutation --gate` (blocking)
   → `--bulk-structural-mutation --gate` (blocking) → `--line-query --gate`
   (blocking) → `--line-geometry-query --gate` (blocking)
-  → `--column-query --gate` (blocking) → `--memory-shape`
+  → `--column-query --gate` (blocking)
+  → `--column-geometry-query --gate` (blocking) → `--memory-shape`
   → `--memory-observation` → realistic relative
   observation (PR-only,
   `continue-on-error`). The synthetic, static variable-height, mutation
   variable-height, structural-mutation, bulk-structural-mutation, line-query,
-  line-geometry-query, and column-query gates **fail the job on perf regression**.
+  line-geometry-query, column-query, and column-geometry-query gates **fail the
+  job on perf regression**.
   Benchmark budgets
   are still macOS-calibrated unless hosted Linux x86_64 evidence explicitly
   justifies a retune. SwiftPM build artifacts use `/tmp/text-engine-host-build`,
