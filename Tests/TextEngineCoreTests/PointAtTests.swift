@@ -98,4 +98,62 @@ final class PointAtTests: XCTestCase {
             column: .cell(ColumnLocation(columnIndex: 0, clamp: .clampedToLeft))
         )))
     }
+
+    // MARK: Failure precedence & validation-before-short-circuit
+
+    func testVerticalFailureShortCircuits() {
+        let h = UniformColumnMetrics(columnsPerLine: 4, columnWidth: 8.0)
+        // negative lineCount -> .negativeLineCount, horizontal never consulted
+        let neg = UniformLineMetrics(lineCount: -1, lineHeight: 16.0)
+        XCTAssertEqual(ViewportVirtualizer.pointAt(x: 5.0, y: 5.0, lineMetrics: neg, columnMetrics: h),
+                       .failure(.negativeLineCount))
+        // non-finite y -> .nonFiniteValue (short-circuits before x is ever looked at)
+        let ok = UniformLineMetrics(lineCount: 4, lineHeight: 16.0)
+        XCTAssertEqual(ViewportVirtualizer.pointAt(x: 5.0, y: .nan, lineMetrics: ok, columnMetrics: h),
+                       .failure(.nonFiniteValue))
+    }
+
+    func testHorizontalFailureSurfaces() {
+        let v = UniformLineMetrics(lineCount: 4, lineHeight: 16.0)
+        // valid line located, but non-finite x -> columnAt .nonFiniteValue surfaces
+        let h = UniformColumnMetrics(columnsPerLine: 4, columnWidth: 8.0)
+        XCTAssertEqual(ViewportVirtualizer.pointAt(x: .infinity, y: 20.0, lineMetrics: v, columnMetrics: h),
+                       .failure(.nonFiniteValue))
+        // valid line, but negative columnCount -> .negativeColumnCount surfaces
+        struct NegativeColumnMetrics: LineHorizontalMetricsSource {
+            func columnCount(inLine line: Int) -> Int { -1 }
+            func columnOffset(inLine line: Int, column: Int) -> Double { 0.0 }
+        }
+        XCTAssertEqual(ViewportVirtualizer.pointAt(x: 5.0, y: 20.0, lineMetrics: v, columnMetrics: NegativeColumnMetrics()),
+                       .failure(.negativeColumnCount))
+    }
+
+    func testFailurePrecedenceVerticalWins() {
+        // Both axes would fail: lineCount < 0 AND columnCount < 0 -> vertical error.
+        struct NegativeColumnMetrics: LineHorizontalMetricsSource {
+            func columnCount(inLine line: Int) -> Int { -1 }
+            func columnOffset(inLine line: Int, column: Int) -> Double { 0.0 }
+        }
+        let v = UniformLineMetrics(lineCount: -1, lineHeight: 16.0)
+        XCTAssertEqual(ViewportVirtualizer.pointAt(x: 5.0, y: 5.0, lineMetrics: v, columnMetrics: NegativeColumnMetrics()),
+                       .failure(.negativeLineCount))
+    }
+
+    func testNonFiniteYBeatsEmptyDocument() {
+        // Validation precedes the zero-count short-circuit: NaN y on an empty doc
+        // is .failure(.nonFiniteValue), NOT .empty.
+        let v = UniformLineMetrics(lineCount: 0, lineHeight: 16.0)
+        let h = UniformColumnMetrics(columnsPerLine: 4, columnWidth: 8.0)
+        XCTAssertEqual(ViewportVirtualizer.pointAt(x: 5.0, y: .nan, lineMetrics: v, columnMetrics: h),
+                       .failure(.nonFiniteValue))
+    }
+
+    func testNonFiniteXBeatsBlankLine() {
+        // Validation precedes the blank-line short-circuit: NaN x on a located
+        // blank line is .failure(.nonFiniteValue), NOT .blankLine.
+        let v = UniformLineMetrics(lineCount: 3, lineHeight: 10.0)      // y=15 -> line 1
+        let h = ArrayColumnMetrics(advancesPerLine: [[8.0], [], [8.0]]) // line 1 blank
+        XCTAssertEqual(ViewportVirtualizer.pointAt(x: .nan, y: 15.0, lineMetrics: v, columnMetrics: h),
+                       .failure(.nonFiniteValue))
+    }
 }
