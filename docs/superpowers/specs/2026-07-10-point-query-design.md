@@ -219,6 +219,14 @@ Rationale:
   explicit-enum convention (`ColumnQuery` itself names this state `.empty` rather
   than using `ColumnLocation?`). An optional `ColumnLocation?` was rejected for
   overloading `nil` and departing from that convention.
+- **`.cell` / `.blankLine` rename the 1D states deliberately.** `ColumnResolution`
+  uses `.cell` / `.blankLine` where the 1D `ColumnQuery` uses `.column` / `.empty`.
+  The divergence is intentional point-level disambiguation, not an oversight:
+  `.blankLine` reads unambiguously against the *top-level* `PointQuery.empty`
+  (empty document), which a nested `.empty` would clash with, and `.cell` names the
+  hit result by what it is at the point level. `ColumnResolution` is a distinct
+  point-composition type, so it is free to pick the clearer point-level vocabulary
+  rather than mirror `ColumnQuery`'s case names.
 - **`ColumnResolution` never carries `.failure`.** A horizontal failure is surfaced
   at the top level as `PointQuery.failure`, never nested — so `ColumnResolution`
   has exactly the two states reachable *after* a horizontal success-or-empty, and a
@@ -275,6 +283,14 @@ Precedence and semantics, all forced by the composition and by construction:
   valid `y` therefore surfaces as `columnAt`'s `.nonFiniteValue` *after* the
   vertical query succeeds; a non-finite `y` surfaces as `lineAt`'s
   `.nonFiniteValue` first and short-circuits (the horizontal query never sees `x`).
+- **A horizontal failure discards the located line.** On the `.line(L)` path a
+  horizontal `.failure` (e.g. non-finite `x` over an otherwise valid line) returns
+  top-level `.failure`, so `L` is *not* surfaced — `pointAt` reports "this point did
+  not resolve", not "the line resolved but the cell did not". A caller that needs the
+  line even under a garbage `x` should call `lineAt` directly; folding a valid line
+  into a `.failure` result would require a fourth, half-resolved shape this slice
+  deliberately does not add. This mirrors the 1D contract (a non-finite coordinate is
+  a validation failure, not a clamp).
 - **No independent validation in `pointAt`.** The composite adds no checks of its
   own; every validation is delegated to the two 1D queries, so their contracts
   remain single-sourced and cannot drift.
@@ -297,6 +313,20 @@ Every row is exercised by the unit tests (Testing Strategy). The clamp flags ins
 `H = .column(C, .clampedToLeft)` yields
 `.point(PointLocation(line: L(.clampedToTop), column: .cell(C(.clampedToLeft))))`.
 
+**Validation precedes the zero-count short-circuit (both axes).** The rows above
+read `.empty` / `.blankLine` as if reachable for any coordinate, but in each 1D
+query the `!isFinite` check and the O(1) contract probe run *before* the
+`count == 0` branch (`PositionQuery.swift:19-32`, `HorizontalPositionQuery.swift:18-33`).
+So `.empty` (empty document) is reachable only with a **finite `y` and valid vertical
+metrics**, and `.blankLine` (located blank line) only with a **finite `x` and valid
+horizontal metrics**. Concretely: `(lineCount == 0, y = NaN)` → `V = .failure(.nonFiniteValue)`
+→ `pointAt == .failure`, *not* `.empty`; and `(columnCount == 0, x = NaN)` →
+`H = .failure(.nonFiniteValue)` → `pointAt == .failure`, *not* `.blankLine`. Same for
+a broken contract probe (`.invalidLineMetrics` / `.invalidColumnMetrics`). `pointAt`
+adds nothing here — this is the two 1D ladders composing verbatim — but the contract
+is pinned so no later test wrongly asserts blank-ness (or empty-ness) wins over a
+non-finite coordinate.
+
 ### Decision 5 — File placement mirrors the 1D queries
 
 The public method lives in a new file
@@ -318,9 +348,13 @@ promotion pairs.
 `--gate` becomes valid with `--point-query` automatically: the parser's rejection
 is a **denylist** (`--gate` rejected only with `.rangeOnly` / `.memoryShape` /
 `.memoryObservation` — `BenchmarkOptions.swift:155`), so a new gateable
-`.pointQuery` mode needs no edit there. `AGENTS.md` gains the new local command and
-the `--point-query` flag; its CI section is unchanged because the workflow is
-unchanged.
+`.pointQuery` mode needs no edit there. `AGENTS.md` gains the new local command, the
+`--point-query` flag, **and a sentence in the "Architecture in one paragraph"
+section** introducing `pointAt` as the first two-axis composite (`(x, y)` →
+`(line, cell)`, composing `lineAt ∘ columnAt`, O(log N) + O(log M) queries / O(1)
+core memory) — mirroring how every 1D query (`lineAt`, `lineGeometryAt`, `columnAt`,
+`columnGeometryAt`) is described there. Its CI section is unchanged because the
+workflow is unchanged.
 
 ## Component Design
 
@@ -375,22 +409,33 @@ For each `(x, y)` in the grid, with `V = lineAt(y:lineMetrics)`:
   `H == .failure(e) → pointAt == .failure(e)`.
 
 The grid spans: `y` below 0, at 0, mid-document, at exact line boundaries, at/above
-total height; crossed with `x` below 0, at 0, mid-cell, at exact cell boundaries,
-at/above line width — over both uniform sources and hand-built non-uniform sources,
-including a document containing at least one blank line. Because the expected value
-is *defined* as the 1D composition, this oracle proves parity directly and will
-catch any divergence in ordering, clamp propagation, or blank-line handling.
+total height, **plus non-finite (`NaN`, `±inf`)**; crossed with `x` below 0, at 0,
+mid-cell, at exact cell boundaries, at/above line width, **plus non-finite** — over
+both uniform sources and hand-built non-uniform sources, including a document
+containing at least one blank line **and an empty-document source**. Non-finite
+coordinates crossed with the empty-document and blank-line sources are what lock in
+the "validation precedes the zero-count short-circuit" ordering (Decision 4): the
+expected value is *defined* as the 1D composition, so the oracle derives
+`.failure(.nonFiniteValue)` for those cells automatically rather than `.empty` /
+`.blankLine`. Because the expected value is defined as the 1D composition, this
+oracle proves parity directly and will catch any divergence in ordering, clamp
+propagation, or blank-line handling.
 
 ### Unit tests (`PointAtTests`)
 
 One test per Decision 4 row plus the clamp/precedence cases:
 
-- **Empty document** (`lineCount == 0`) → `.empty`, for any `(x, y)` (including
-  out-of-range on both axes).
+- **Empty document** (`lineCount == 0`) → `.empty`, for any **finite** `(x, y)`
+  (including out-of-range extremes on both axes). A non-finite `y` short-circuits to
+  `.failure(.nonFiniteValue)` even on an empty document (validation precedes the
+  empty short-circuit) — covered by a dedicated case.
 - **In-range cell hit** → `.point(line: L(.inRange), column: .cell(C(.inRange)))`
   with the correct `lineIndex` and `columnIndex`.
 - **Blank located line** (in-range `y` selecting a line whose `columnCount == 0`) →
-  `.point(line: L, column: .blankLine)`, for any `x` (negative, zero, positive).
+  `.point(line: L, column: .blankLine)`, for any **finite** `x` (negative, zero,
+  positive). A non-finite `x` on that same blank line short-circuits to
+  `.failure(.nonFiniteValue)` (validation precedes the blank-line short-circuit) —
+  covered by a dedicated case.
 - **Vertical clamp only**: `y < 0` / `y >= totalHeight` over a non-blank line →
   `line.clamp` is `.clampedToTop` / `.clampedToBottom`, cell still resolved
   `.inRange` (or clamped per `x`).
@@ -442,7 +487,12 @@ New file `Sources/ViewportBenchmarks/PointQueryBenchmark.swift`, modeled on
   `prefixsum_100k` / `prefixsum_1m` (`PrefixSumLineMetrics` ×
   `PrefixSumColumnMetrics`, deterministic varied heights/advances) — each with
   `p95`/`p99` budgets. Large line/cell counts exist only to exercise combined
-  search depth. Because the composite's cost is the *sum* of the two 1D queries, the
+  search depth. These pairings cover the O(1) native-arithmetic vertical path
+  (`UniformLineMetrics`) and the generic O(log N) binary-search fallback
+  (`PrefixSumLineMetrics`); the balanced-tree native-descent path
+  (`BalancedTreeLineMetrics`) is **deliberately not** re-measured here because the
+  point gate's unique job is composition overhead, and that path is already guarded
+  by `--line-query`. Because the composite's cost is the *sum* of the two 1D queries, the
   budgets are set with headroom over the observed combined latency (roughly the sum
   of the corresponding `--line-query` and `--column-query` scenarios), following the
   project's customary margin.
