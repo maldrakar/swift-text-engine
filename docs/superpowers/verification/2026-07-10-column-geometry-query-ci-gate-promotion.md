@@ -233,36 +233,52 @@ then touches only the CI workflow, `AGENTS.md`, and files under `docs/**`
 (design, plan, and this verification record) — no Swift source, benchmark, or
 provider file changed, consistent with a promotion-only slice.
 
-## Hosted Proof — Pending
+## Hosted Proof
 
-Per Decision 3 / the clean-evidence convention documented in the slice plan
-(`docs/superpowers/plans/2026-07-10-column-geometry-query-ci-gate-promotion.md`,
-Task 3/Task 4 split), PR-head and post-merge push run IDs are **not** recorded
-here because this slice's PR head is not yet the final, stable SHA at the time
-this local verification record was written. Recording a run ID against a
-still-moving head risks anchoring evidence to a commit that later gets
-superseded by a fixup, so hosted proof is deliberately deferred to a small
-docs-only post-merge follow-up PR that fills in this section once:
+Recorded post-merge, once the head SHA was stable (per the clean-evidence
+convention / Decision 3 documented in the slice plan). Both hosted runs are
+green at **step level** — not merely at job conclusion — on `ubuntu-latest`
+with `swift:6.2.1-bookworm` (Linux x86_64).
 
-- the PR-head run (`pull_request` event) on the final head SHA is captured,
-  with all three required contexts `success` and the new "Run column geometry
-  query benchmark gate" step verified `success` (not skipped, not
-  `continue-on-error`) at step level; and
-- the post-merge push run (`push` event, merge commit on `main`) is captured
-  the same way, anchoring the merged-behavior evidence.
+**PR-head run — [`29108998305`](https://github.com/maldrakar/swift-text-engine/actions/runs/29108998305)**
+(`pull_request` event, head `bb24c95`):
 
-Two watch scenarios to explicitly confirm on hosted Linux x86_64
-(`swift:6.2.1-bookworm`), since macOS-calibrated budgets need Linux headroom
-evidence and these are the tightest local margins:
+- All three required contexts `success`: `Host tests and benchmark gate`,
+  `iOS cross-target compile`, `WASM cross-target observation`.
+- Host job step `Run column geometry query benchmark gate` = `success` (not
+  skipped, not `continue-on-error`), sitting between `Run column query
+  benchmark gate` and `Run memory shape diagnostic` — the nine blocking
+  latency gates stay contiguous.
+- `Complete docs-only PR` step skipped: this PR touches
+  `.github/workflows/**`, so the heavy path ran, exactly as designed.
 
-- **`prefixsum_100k`** — least multiplicative headroom locally (1395.3×
-  budget ÷ observed p95, per the table above); the scenario most likely to
-  show the smallest hosted headroom too.
-- **`prefixsum_1m`** — largest absolute observed latency locally (47 ns p95 /
-  67 ns p99); the scenario most sensitive in absolute nanoseconds to hosted
-  Linux's typically slower and noisier CPU/scheduler versus local macOS arm64.
+**Post-merge push run — [`29110714042`](https://github.com/maldrakar/swift-text-engine/actions/runs/29110714042)**
+(`push` event, merge commit `52a2eaf` on `main`) — the anchor proof of merged
+behavior:
 
-If either watch scenario (or any scenario) fails its budget on the first
-hosted PR-head run, Decision 3 applies: STOP, do not add `continue-on-error`
-or silently widen budgets — update the spec with the hosted numbers and
-re-derive Linux budgets in `ColumnGeometryQueryBenchmark.swift` instead.
+- All three required contexts `success`; the new gate step `Run column
+  geometry query benchmark gate` = `success`.
+- `Observe realistic provider relative performance` step **skipped** on push
+  (it is PR-only), confirming the event-scoped guard behaves as designed on
+  `main`.
+
+Both runs pass all five `column_geometry_query` scenarios (`gate=pass`,
+`failures=0`) with the five checksums **byte-identical** to the Slice 35
+values, so the promoted benchmark workload is provably unchanged on hosted
+Linux as well as locally:
+
+| scenario | budget p95 (ns) | PR-head p95 / p99 (ns) | push p95 / p99 (ns) | push headroom (p95) | checksum |
+|---|---|---|---|---|---|
+| uniform_1k | 30 000 | 32 / 63 | 34 / 63 | ~882× | 160641440000 |
+| uniform_100k | 60 000 | 43 / 73 | 46 / 75 | ~1 304× | 267505512960 |
+| uniform_1m | 120 000 | 48 / 79 | 52 / 84 | ~2 308× | 799841600000 |
+| **prefixsum_100k** | 60 000 | 70 / 106 | 67 / 105 | ~895× | 223985600000 |
+| **prefixsum_1m** | 120 000 | 82 / 121 | 74 / 109 | ~1 622× | 839521520640 |
+
+Watch-scenario outcome as predicted: **`prefixsum_100k`** held the least
+multiplicative hosted headroom (~857× PR-head, ~895× post-merge) and
+**`prefixsum_1m`** the largest absolute latency (82 ns p95 PR-head, 74 ns
+post-merge) — both comfortably inside budget. Decision 3's stop-and-retune
+path was therefore **not** triggered: no `continue-on-error`, no budget
+widening. The nine blocking latency gates now run contiguously on every
+hosted PR and push.
