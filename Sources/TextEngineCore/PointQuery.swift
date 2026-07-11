@@ -16,6 +16,12 @@ extension ViewportVirtualizer {
     /// zero allocation beyond the returned value structs. Validation is delegated
     /// entirely to the two 1D queries — a non-finite coordinate is a failure, not a
     /// clamp, and it is checked before either axis's zero-count short-circuit.
+    ///
+    /// - Precondition: `lineMetrics` and `columnMetrics` must describe the same
+    ///   document. The line index located by the vertical query is threaded into
+    ///   `columnAt(inLine:)` over the horizontal source, whose `inLine` is itself an
+    ///   unvalidated precondition (`LineHorizontalMetricsSource` carries no line
+    ///   count), so the two sources must agree on the line count.
     public static func pointAt<VMetrics: LineMetricsSource, HMetrics: LineHorizontalMetricsSource>(
         x: Double,
         y: Double,
