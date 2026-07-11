@@ -12,10 +12,13 @@ struct PointQueryScenario {
 
 // Horizontal provider is UniformColumnMetrics in every scenario: line-agnostic,
 // O(1) memory, valid for every located line, still O(log M) search per line.
-// Only the VERTICAL provider varies (uniform native arithmetic vs prefix-sum
-// O(log N) fallback). Balanced-tree vertical descent stays gated by --line-query
-// and variable horizontal advances by --column-query; the point gate's unique job
-// is composition overhead (sum of the two 1D queries).
+// Only the VERTICAL provider varies, and neither uniform provider overrides its
+// native inverse hook, so all four scenarios take the generic binary-search
+// fallback on both axes; the vertical variation is in how offset(ofLine:) is
+// answered (arithmetic vs prefix-sum array read). Provider-native descent stays
+// gated by --line-query (balanced tree) and variable horizontal advances by
+// --column-query; the point gate's unique job is composition overhead (sum of the
+// two 1D queries).
 private let pointColumnsPerLine = 256
 private let pointColumnWidth = 8.0
 private let pointLineHeight = 16.0

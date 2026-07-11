@@ -495,9 +495,12 @@ New file `Sources/ViewportBenchmarks/PointQueryBenchmark.swift`, modeled on
   storage). `UniformColumnMetrics` is line-agnostic (same cells for every line), O(1)
   memory, valid for any located line, and still performs a real O(log M) binary
   search per line (a fixed `columnsPerLine`, e.g. 256, gives genuine search depth).
-  Varying **only the vertical provider** covers the O(1) native-arithmetic vertical
-  path (`UniformLineMetrics`) and the generic O(log N) binary-search fallback
-  (`PrefixSumLineMetrics`). Two paths are **deliberately not** re-measured here
+  Varying **only the vertical provider** changes how `offset(ofLine:)` is answered
+  (constant-time arithmetic in `UniformLineMetrics` vs a prefix-sum array read in
+  `PrefixSumLineMetrics`). Neither uniform provider overrides its native inverse
+  hook, so **all four scenarios take the generic binary-search fallback on both
+  axes** — this gate measures the generic search path, never a provider-native
+  descent. Two paths are **deliberately not** re-measured here
   because the point gate's unique job is composition overhead and each is already
   guarded by its own axis gate: the balanced-tree native-descent vertical path
   (`BalancedTreeLineMetrics`) by `--line-query`, and variable-advance horizontal
@@ -508,11 +511,16 @@ New file `Sources/ViewportBenchmarks/PointQueryBenchmark.swift`, modeled on
 - **Workload**: per operation, derive a deterministic `(x, y)` spanning in-range and
   out-of-range values on both axes (reusing `deterministicScrollOffset` and a
   deterministic fraction of the line width, with a slice of samples pushed
-  below `0` and at/above the edges to exercise both clamp branches and at least one
-  blank line), call `pointAt(x:y:lineMetrics:columnMetrics:)`, and fold the returned
+  below `0` and at/above the edges to exercise both clamp branches),
+  call `pointAt(x:y:lineMetrics:columnMetrics:)`, and fold the returned
   `line.lineIndex`, an integer encoding of the two clamp cases, and the column
   resolution (`cell` index or a `blankLine` sentinel) into a running **checksum**
-  (determinism guard, matching every other benchmark).
+  (determinism guard, matching every other benchmark). The `.blankLine` resolution
+  is **not reachable** in these scenarios — `UniformColumnMetrics` gives every line
+  the same non-zero cell count — so the blank-line branch is covered by the unit and
+  oracle tests, not by the gate. That is the right trade: a blank line short-circuits
+  `columnAt` *early*, so including one would only lower the measured latency and
+  dilute the composite's worst-case signal.
 - **Gate**: `--point-query --gate` enforces `p95`/`p99` budgets and exits non-zero
   on regression; without `--gate` it asserts `failureCount == 0`. Budgets are
   macOS-calibrated; the plan records the observed numbers and sets budgets with the
@@ -614,7 +622,7 @@ is an accepted, time-boxed gap.
 `--point-query` exercises `lineAt` and `columnAt` again, so a regression in either
 1D primitive could surface here as well as in its own gate. This is redundancy, not
 a gap — the composite gate's *unique* job is guarding the composition overhead (the
-ordering, the result assembly, the blank-line branch), which no 1D gate covers. The
+ordering and the result assembly), which no 1D gate covers. The
 redundancy is cheap and consistent with how `lineGeometryAt` / `columnGeometryAt`
 gates also re-measure their base query.
 
