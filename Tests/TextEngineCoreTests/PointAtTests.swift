@@ -111,6 +111,13 @@ final class PointAtTests: XCTestCase {
         let ok = UniformLineMetrics(lineCount: 4, lineHeight: 16.0)
         XCTAssertEqual(ViewportVirtualizer.pointAt(x: 5.0, y: .nan, lineMetrics: ok, columnMetrics: h),
                        .failure(.nonFiniteValue))
+        // offset(ofLine: 0) != 0 breaks the O(1) contract probe -> .invalidLineMetrics
+        struct BrokenLineMetrics: LineMetricsSource {
+            var lineCount: Int { 4 }
+            func offset(ofLine index: Int) -> Double { Double(index) * 16.0 + 1.0 }
+        }
+        XCTAssertEqual(ViewportVirtualizer.pointAt(x: 5.0, y: 5.0, lineMetrics: BrokenLineMetrics(), columnMetrics: h),
+                       .failure(.invalidLineMetrics))
     }
 
     func testHorizontalFailureSurfaces() {
@@ -126,6 +133,13 @@ final class PointAtTests: XCTestCase {
         }
         XCTAssertEqual(ViewportVirtualizer.pointAt(x: 5.0, y: 20.0, lineMetrics: v, columnMetrics: NegativeColumnMetrics()),
                        .failure(.negativeColumnCount))
+        // columnOffset(inLine:column: 0) != 0 breaks the probe -> .invalidColumnMetrics
+        struct BrokenColumnMetrics: LineHorizontalMetricsSource {
+            func columnCount(inLine line: Int) -> Int { 4 }
+            func columnOffset(inLine line: Int, column: Int) -> Double { Double(column) * 8.0 + 1.0 }
+        }
+        XCTAssertEqual(ViewportVirtualizer.pointAt(x: 5.0, y: 20.0, lineMetrics: v, columnMetrics: BrokenColumnMetrics()),
+                       .failure(.invalidColumnMetrics))
     }
 
     func testFailurePrecedenceVerticalWins() {
