@@ -14,8 +14,11 @@ extension ViewportVirtualizer {
     /// Cost is the sum of the two 1D envelopes: O(log N) + O(log M) queries (or
     /// better where a provider overrides its native inverse hook), O(1) core memory,
     /// zero allocation beyond the returned value structs. Validation is delegated
-    /// entirely to the two 1D queries — a non-finite coordinate is a failure, not a
-    /// clamp, and it is checked before either axis's zero-count short-circuit.
+    /// entirely to the two 1D queries: each checks its own coordinate's finiteness
+    /// (a non-finite coordinate is a failure, not a clamp) before its own zero-count
+    /// short-circuit, so a non-finite `y` beats `.empty` and a non-finite `x` beats
+    /// `.blankLine`. `x` is only ever examined by the horizontal query, so an empty
+    /// document returns `.empty` even for a non-finite `x`.
     ///
     /// - Precondition: `lineMetrics` and `columnMetrics` must describe the same
     ///   document. The line index located by the vertical query is threaded into
