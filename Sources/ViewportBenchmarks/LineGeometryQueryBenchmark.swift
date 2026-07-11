@@ -10,27 +10,27 @@ struct LineGeometryQueryScenario {
     let p99BudgetNanoseconds: Int64
 }
 
-// Budgets mirror the --line-query local gate: lineGeometryAt is lineAt plus a
-// constant two offset(ofLine:) probes, so it stays well within the same headroom.
-// Uniform uses the O(log N) fallback; balanced-tree scenarios exercise the native
-// O(log N) index descent plus the two generic O(log N) geometry probes.
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+// Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
+// binds. Do not hand-edit — re-derive.
 func lineGeometryQueryScenarios() -> [LineGeometryQueryScenario] {
     [
         LineGeometryQueryScenario(name: "uniform_1k", providerName: "uniform",
                                   lineCount: 1_000, useBalancedTree: false,
-                                  p95BudgetNanoseconds: 30_000, p99BudgetNanoseconds: 60_000),
+                                  p95BudgetNanoseconds: 270, p99BudgetNanoseconds: 540),
         LineGeometryQueryScenario(name: "uniform_100k", providerName: "uniform",
                                   lineCount: 100_000, useBalancedTree: false,
-                                  p95BudgetNanoseconds: 60_000, p99BudgetNanoseconds: 120_000),
+                                  p95BudgetNanoseconds: 360, p99BudgetNanoseconds: 720),
         LineGeometryQueryScenario(name: "uniform_1m", providerName: "uniform",
                                   lineCount: 1_000_000, useBalancedTree: false,
-                                  p95BudgetNanoseconds: 120_000, p99BudgetNanoseconds: 240_000),
+                                  p95BudgetNanoseconds: 380, p99BudgetNanoseconds: 760),
         LineGeometryQueryScenario(name: "balanced_tree_100k", providerName: "balanced_tree",
                                   lineCount: 100_000, useBalancedTree: true,
-                                  p95BudgetNanoseconds: 300_000, p99BudgetNanoseconds: 600_000),
+                                  p95BudgetNanoseconds: 3_000, p99BudgetNanoseconds: 6_000),
         LineGeometryQueryScenario(name: "balanced_tree_1m", providerName: "balanced_tree",
                                   lineCount: 1_000_000, useBalancedTree: true,
-                                  p95BudgetNanoseconds: 600_000, p99BudgetNanoseconds: 1_200_000),
+                                  p95BudgetNanoseconds: 3_400, p99BudgetNanoseconds: 6_800),
     ]
 }
 

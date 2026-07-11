@@ -10,26 +10,27 @@ struct LineQueryScenario {
     let p99BudgetNanoseconds: Int64
 }
 
-// Budgets remain the hosted Slice 28 values. Uniform uses the default O(log N)
-// fallback; balanced-tree scenarios exercise the native O(log N) provider
-// descent through ViewportVirtualizer.lineAt(y:metrics:).
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+// Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
+// binds. Do not hand-edit — re-derive.
 func lineQueryScenarios() -> [LineQueryScenario] {
     [
         LineQueryScenario(name: "uniform_1k", providerName: "uniform",
                           lineCount: 1_000, useBalancedTree: false,
-                          p95BudgetNanoseconds: 30_000, p99BudgetNanoseconds: 60_000),
+                          p95BudgetNanoseconds: 190, p99BudgetNanoseconds: 430),
         LineQueryScenario(name: "uniform_100k", providerName: "uniform",
                           lineCount: 100_000, useBalancedTree: false,
-                          p95BudgetNanoseconds: 60_000, p99BudgetNanoseconds: 120_000),
+                          p95BudgetNanoseconds: 280, p99BudgetNanoseconds: 560),
         LineQueryScenario(name: "uniform_1m", providerName: "uniform",
                           lineCount: 1_000_000, useBalancedTree: false,
-                          p95BudgetNanoseconds: 120_000, p99BudgetNanoseconds: 240_000),
+                          p95BudgetNanoseconds: 320, p99BudgetNanoseconds: 640),
         LineQueryScenario(name: "balanced_tree_100k", providerName: "balanced_tree",
                           lineCount: 100_000, useBalancedTree: true,
-                          p95BudgetNanoseconds: 300_000, p99BudgetNanoseconds: 600_000),
+                          p95BudgetNanoseconds: 1_700, p99BudgetNanoseconds: 3_400),
         LineQueryScenario(name: "balanced_tree_1m", providerName: "balanced_tree",
                           lineCount: 1_000_000, useBalancedTree: true,
-                          p95BudgetNanoseconds: 600_000, p99BudgetNanoseconds: 1_200_000),
+                          p95BudgetNanoseconds: 2_100, p99BudgetNanoseconds: 4_200),
     ]
 }
 

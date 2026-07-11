@@ -10,28 +10,31 @@ struct ColumnGeometryQueryScenario {
     let p99BudgetNanoseconds: Int64
 }
 
-// columnGeometryAt is columnAt plus a constant two O(1) columnOffset probes, so it
-// stays within the --column-query headroom. Both provider families answer
-// columnOffset in O(1); there is no balanced-tree/Fenwick horizontal analog. Budgets
-// start from the --column-query numbers; the verification step confirms gate=pass and
-// bumps with the project's customary headroom if the constant probes need it.
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+// Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
+// binds. Do not hand-edit — re-derive.
+//
+// columnGeometryAt is columnAt plus a constant two O(1) columnOffset probes. Both
+// provider families answer columnOffset in O(1); there is no balanced-tree/Fenwick
+// horizontal analog.
 func columnGeometryQueryScenarios() -> [ColumnGeometryQueryScenario] {
     [
         ColumnGeometryQueryScenario(name: "uniform_1k", providerName: "uniform",
                                     columnCount: 1_000, useVariableAdvance: false,
-                                    p95BudgetNanoseconds: 30_000, p99BudgetNanoseconds: 60_000),
+                                    p95BudgetNanoseconds: 260, p99BudgetNanoseconds: 520),
         ColumnGeometryQueryScenario(name: "uniform_100k", providerName: "uniform",
                                     columnCount: 100_000, useVariableAdvance: false,
-                                    p95BudgetNanoseconds: 60_000, p99BudgetNanoseconds: 120_000),
+                                    p95BudgetNanoseconds: 350, p99BudgetNanoseconds: 700),
         ColumnGeometryQueryScenario(name: "uniform_1m", providerName: "uniform",
                                     columnCount: 1_000_000, useVariableAdvance: false,
-                                    p95BudgetNanoseconds: 120_000, p99BudgetNanoseconds: 240_000),
+                                    p95BudgetNanoseconds: 390, p99BudgetNanoseconds: 780),
         ColumnGeometryQueryScenario(name: "prefixsum_100k", providerName: "prefixsum",
                                     columnCount: 100_000, useVariableAdvance: true,
-                                    p95BudgetNanoseconds: 60_000, p99BudgetNanoseconds: 120_000),
+                                    p95BudgetNanoseconds: 840, p99BudgetNanoseconds: 1_700),
         ColumnGeometryQueryScenario(name: "prefixsum_1m", providerName: "prefixsum",
                                     columnCount: 1_000_000, useVariableAdvance: true,
-                                    p95BudgetNanoseconds: 120_000, p99BudgetNanoseconds: 240_000),
+                                    p95BudgetNanoseconds: 720, p99BudgetNanoseconds: 1_500),
     ]
 }
 
