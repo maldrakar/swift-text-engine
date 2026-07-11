@@ -200,3 +200,26 @@ public struct ColumnGeometryLocation: Equatable {
         self.clamp = clamp
     }
 }
+
+public enum PointQuery: Equatable {
+    case point(PointLocation)             // a line was located (cell may be blank)
+    case empty                            // empty document: lineCount == 0
+    case failure(ViewportValidationError) // vertical or horizontal validation failure
+}
+
+public struct PointLocation: Equatable {
+    /// The located line (index + vertical clamp). Always a real line.
+    public let line: LineLocation
+    /// The located cell within that line, or `.blankLine` if the line has no cells.
+    public let column: ColumnResolution
+
+    public init(line: LineLocation, column: ColumnResolution) {
+        self.line = line
+        self.column = column
+    }
+}
+
+public enum ColumnResolution: Equatable {
+    case cell(ColumnLocation)             // a real cell was located (index + horizontal clamp)
+    case blankLine                        // located line has no cells (columnCount(inLine:) == 0)
+}

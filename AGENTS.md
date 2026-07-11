@@ -82,6 +82,14 @@ companion to `columnAt`: it composes over `columnAt`, returning the located cell
 `columnOffset(inLine:column:)` probes (O(1) core memory), so its per-provider cost
 class equals `columnAt`'s; caret snapping stays a caller concern.
 `--column-geometry-query` is its blocking host-job CI gate.
+`ViewportVirtualizer.pointAt(x:y:lineMetrics:columnMetrics:)` is the first two-axis
+composite: it maps a single point to `(line, cell)` by composing `lineAt` over a
+`LineMetricsSource` with `columnAt` over a `LineHorizontalMetricsSource` (vertical
+runs first and feeds the located line index to the horizontal query), returning a
+nested `PointQuery` — `.point(PointLocation)` carrying the located `line` plus a
+`ColumnResolution` (`.cell`/`.blankLine`), `.empty` for an empty document, or
+`.failure`. It adds no new search: O(log N) + O(log M) queries / O(1) core memory,
+both clamp flags preserved. Its `--point-query --gate` is **local (not-yet-CI)**.
 
 ## Package layout
 
@@ -111,6 +119,7 @@ swift run -c release ViewportBenchmarks -- --line-query --gate   # y->line posit
 swift run -c release ViewportBenchmarks -- --line-geometry-query --gate   # y->line+box+fraction local gate
 swift run -c release ViewportBenchmarks -- --column-query --gate   # x->cell within-line position-query local gate
 swift run -c release ViewportBenchmarks -- --column-geometry-query --gate   # x->cell+box+fraction within-line local gate
+swift run -c release ViewportBenchmarks -- --point-query --gate   # (x,y)->(line,cell) 2D composite local gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --help            # all flags
@@ -123,12 +132,13 @@ swift run -c release ViewportBenchmarks -- --help            # all flags
 Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
 `--variable-height-mutation`, `--structural-mutation`,
 `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
-`--column-query`, `--column-geometry-query`, `--memory-shape`,
+`--column-query`, `--column-geometry-query`, `--point-query`, `--memory-shape`,
 `--memory-observation`, `--gate`. Only one mode
 flag at a time. `--gate` is valid with the default pipeline, `--realistic-provider`,
 `--variable-height`, `--variable-height-mutation`, `--structural-mutation`,
 `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
-`--column-query`, and `--column-geometry-query` modes; it is **rejected** with
+`--column-query`, `--column-geometry-query`, and `--point-query` modes; it is
+**rejected** with
 `--range-only`, `--memory-shape`,
 `--memory-observation`.
 
