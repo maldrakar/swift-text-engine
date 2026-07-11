@@ -319,6 +319,78 @@ source, test, benchmark, or CI files were modified by any command above.
   PR's final head would otherwise cite a run ID that doesn't correspond to
   the merged code).
 
+## Post-Review Corrections (2026-07-11)
+
+A pre-merge review of the slice against its spec found no P0/P1 and no functional
+defect, but three descriptions that overclaimed. All three were corrected; **no
+algorithm, budget, scenario, or result type changed**, so every number above still
+holds (re-confirmed below).
+
+1. **`PointQuery.swift` doc comment overstated the validation ordering.** It read as
+   an unconditional "a non-finite coordinate ... is checked before *either* axis's
+   zero-count short-circuit", but `pointAt(x: .nan, y: 0.0, lineMetrics: <lineCount 0>)`
+   correctly returns `.empty`: the vertical query short-circuits on the empty document
+   and `x` is never examined. The code is right (and pinned by
+   `PointAtEquivalenceTests.testParityEmptyDocument`); the comment now states the real
+   contract — each 1D query validates its own coordinate before its own zero-count
+   branch, and `x` is only ever examined by the horizontal query.
+2. **The benchmark's provider-path claim was factually wrong.** The scenario comment
+   (and the spec's Benchmark Mode section) said the uniform vertical scenarios cover an
+   "O(1) native-arithmetic vertical path". `UniformLineMetrics` does **not** override
+   `lineIndex(containingOffset:)`, and `UniformColumnMetrics` does not override
+   `columnIndex(containingOffset:inLine:)` — so all four point scenarios take the
+   **generic binary-search fallback on both axes**, and the vertical variation is only in
+   how `offset(ofLine:)` is answered (arithmetic vs prefix-sum array read). Corrected in
+   both places, since the follow-up CI-promotion slice would otherwise reason about gate
+   coverage from a false premise.
+3. **The spec asked the workload to exercise "at least one blank line", which its own
+   provider choice makes impossible.** `UniformColumnMetrics` gives every line the same
+   non-zero cell count, so `.blankLine` is unreachable in all four scenarios. The spec now
+   says so explicitly and records why that is the right trade (a blank line short-circuits
+   `columnAt` early, so it would only *lower* measured latency). Blank-line correctness
+   stays covered by `PointAtTests`, the equivalence oracle, and the reference-provider test.
+
+Additionally, `PointAtTests` now pins the two failure cases the spec's Testing Strategy
+enumerated but the suite had not covered: `.invalidLineMetrics` (vertical
+`offset(ofLine: 0) != 0`) and `.invalidColumnMetrics` (horizontal
+`columnOffset(inLine:column: 0) != 0`). Both were added as assertions inside the existing
+`testVerticalFailureShortCircuits` / `testHorizontalFailureSurfaces` tests, so the **test
+count is unchanged at 232**.
+
+Re-verification at the corrected head:
+
+```text
+$ swift test 2>&1 | grep "Executed 232"
+	 Executed 232 tests, with 0 failures (0 unexpected) in 2.290 (2.301) seconds
+
+$ swift build -c release 2>&1 | tail -1
+Build complete! (2.46s)
+
+$ swift run -c release ViewportBenchmarks -- --point-query --gate
+mode=point_query provider=uniform scenario=uniform_100k ... gate=pass checksum=64166237440
+mode=point_query provider=uniform scenario=uniform_1m ... gate=pass checksum=640022280960
+mode=point_query provider=prefixsum scenario=prefixsum_100k ... gate=pass checksum=64166280960
+mode=point_query provider=prefixsum scenario=prefixsum_1m ... gate=pass checksum=640022228480
+EXIT:0
+
+$ rg -n "Foundation" Sources/TextEngineCore; echo "core exit=$?"
+core exit=1
+
+$ git diff --check
+(no output, exit 0)
+```
+
+All four `--point-query` checksums are **byte-identical** to the §2 baseline above,
+confirming the corrections are comment/doc/test-only and moved no measured path. The nine
+existing gates were independently re-run during the review at branch head `25832de` and all
+36 checksums matched the §3 table byte-for-byte.
+
+**Head note.** §1–§6 above were recorded at `c8b26d7`. Two later commits touch
+`Sources/TextEngineCore/PointQuery.swift` (doc comment only: `25832de`, and correction 1
+above) plus the benchmark comment and the two added assertions. None changes an algorithm,
+and every command above was re-run at the corrected head with identical results, so the
+recorded evidence covers the final head.
+
 ## Hosted Proof — Pending
 
 Real PR-head and post-merge push run IDs are filled in a post-merge follow-up,
