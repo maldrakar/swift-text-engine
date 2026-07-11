@@ -442,10 +442,16 @@ composite. The claim is slightly stronger than the evidence supports.
 
 **7. Carried / standing items, unchanged and correctly out of scope.** Budgets remain
 macOS-calibrated (Option E); both horizontal providers remain fallback-bound with no
-native `columnIndex` descent (Option D); the `join(_:_:)` spec/code naming drift persists
-(carried since Slice 25 — this slice touches no provider source, so it is correctly not a
-Slice 37 defect); the new public types are not `Sendable`, consistent with every existing
-public type in the codebase.
+native `columnIndex` descent (Option D); the new public types are not `Sendable`,
+consistent with every existing public type in the codebase.
+
+**A correction to this review series: the long-carried `join(_:_:)` P3 is retired and
+should stop being carried.** Reviews from Slice 25 through Slice 36 each forwarded a P3
+noting that the bulk-edits spec names the join primitive `join(_:_:)` while the code ships
+`join3`/`join2`. That drift **no longer exists**: the spec
+(`docs/superpowers/specs/2026-06-20-bulk-structural-edits-design.md:91-93`) already carries
+a "Shipped naming note (Slice 29)" reconciling the two. It was retired six slices ago and
+has been copied forward by inertia since. Dropped here deliberately.
 
 No P3 changes whether the merged result is correct.
 
