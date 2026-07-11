@@ -391,16 +391,54 @@ above) plus the benchmark comment and the two added assertions. None changes an 
 and every command above was re-run at the corrected head with identical results, so the
 recorded evidence covers the final head.
 
-## Hosted Proof — Pending
+## Hosted Proof
 
-Real PR-head and post-merge push run IDs are filled in a post-merge follow-up,
-recorded against the stable final head only (never a pre-final commit), per
-the project's standing stale-on-write lesson (Slice 26 and every slice since).
-This section is an intentional placeholder as of this commit:
+Filled in the post-merge follow-up against the stable final head, per the
+project's standing stale-on-write lesson (Slice 26 and every slice since). Both
+runs were verified at **step level**, not by job conclusion, per the "a green job
+can hide a dead `continue-on-error` step" lesson.
 
-- **PR-head run:** *(pending — to be filled once the PR is opened and its
-  final head is stable)*
-- **Post-merge push run:** *(pending — to be filled once merged to `main`)*
-- **Step-level proof** (all nine existing blocking gates + host tests green,
-  new `--point-query` gate correctly absent from any hosted step since it is
-  local-only this slice): *(pending)*
+- **PR-head run: `29150235152`** — PR #77, head
+  `033e7309f235e72a7af8155e4a63772b8640ca16` (`033e730`), event `pull_request`;
+  conclusion `success`, all three required jobs `success`.
+- **Post-merge push run: `29150501304`** — merge commit
+  `ba51a33b5fae5d98c322306976d03845700b0dc8` (`ba51a33`), event `push`, branch
+  `main`; conclusion `success`, all three required jobs `success`. **This is the
+  merged-code evidence anchor for Slice 37.**
+
+Merge parentage confirms the proof anchors the actually-merged head:
+`git rev-list --parents -1 ba51a33` → `ba51a33 e3a7a28 033e730`, so `ba51a33^2`
+is exactly the head that run `29150235152` tested.
+
+### Step-level detail (post-merge push run `29150501304`)
+
+`Host tests and benchmark gate` — every step `success`:
+
+| Step | Name | Conclusion |
+| ---: | --- | --- |
+| 5 | Complete docs-only PR | `skipped` — correct: the merge carries Swift, so the heavy path runs |
+| 7 | Run host tests | `success` — **`Executed 232 tests, with 0 failures`** on merged code |
+| 8–16 | The nine blocking latency gates (synthetic, variable-height, variable-height-mutation, structural-mutation, bulk-structural-mutation, line-query, line-geometry-query, column-query, column-geometry-query) | all `success` |
+| 17 | Run memory shape diagnostic | `success` |
+| 18 | Run RSS memory observation diagnostic | `success` |
+| 19 | Observe realistic provider relative performance | `skipped` — correct: PR-only; it ran `success` in the PR-head run |
+
+`iOS cross-target compile` = `success` (the `Compile cross-target packages for
+iOS` step ran, not skipped); `WASM cross-target observation` = `success`.
+
+**`--point-query` is correctly absent from the hosted run.** `grep -c
+"mode=point_query"` over the full push-run log returns **0** — the gate is
+local-only this slice by design (Decision 6), and no workflow step invokes it.
+Promoting it to a blocking hosted gate is the deferred follow-up slice.
+
+### Hosted checksums cross-checked against the local record
+
+Extracted from the push run's own gate-step logs (verified, not asserted): every
+hosted query-gate checksum is **byte-identical** to the §3 local table —
+`line_query` (`641440000`, `63985556480`, `639841600000`, `63985600000`,
+`639841547520`), `line_geometry_query` (`160641440000`, `267505512960`,
+`799841600000`, `223985600000`, `852321495040`), `column_query` (`641440000`,
+`63985556480`, `639841600000`, `63985600000`, `639841560320`), and
+`column_geometry_query` (`160641440000`, `267505512960`, `799841600000`,
+`223985600000`, `839521520640`). Slice 37 moved no measured path on hosted Linux
+x86_64 either.
