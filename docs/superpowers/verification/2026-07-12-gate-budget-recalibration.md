@@ -1170,8 +1170,69 @@ against a head that then moves is not a proof.
 
 ## 13c. Hosted proof of the final head
 
-Recorded in §13c once the review-response round (§14) has a hosted run on the actual
-PR head. Not guessed here.
+**PR-head run `29195160122`**, head `235a1e78c06b85c833660925b8165f19eb498139`
+(`235a1e7`), event `pull_request`, conclusion `success`. This run covers **every**
+line of Swift, workflow, script, corpus, and budget the slice ships, including the
+review-response round (§14) — it is the first run of which that is true, and it is
+recorded only now, after the last Swift commit, per the rule stated above.
+
+All three required jobs `success`. Verified at **step** level, per the standing
+"a green job can hide a dead `continue-on-error` step" lesson:
+
+```text
+5  skipped  Complete docs-only PR          (correct — the PR carries Swift, so the heavy path runs)
+7  success  Run host tests                 → Executed 251 tests, with 0 failures
+8-17 success  all TEN blocking latency gates
+18-19 success  memory diagnostics
+20 success  Observe realistic provider relative performance   (ran, not skipped)
+```
+
+`iOS cross-target compile` = `success` and `WASM cross-target observation` = `success`,
+both with their substantive compile steps genuinely executed.
+
+**251 tests pass on hosted Linux x86_64.** This is the load-bearing new fact:
+`GateFloorTests` reads the committed corpus off disk via `#filePath`, and it resolves
+and passes inside the container, not merely on macOS.
+
+### The band holds on the machine the budgets were cut for
+
+Across all 41 gated scenarios in the hosted log:
+
+```text
+$ grep -c "gate=pass" <log>   → 41
+$ grep -c "gate=fail" <log>   → 0
+headroom_p95:  4.4x – 12.6x    (floor 3x, ceiling 50x)
+headroom_p99:  6.6x – 22.3x    (ceiling 100x)
+```
+
+Every budget sits inside the band on hosted — the tightest at **4.4×**, comfortably
+above the 3× floor, and the loosest at **12.6×**, nowhere near the 50× ceiling. This is
+what a calibrated suite looks like, and it is the direct answer to the pre-slice state
+where the same statistic ran 815×–3,000×.
+
+### `mode=point_query` is present, the observation step is gone
+
+```text
+$ grep -c "mode=point_query" <log>      → 4
+$ grep -c "Observe point query" <log>   → 0
+```
+
+The four point-query gate lines on hosted:
+
+```text
+mode=point_query provider=uniform   scenario=uniform_100k   p95_ns=60 p99_ns=92  budget_p95_ns=700  headroom_p95=11.7x gate=pass
+mode=point_query provider=uniform   scenario=uniform_1m     p95_ns=65 p99_ns=96  budget_p95_ns=670  headroom_p95=10.3x gate=pass
+mode=point_query provider=prefixsum scenario=prefixsum_100k p95_ns=76 p99_ns=113 budget_p95_ns=880  headroom_p95=11.6x gate=pass
+mode=point_query provider=prefixsum scenario=prefixsum_1m   p95_ns=82 p99_ns=116 budget_p95_ns=1000 headroom_p95=12.2x gate=pass
+```
+
+The tenth gate is blocking, and it is a gate that can now actually fail.
+
+### Why this run's samples are NOT in the corpus either
+
+Same reason as §13b: the corpus is the derivation's **input**, this run is the
+**validation** of its output. Folding a validating run back in would move the medians,
+change the budgets, and require another run to validate those.
 
 ## Hosted Proof — Pending
 
