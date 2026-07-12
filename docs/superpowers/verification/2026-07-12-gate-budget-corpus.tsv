@@ -560,3 +560,7 @@ run_id	mode	scenario	p95_ns	p99_ns
 29184456256	point_query	prefixsum_1m	133	156
 29184456256	point_query	uniform_100k	96	132
 29184456256	point_query	uniform_1m	96	128
+29184686762	point_query	prefixsum_100k	132	159
+29184686762	point_query	prefixsum_1m	171	202
+29184686762	point_query	uniform_100k	97	133
+29184686762	point_query	uniform_1m	83	108

@@ -10,6 +10,20 @@ struct PointQueryScenario {
     let p99BudgetNanoseconds: Int64
 }
 
+private let pointColumnsPerLine = 256
+private let pointColumnWidth = 8.0
+private let pointLineHeight = 16.0
+
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+// Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
+// binds. Do not hand-edit — re-derive.
+//
+// Derived from a 3-run base — the thinnest of any gated mode, because --point-query
+// had no hosted history and observed for three runs before it gated. The 3x-max floor
+// therefore carries more of the budget here than elsewhere; this is the mode most
+// likely to need an upward re-derivation as the corpus grows.
+//
 // Horizontal provider is UniformColumnMetrics in every scenario: line-agnostic,
 // O(1) memory, valid for every located line, still O(log M) search per line.
 // Only the VERTICAL provider varies, and neither uniform provider overrides its
@@ -17,26 +31,23 @@ struct PointQueryScenario {
 // fallback on both axes; the vertical variation is in how offset(ofLine:) is
 // answered (arithmetic vs prefix-sum array read). Provider-native descent stays
 // gated by --line-query (balanced tree) and variable horizontal advances by
-// --column-query; the point gate's unique job is composition overhead (sum of the
-// two 1D queries).
-private let pointColumnsPerLine = 256
-private let pointColumnWidth = 8.0
-private let pointLineHeight = 16.0
-
+// --column-query; the point gate's unique job is composition overhead — hosted
+// medians run ~1.2x the sum of the two 1D queries, which is protocol dispatch
+// with no cross-inlining, not hidden work.
 func pointQueryScenarios() -> [PointQueryScenario] {
     [
         PointQueryScenario(name: "uniform_100k", providerName: "uniform",
                            lineCount: 100_000, useVariableHeights: false,
-                           p95BudgetNanoseconds: 120_000, p99BudgetNanoseconds: 240_000),
+                           p95BudgetNanoseconds: 770, p99BudgetNanoseconds: 1_600),
         PointQueryScenario(name: "uniform_1m", providerName: "uniform",
                            lineCount: 1_000_000, useVariableHeights: false,
-                           p95BudgetNanoseconds: 240_000, p99BudgetNanoseconds: 480_000),
+                           p95BudgetNanoseconds: 770, p99BudgetNanoseconds: 1_600),
         PointQueryScenario(name: "prefixsum_100k", providerName: "prefixsum",
                            lineCount: 100_000, useVariableHeights: true,
-                           p95BudgetNanoseconds: 120_000, p99BudgetNanoseconds: 240_000),
+                           p95BudgetNanoseconds: 900, p99BudgetNanoseconds: 1_800),
         PointQueryScenario(name: "prefixsum_1m", providerName: "prefixsum",
                            lineCount: 1_000_000, useVariableHeights: true,
-                           p95BudgetNanoseconds: 240_000, p99BudgetNanoseconds: 480_000),
+                           p95BudgetNanoseconds: 1_100, p99BudgetNanoseconds: 2_200),
     ]
 }
 
