@@ -182,8 +182,21 @@ final class GateLogicTests: XCTestCase {
 
     // The p95-only ceiling cannot see an inflated p99 budget, so pin it statically
     // over the real scenario tables.
-    func testEveryScenarioTableKeepsP99AtLeastTwiceP95() {
+    // The recipe in .github/scripts/derive-gate-budgets.sh sets
+    // budget_p99 = max(2 * budget_p95, ...), so every budget it produces satisfies
+    // p99 >= 2 * p95. This pins that property for the tables whose budgets the recipe
+    // produced, so a hand-edit cannot quietly break the invariant that
+    // GateLimits.maxHeadroomP99 = 2 * maxHeadroomP95 relies on.
+    //
+    // The mutation tables (structural, variable-height, bulk) are deliberately absent:
+    // their budgets predate the recipe and were left alone because they were already
+    // correctly calibrated, and they sit below 2x. Do NOT "complete" this list with
+    // them -- they would fail, and the fix is a re-derivation, not a wider assertion.
+    func testEveryRecipeDerivedScenarioTableKeepsP99AtLeastTwiceP95() {
         var budgets: [(String, Int64, Int64)] = []
+        for s in benchmarkScenarios() {
+            budgets.append(("pipeline|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
+        }
         for s in lineQueryScenarios() {
             budgets.append(("line_query|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
         }

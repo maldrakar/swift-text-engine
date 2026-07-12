@@ -22,21 +22,46 @@ struct RealisticProviderScenario {
 }
 
 enum GateLimits {
-    // The budget must stay within this multiple of observed latency, or it is
-    // guarding nothing. Calibrated against the fastest machine in play (local
-    // macOS arm64, which runs 2-3x faster than hosted CI and so shows the highest
-    // headroom): worst observed scenario is 25.9x (bulk_structural_mutation|100k_lines_batch_4096),
-    // leaving 1.9x of margin.
+    // A budget far above observed latency guards nothing, so the gate fails when
+    // headroom is too LOOSE as well as when it is exceeded.
+    //
+    // This ceiling is calibrated against the FASTEST machine in play. Budgets are
+    // derived from hosted Linux x86_64 samples, but local macOS arm64 runs 2-3x
+    // faster, so the same budget shows its highest headroom locally. A ceiling has
+    // to clear what the fastest machine reports, or it would condemn budgets that
+    // are correctly calibrated for the machine they were derived on. That reasoning
+    // fixes the ceiling's role; it does not depend on any particular measurement.
+    //
+    // Deliberately NO "worst observed is X.Yx" figure here. Headroom is
+    // budget / observed, so every budget re-derivation moves it without touching
+    // this file -- which is exactly how the previous version of this comment came
+    // to state numbers that were no longer true. To find today's worst, run the ten
+    // gate modes and read the headroom_p95= field; recorded measurements live in
+    // docs/superpowers/verification/2026-07-12-gate-budget-recalibration.md.
     static let maxHeadroomP95: Double = 50.0
 
-    // The derivation formula sets budget_p99 = max(2 * budget_p95, 8 *
-    // median(p99), 3 * max(p99)), so budget_p99 is >= 2x budget_p95 BY
-    // CONSTRUCTION. The p99 ceiling is therefore the p95 ceiling doubled --
-    // that keeps the two guards equally tight rather than making p99 the
-    // binding one. Measured worst local p99 headroom today is 44.5x
-    // (variable_height|1m_lines_200_visible_overscan_50), leaving 2.2x of
-    // margin -- the mirror of p95's worst 25.9x against its 50x ceiling.
-    // Computed as 2x p95 to prevent silent drift if maxHeadroomP95 is tightened.
+    // Exactly twice the p95 ceiling, and computed from it so that tightening the
+    // p95 ceiling cannot silently decouple the two.
+    //
+    // Why 2x is the right coupling -- structural, not measured: the derivation
+    // recipe (.github/scripts/derive-gate-budgets.sh) sets
+    //   budget_p99 = max(2 * budget_p95, 8 * median(p99), 3 * max(p99))
+    // so a recipe-derived budget_p99 is >= 2 * budget_p95 BY CONSTRUCTION. Yet
+    // observed p99 can EQUAL observed p95: these operations are sub-microsecond and
+    // the clock is ns-quantized, so both quantiles routinely land on the same tick.
+    // A scenario can therefore show ~2x its p95 headroom on p99 while being
+    // perfectly in-band on p95. Any p99 ceiling tighter than 2 * maxHeadroomP95
+    // would condemn budgets the recipe itself produced.
+    //
+    // Scope of the >= 2x guarantee: it holds for budgets the recipe produced. The
+    // mutation tables predate the recipe and were left alone because they were
+    // already correctly calibrated; their p99 budgets sit below 2x their p95, so
+    // for them this ceiling is slack and never wrongly binds. GateLogicTests
+    // asserts the >= 2x property over exactly the recipe-derived tables.
+    //
+    // Observed p99 headroom is even less quotable than p95: on the fastest scenarios
+    // p99 is effectively a single tail sample and swings by more than 1.5x between
+    // runs of an UNCHANGED binary. Re-measure it; never trust a number written here.
     static let maxHeadroomP99: Double = 2 * maxHeadroomP95
 }
 

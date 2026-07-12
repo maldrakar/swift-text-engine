@@ -19,12 +19,18 @@ private let pointLineHeight = 16.0
 // Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
 // binds. Do not hand-edit — re-derive.
 //
-// Derived from a 3-run base — the thinnest of any gated mode, because --point-query
-// had no hosted history and observed for three runs before it gated (every other
-// recalibrated mode has n>=5). That thin sample — not the 3x-max floor, which does
-// not bind here: in all four scenarios 8x-median is the larger term (e.g.
-// prefixsum_100k: 8x112=896 vs 3x132=396) — is why this is the mode most likely to
-// need an upward re-derivation as the corpus grows.
+// This mode rests on the THINNEST corpus base of any gated mode: --point-query had
+// no hosted history when it was promoted, so it has the fewest samples per scenario
+// of anything gated. That thin base — not the 3x-max floor, which does not bind here
+// at all, because 8x-median is the larger term in every point scenario — is why this
+// is the mode most likely to need an upward re-derivation as evidence accumulates.
+//
+// Both of those claims are checkable, and neither is restated as a number here on
+// purpose: an earlier version of this comment quoted a sample count and the
+// arithmetic of one scenario, and a later append to the corpus silently falsified
+// both. Run `.github/scripts/derive-gate-budgets.sh <corpus> point_query` to see
+// today's n, medians, maxima, and which term binds; count the mode's rows in the
+// corpus to compare its n against the other gated modes.
 //
 // Horizontal provider is UniformColumnMetrics in every scenario: line-agnostic,
 // O(1) memory, valid for every located line, still O(log M) search per line.
@@ -33,9 +39,10 @@ private let pointLineHeight = 16.0
 // fallback on both axes; the vertical variation is in how offset(ofLine:) is
 // answered (arithmetic vs prefix-sum array read). Provider-native descent stays
 // gated by --line-query (balanced tree) and variable horizontal advances by
-// --column-query; the point gate's unique job is composition overhead — hosted
-// medians run ~1.2x the sum of the two 1D queries, which is protocol dispatch
-// with no cross-inlining, not hidden work.
+// --column-query, so each axis's own search cost is already guarded elsewhere.
+// The point gate's unique job is therefore the composition overhead layered on top
+// of them: protocol dispatch across the two axes with no cross-inlining, not hidden
+// work.
 func pointQueryScenarios() -> [PointQueryScenario] {
     [
         PointQueryScenario(name: "uniform_100k", providerName: "uniform",
