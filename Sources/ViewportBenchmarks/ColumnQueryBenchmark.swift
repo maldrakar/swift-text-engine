@@ -26,16 +26,16 @@ func columnQueryScenarios() -> [ColumnQueryScenario] {
                             p95BudgetNanoseconds: 200, p99BudgetNanoseconds: 400),
         ColumnQueryScenario(name: "uniform_100k", providerName: "uniform",
                             columnCount: 100_000, useVariableAdvance: false,
-                            p95BudgetNanoseconds: 300, p99BudgetNanoseconds: 600),
+                            p95BudgetNanoseconds: 280, p99BudgetNanoseconds: 560),
         ColumnQueryScenario(name: "uniform_1m", providerName: "uniform",
                             columnCount: 1_000_000, useVariableAdvance: false,
                             p95BudgetNanoseconds: 320, p99BudgetNanoseconds: 640),
         ColumnQueryScenario(name: "prefixsum_100k", providerName: "prefixsum",
                             columnCount: 100_000, useVariableAdvance: true,
-                            p95BudgetNanoseconds: 460, p99BudgetNanoseconds: 920),
+                            p95BudgetNanoseconds: 470, p99BudgetNanoseconds: 940),
         ColumnQueryScenario(name: "prefixsum_1m", providerName: "prefixsum",
                             columnCount: 1_000_000, useVariableAdvance: true,
-                            p95BudgetNanoseconds: 570, p99BudgetNanoseconds: 1_200),
+                            p95BudgetNanoseconds: 580, p99BudgetNanoseconds: 1_200),
     ]
 }
 

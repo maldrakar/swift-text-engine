@@ -14,17 +14,24 @@ struct LineGeometryQueryScenario {
 // against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
 // Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
 // binds. Do not hand-edit — re-derive.
+//
+// uniform_1k's p99 budget (990) is ~4x its p95 budget (250) — wider than the usual
+// 2x coupling, and not a typo. Hosted runners show a heavy p99 tail on this
+// smallest scenario: one sample hit 330ns against a 62ns median. The recipe's 3x
+// floor over max(observed p99) is what sets the number; without it the budget
+// would sit ~1.6x above an already-observed sample and go red on runner noise
+// alone. uniform_1m carries a milder version of the same tail (max p99 265).
 func lineGeometryQueryScenarios() -> [LineGeometryQueryScenario] {
     [
         LineGeometryQueryScenario(name: "uniform_1k", providerName: "uniform",
                                   lineCount: 1_000, useBalancedTree: false,
-                                  p95BudgetNanoseconds: 270, p99BudgetNanoseconds: 540),
+                                  p95BudgetNanoseconds: 250, p99BudgetNanoseconds: 990),
         LineGeometryQueryScenario(name: "uniform_100k", providerName: "uniform",
                                   lineCount: 100_000, useBalancedTree: false,
-                                  p95BudgetNanoseconds: 360, p99BudgetNanoseconds: 720),
+                                  p95BudgetNanoseconds: 340, p99BudgetNanoseconds: 680),
         LineGeometryQueryScenario(name: "uniform_1m", providerName: "uniform",
                                   lineCount: 1_000_000, useBalancedTree: false,
-                                  p95BudgetNanoseconds: 380, p99BudgetNanoseconds: 760),
+                                  p95BudgetNanoseconds: 380, p99BudgetNanoseconds: 800),
         LineGeometryQueryScenario(name: "balanced_tree_100k", providerName: "balanced_tree",
                                   lineCount: 100_000, useBalancedTree: true,
                                   p95BudgetNanoseconds: 3_000, p99BudgetNanoseconds: 6_000),
