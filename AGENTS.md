@@ -131,7 +131,8 @@ swift run -c release ViewportBenchmarks -- --point-query --gate   # (x,y)->(line
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --help            # all flags
-./.github/scripts/harvest-gate-corpus.sh --limit 40          # hosted CI logs -> corpus rows (append half)
+./.github/scripts/harvest-gate-corpus.sh --limit 40 --corpus <corpus.tsv>   # hosted CI logs -> NEW corpus rows (append half)
+./.github/scripts/harvest-gate-corpus.sh --self-test         # harvest selection-logic self-test (no network)
 ./.github/scripts/derive-gate-budgets.sh <corpus.tsv> <mode> # corpus -> budgets (re-derive half)
 ./.github/scripts/cross-target-compile.sh --self-test        # shell logic self-test (no toolchain)
 ./.github/scripts/cross-target-compile.sh                    # local iOS/WASM cross-compile
@@ -253,8 +254,14 @@ when it doesn't.
 hosted evidence, then re-derive from it:
 
 ```bash
-# 1. append: pull hosted samples out of CI logs into the corpus
+# 1. append: pull hosted samples out of CI logs into the corpus.
+#    --corpus makes the harvest IDEMPOTENT: it skips runs the corpus already
+#    carries (before fetching their logs) and emits only new ones. Without it the
+#    append re-adds every run inside the --limit window that was harvested before,
+#    and a double-counted run double-weights itself in median() -- the term that
+#    governs most budgets. Preview the decisions with --dry-run.
 ./.github/scripts/harvest-gate-corpus.sh --limit 40 \
+  --corpus docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv \
   >> docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv
 
 # 2. re-derive: <mode> may be spelled point-query or point_query; a mode with no
@@ -267,6 +274,17 @@ budget_p99 = round_up_2sf(max(2 x budget_p95, 8 x median(p99), 3 x max(p99)))
 ```
 
 The 3x floor covers both statistics because the gate fails on either.
+
+The corpus is **append-only**, and the run id is its dedup key — one run
+legitimately contributes many rows (a `realistic_provider` run contributes 8), and
+two of them can be byte-identical. So `sort -u` over the corpus is **not** a
+substitute for `--corpus`: it would collapse two genuine repetitions that happened
+to measure the same nanoseconds, and it reorders every row.
+
+The one time to harvest **without** `--corpus` is when the harvester learns to read
+a *new line shape* (as it did for `realistic_provider`): previously-harvested runs
+then hold rows the corpus never captured, so the corpus must be **rebuilt** from a
+full sweep, not appended to.
 
 `--realistic-provider` is the one gated mode CI never runs with `--gate` (the
 PR-only observation step runs it bare and keeps the benchmark output in a temp
