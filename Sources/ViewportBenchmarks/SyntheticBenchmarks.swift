@@ -39,11 +39,12 @@ func benchmarkScenarios() -> [BenchmarkScenario] {
         // Budget re-derived from hosted Linux x86_64 by
         // .github/scripts/derive-gate-budgets.sh against
         // docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
-        // The prior 100_000/200_000 sat below the recipe's 3x floor
-        // (3 * max observed hosted p95 39,381ns = 118,143ns), giving this
-        // scenario the suite's thinnest hosted headroom at 2.9x. Do not
-        // hand-edit -- re-derive. (The other two scenarios in this file are
-        // unrelated and remain their pre-slice-38 values.)
+        // The prior budget sat BELOW the recipe's 3x floor over the worst observed
+        // hosted p95 -- close enough to a sample already seen that runner noise alone
+        // would eventually turn this blocking gate red on a clean tree. GateFloorTests
+        // now pins that floor for every gated scenario. Do not hand-edit -- re-derive.
+        // (The other two scenarios in this file were already above the floor and keep
+        // their pre-slice-38 values.)
         BenchmarkScenario(
             name: "1m_lines_200_visible_overscan_50",
             lineCount: 1_000_000,

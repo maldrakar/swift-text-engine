@@ -15,12 +15,13 @@ struct LineGeometryQueryScenario {
 // Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
 // binds. Do not hand-edit — re-derive.
 //
-// uniform_1k's p99 budget (990) is ~4x its p95 budget (250) — wider than the usual
-// 2x coupling, and not a typo. Hosted runners show a heavy p99 tail on this
-// smallest scenario: one sample hit 330ns against a 62ns median. The recipe's 3x
-// floor over max(observed p99) is what sets the number; without it the budget
-// would sit ~1.6x above an already-observed sample and go red on runner noise
-// alone. uniform_1m carries a milder version of the same tail (max p99 265).
+// uniform_1k's p99 budget is far wider than the usual 2x coupling with its p95 budget,
+// and that is not a typo: hosted runners show a heavy p99 tail on the smallest uniform
+// scenarios, so the recipe's 3x floor over max(observed p99) -- not the 8x-median term --
+// is what sets the number. Run
+// `.github/scripts/derive-gate-budgets.sh <corpus> line_geometry_query` to see today's
+// medians, maxima, and which term binds; no figure is quoted here because the next corpus
+// append would silently falsify it.
 func lineGeometryQueryScenarios() -> [LineGeometryQueryScenario] {
     [
         LineGeometryQueryScenario(name: "uniform_1k", providerName: "uniform",
