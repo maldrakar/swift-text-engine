@@ -20,9 +20,11 @@ private let pointLineHeight = 16.0
 // binds. Do not hand-edit — re-derive.
 //
 // Derived from a 3-run base — the thinnest of any gated mode, because --point-query
-// had no hosted history and observed for three runs before it gated. The 3x-max floor
-// therefore carries more of the budget here than elsewhere; this is the mode most
-// likely to need an upward re-derivation as the corpus grows.
+// had no hosted history and observed for three runs before it gated (every other
+// recalibrated mode has n>=5). That thin sample — not the 3x-max floor, which does
+// not bind here: in all four scenarios 8x-median is the larger term (e.g.
+// prefixsum_100k: 8x112=896 vs 3x132=396) — is why this is the mode most likely to
+// need an upward re-derivation as the corpus grows.
 //
 // Horizontal provider is UniformColumnMetrics in every scenario: line-agnostic,
 // O(1) memory, valid for every located line, still O(log M) search per line.
