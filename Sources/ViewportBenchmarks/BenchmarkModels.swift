@@ -27,6 +27,15 @@ enum GateLimits {
     // macOS arm64, which runs 2-3x faster than hosted CI and so shows the highest
     // headroom): no scenario exceeds 23x there, leaving >= 2.2x of margin.
     static let maxHeadroomP95: Double = 50.0
+
+    // The derivation formula sets budget_p99 = max(2 * budget_p95, 8 *
+    // median(p99), 3 * max(p99)), so budget_p99 is >= 2x budget_p95 BY
+    // CONSTRUCTION. The p99 ceiling is therefore the p95 ceiling doubled --
+    // that keeps the two guards equally tight rather than making p99 the
+    // binding one. Measured worst local p99 headroom today is 44.5x
+    // (variable_height|1m_lines_200_visible_overscan_50), leaving 2.2x of
+    // margin -- the mirror of p95's worst 25.9x against its 50x ceiling.
+    static let maxHeadroomP99: Double = 100.0
 }
 
 enum GateFailureReason: String {
@@ -62,6 +71,16 @@ struct BenchmarkSummary {
         return Double(p95BudgetNanoseconds) / Double(p95Nanoseconds)
     }
 
+    var headroomP99: Double? {
+        guard let p99BudgetNanoseconds else {
+            return nil
+        }
+        if p99Nanoseconds <= 0 {
+            return .infinity
+        }
+        return Double(p99BudgetNanoseconds) / Double(p99Nanoseconds)
+    }
+
     // A gate that cannot fail is not a gate. `budgetStale` is what makes an
     // inflated budget a build error rather than a silent no-op: the two causes
     // demand opposite responses (fix the code vs. re-derive the budget), so the
@@ -77,6 +96,9 @@ struct BenchmarkSummary {
             return .budgetExceeded
         }
         if let headroomP95, headroomP95 > GateLimits.maxHeadroomP95 {
+            return .budgetStale
+        }
+        if let headroomP99, headroomP99 > GateLimits.maxHeadroomP99 {
             return .budgetStale
         }
         return nil

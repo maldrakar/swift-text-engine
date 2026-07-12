@@ -105,13 +105,15 @@ func formatSummary(_ summary: BenchmarkSummary, includeGate: Bool) -> String {
     if includeGate {
         guard let p95BudgetNanoseconds = summary.p95BudgetNanoseconds,
               let p99BudgetNanoseconds = summary.p99BudgetNanoseconds,
-              let headroomP95 = summary.headroomP95 else {
+              let headroomP95 = summary.headroomP95,
+              let headroomP99 = summary.headroomP99 else {
             preconditionFailure("gate output requires budget values")
         }
 
         output += " budget_p95_ns=\(p95BudgetNanoseconds)"
         output += " budget_p99_ns=\(p99BudgetNanoseconds)"
         output += " headroom_p95=\(formatHeadroom(headroomP95))"
+        output += " headroom_p99=\(formatHeadroom(headroomP99))"
         output += " gate=\(summary.passesGate ? "pass" : "fail")"
         if let reason = summary.gateFailureReason {
             output += " reason=\(reason.rawValue)"

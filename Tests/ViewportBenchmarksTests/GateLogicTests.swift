@@ -54,6 +54,18 @@ final class GateLogicTests: XCTestCase {
         XCTAssertEqual(pastCeiling.gateFailureReason, .budgetStale)
     }
 
+    // Same boundary, mirrored on the p99 ceiling (100.0x). p95 is kept safely
+    // in-band here so only the p99 ceiling is under test.
+    func testP99CeilingBoundaryIsInclusive() {
+        let atCeiling = summary(p95: 10, p99: 20, budgetP95: 100, budgetP99: 2_000)
+        XCTAssertEqual(atCeiling.headroomP99, 100.0)
+        XCTAssertTrue(atCeiling.passesGate)
+
+        let pastCeiling = summary(p95: 10, p99: 20, budgetP95: 100, budgetP99: 2_001)
+        XCTAssertFalse(pastCeiling.passesGate)
+        XCTAssertEqual(pastCeiling.gateFailureReason, .budgetStale)
+    }
+
     // The two failures demand opposite responses, so the gate must say which it is.
     func testSlowCodeAndStaleBudgetAreDistinguished() {
         let slow = summary(p95: 400, p99: 700, budgetP95: 330, budgetP99: 660)
@@ -63,8 +75,11 @@ final class GateLogicTests: XCTestCase {
         XCTAssertEqual(slowOnP99Only.gateFailureReason, .budgetExceeded)
     }
 
+    // Budgets here are deliberately stale (would fail on their own with
+    // .budgetStale), so this actually proves operationFailures outranks the
+    // budget checks rather than just being the only failing branch available.
     func testOperationFailuresOutrankBudgetChecks() {
-        let s = summary(p95: 40, p99: 70, budgetP95: 330, budgetP99: 660, failures: 1)
+        let s = summary(p95: 20, p99: 40, budgetP95: 60_000, budgetP99: 120_000, failures: 1)
         XCTAssertEqual(s.gateFailureReason, .operationFailures)
     }
 
@@ -73,17 +88,43 @@ final class GateLogicTests: XCTestCase {
         XCTAssertFalse(s.passesGate)
         XCTAssertEqual(s.gateFailureReason, .missingBudget)
         XCTAssertNil(s.headroomP95)
+        XCTAssertNil(s.headroomP99)
     }
 
     // A workload too cheap for the clock guards nothing. Must not divide by zero.
     func testZeroLatencyIsUnboundedHeadroomAndFails() {
         let s = summary(p95: 0, p99: 0, budgetP95: 330, budgetP99: 660)
         XCTAssertEqual(s.headroomP95, .infinity)
+        XCTAssertEqual(s.headroomP99, .infinity)
         XCTAssertEqual(s.gateFailureReason, .budgetStale)
     }
 
     func testHeadroomIsBudgetOverP95() {
         XCTAssertEqual(summary(p95: 40, p99: 70, budgetP95: 320, budgetP99: 640).headroomP95, 8.0)
+    }
+
+    // headroomP99 mirrors headroomP95 exactly: budget_p99 / p99.
+    func testHeadroomIsBudgetOverP99() {
+        XCTAssertEqual(summary(p95: 40, p99: 70, budgetP95: 320, budgetP99: 700).headroomP99, 10.0)
+    }
+
+    // headroomP99 is nil independently of headroomP95's own presence -- a p95
+    // budget alone must not make headroomP99 non-nil.
+    func testHeadroomP99IsNilWithNoP99Budget() {
+        let s = summary(p95: 40, p99: 70, budgetP95: 320, budgetP99: nil)
+        XCTAssertNotNil(s.headroomP95)
+        XCTAssertNil(s.headroomP99)
+    }
+
+    // This is the exact hole the review found: the p95-only ceiling cannot see
+    // an inflated p99 budget, so a pure-tail regression (p99 blows up while p95
+    // stays steady behind an honest, in-band p95 budget) would previously pass
+    // the gate. With the p99 ceiling in place it must now fail as budget_stale.
+    func testInflatedP99BudgetFailsTheGateEvenWithHonestP95Budget() {
+        let s = summary(p95: 40, p99: 70, budgetP95: 320, budgetP99: 1_000_000_000)
+        XCTAssertLessThanOrEqual(s.headroomP95 ?? .infinity, GateLimits.maxHeadroomP95)
+        XCTAssertFalse(s.passesGate)
+        XCTAssertEqual(s.gateFailureReason, .budgetStale)
     }
 
     func testGateOutputCarriesHeadroomAndReason() {
@@ -99,11 +140,32 @@ final class GateLogicTests: XCTestCase {
         XCTAssertTrue(stale.contains(" reason=budget_stale"), stale)
     }
 
+    // headroom_p99 rides alongside headroom_p95 in gate output, immediately
+    // after it and before gate=. No Foundation-only String API here (split /
+    // hasPrefix are stdlib) since Sources/ViewportBenchmarks must stay
+    // Foundation-free and this pins the field order without needing it.
+    func testGateOutputCarriesHeadroomP99() {
+        let passing = formatSummary(
+            summary(p95: 40, p99: 70, budgetP95: 320, budgetP99: 700), includeGate: true)
+        XCTAssertTrue(passing.contains(" headroom_p99=10.0x"), passing)
+
+        let tokens = passing.split(separator: " ")
+        guard let p95Index = tokens.firstIndex(where: { $0.hasPrefix("headroom_p95=") }),
+              let p99Index = tokens.firstIndex(where: { $0.hasPrefix("headroom_p99=") }),
+              let gateIndex = tokens.firstIndex(where: { $0.hasPrefix("gate=") }) else {
+            XCTFail("expected headroom_p95, headroom_p99, and gate fields: \(passing)")
+            return
+        }
+        XCTAssertTrue(p95Index < p99Index, passing)
+        XCTAssertTrue(p99Index < gateIndex, passing)
+    }
+
     // Non-gate output is a separate contract and must not change.
     func testNonGateOutputIsUnchanged() {
         let line = formatSummary(
             summary(p95: 40, p99: 70, budgetP95: 320, budgetP99: 640), includeGate: false)
         XCTAssertFalse(line.contains("headroom_p95"), line)
+        XCTAssertFalse(line.contains("headroom_p99"), line)
         XCTAssertFalse(line.contains("budget_p95_ns"), line)
         XCTAssertFalse(line.contains("gate="), line)
     }
