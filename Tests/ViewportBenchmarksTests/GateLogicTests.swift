@@ -181,21 +181,30 @@ final class GateLogicTests: XCTestCase {
     }
 
     // The p95-only ceiling cannot see an inflated p99 budget, so pin it statically
-    // over the real scenario tables.
-    // The recipe in .github/scripts/derive-gate-budgets.sh sets
-    // budget_p99 = max(2 * budget_p95, ...), so every budget it produces satisfies
-    // p99 >= 2 * p95. This pins that property for the tables whose budgets the recipe
-    // produced, so a hand-edit cannot quietly break the invariant that
-    // GateLimits.maxHeadroomP99 = 2 * maxHeadroomP95 relies on.
+    // over the real scenario tables. The recipe sets budget_p99 to at least twice
+    // budget_p95, so every budget it produces satisfies p99 >= 2 * p95 -- and a
+    // hand-edit must not quietly break the invariant that
+    // GateLimits.maxHeadroomP99 = 2 * maxHeadroomP95 rests on.
     //
-    // The mutation tables (structural, variable-height, bulk) are deliberately absent:
-    // their budgets predate the recipe and were left alone because they were already
-    // correctly calibrated, and they sit below 2x. Do NOT "complete" this list with
-    // them -- they would fail, and the fix is a re-derivation, not a wider assertion.
+    // Deliberately absent: structuralMutationScenarios(), variableHeightMutationScenarios()
+    // and bulkStructuralMutationScenarios(). Their budgets predate the recipe and were left
+    // alone because they were already correctly calibrated; several sit at exactly 2x and
+    // others below it, so the table as a whole would fail. Do NOT "complete" this list with
+    // them -- the fix would be a re-derivation, not a wider assertion.
+    //
+    // (variableHeightScenarios() is the STATIC variable-height table and IS recipe-derived,
+    // so it belongs here. It is not the mutation table its name resembles.)
+    //
+    // benchmarkScenarios() contributes three pipeline scenarios of which only `1m` was
+    // re-derived; the other two keep pre-slice-38 budgets that happen to satisfy the
+    // invariant. GateFloorTests is what holds every gated scenario to the 3x floor.
     func testEveryRecipeDerivedScenarioTableKeepsP99AtLeastTwiceP95() {
         var budgets: [(String, Int64, Int64)] = []
         for s in benchmarkScenarios() {
             budgets.append(("pipeline|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
+        }
+        for s in realisticProviderScenarios() {
+            budgets.append(("realistic_provider|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
         }
         for s in lineQueryScenarios() {
             budgets.append(("line_query|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
