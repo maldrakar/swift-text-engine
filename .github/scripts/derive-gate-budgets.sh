@@ -9,12 +9,19 @@
 #   budget_p99 = round_up_2sf(max(2 * budget_p95, 8 * median(p99), 3 * max(p99)))
 #
 # Usage: ./.github/scripts/derive-gate-budgets.sh <corpus.tsv> [mode ...]
+#
+# A mode may be spelled either way -- `line-query` (as the CLI flag and every CI
+# step name spell it) or `line_query` (as the corpus does). A mode that matches no
+# corpus row is an error, not an empty success: this script is the only sanctioned
+# source of a budget, and silence here is what sends someone back to hand-typing one.
 set -euo pipefail
 
 corpus="${1:?usage: derive-gate-budgets.sh <corpus.tsv> [mode ...]}"
 shift || true
 
-awk -F'\t' -v modes="$*" '
+modes="$(printf '%s' "$*" | tr '-' '_')"
+
+awk -F'\t' -v modes="$modes" '
 function ru2(x,   e, n) {          # round up to 2 significant figures
   if (x <= 0) return 0
   e = 1
@@ -31,13 +38,30 @@ function med(arr, n,   i, j, t) {  # lower median of a 1..n array, sorts in plac
 }
 NR == 1 { next }                   # header
 {
+  seen[$2] = 1
   if (modes != "" && index(" " modes " ", " " $2 " ") == 0) next
+  matched[$2] = 1
   k = $2 "|" $3
   n[k]++
   p95[k, n[k]] = $4
   p99[k, n[k]] = $5
 }
 END {
+  # A requested mode with no rows is an operator error (a typo, or a mode the
+  # corpus has never been harvested for). Say so and fail, rather than printing
+  # nothing and exiting 0 -- which reads as "the corpus supports no change".
+  if (modes != "") {
+    want_count = split(modes, want, " ")
+    for (i = 1; i <= want_count; i++) {
+      if (!(want[i] in matched)) {
+        known = ""
+        for (m in seen) known = known (known == "" ? "" : ",") m
+        printf "error=no_corpus_rows mode=%s known=%s\n", want[i], known > "/dev/stderr"
+        exit 1
+      }
+    }
+  }
+
   for (k in n) {
     cnt = n[k]
     for (i = 1; i <= cnt; i++) { a[i] = p95[k, i]; b[i] = p99[k, i] }
