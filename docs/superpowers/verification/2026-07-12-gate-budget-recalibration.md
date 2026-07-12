@@ -1234,21 +1234,81 @@ Same reason as §13b: the corpus is the derivation's **input**, this run is the
 **validation** of its output. Folding a validating run back in would move the medians,
 change the budgets, and require another run to validate those.
 
-## Hosted Proof — Pending
+## Hosted Proof — post-merge
 
-The post-merge `push` run against the stable merge commit is **not yet available**
-and is deliberately **not guessed here**. Per the project's clean-evidence
-convention (Slices 31/33/35/37) and the standing stale-on-write lesson, it will be
-recorded by a genuinely docs-only follow-up PR once `main` carries the merge:
+**This is the merged-code evidence anchor for Slice 38.** Recorded by a genuinely
+docs-only follow-up PR, per the clean-evidence convention (Slices 31/33/35/37), once
+`main` carried the merge — not guessed in advance.
 
-- **Post-merge push run: _pending_** — merge commit _pending_, event `push`,
-  branch `main`. To be verified at step level (all three required jobs; all ten
-  gate steps `success`; `grep -c "mode=point_query"` non-zero; no
-  `Observe point query` step) and recorded here. **This is the merged-code
-  evidence anchor for Slice 38.**
+- **Post-merge push run `29196145560`** — merge commit
+  `2bc290ee19b96fc4e1c21b037cfd64dbc66fe056` (`2bc290e`), event `push`, branch `main`,
+  conclusion `success`. PR #80 merged 2026-07-12.
 
-Merge parentage (`git rev-list --parents -1 <merge>` → `<merge> 5e2abf7 <pr-head>`)
-will be recorded alongside it to confirm the proof anchors the actually-merged head.
+### Merge parentage — the proof anchors the actually-merged head
+
+```text
+$ git rev-list --parents -1 2bc290e
+2bc290ee19b96fc4e1c21b037cfd64dbc66fe056 5e2abf7a3f9ca4769857c77d1b33d78c1c74992e 8e7c062e1236431f93116b91ed5c379e5941a91f
+```
+
+Second parent `8e7c062` is exactly the PR head that ran green in §13c's sibling run —
+so the merge introduced no post-head drift, and this proof covers the code that is
+actually on `main`.
+
+### Step-level verification (not the job conclusion)
+
+All three required jobs `success`. Per the standing "a green job can hide a dead
+`continue-on-error` step" lesson, the substantive steps were confirmed to have **run**:
+
+```text
+Host tests and benchmark gate
+  5  skipped  Complete docs-only PR        (correct — the merge carries Swift, so the heavy path runs)
+  7  success  Run host tests               → Executed 251 tests, with 0 failures
+  8-17 success  all TEN blocking latency gates
+  18-19 success  memory diagnostics
+  20 skipped  Observe realistic provider   (correct — that step is PR-only, and this is a push event)
+
+iOS cross-target compile     → "Compile cross-target packages for iOS"  = success (ran, not skipped)
+WASM cross-target observation → "Observe cross-target packages for WASM" = success
+```
+
+### The recalibrated suite, on merged code
+
+```text
+$ grep -c "gate=pass" <log>   → 41
+$ grep -c "gate=fail" <log>   → 0
+
+headroom_p95:  4.4x – 12.5x    (floor 3x, ceiling 50x)
+headroom_p99:  6.0x – 21.8x    (ceiling 100x)
+```
+
+Every one of the 41 gated scenarios sits inside the band on hosted Linux x86_64 — the
+machine the budgets were cut for. The pre-slice state of the same statistic was
+**815×–3,000×** on the query gates. The gates are gates again.
+
+### The tenth gate is live
+
+```text
+$ grep -c "mode=point_query" <log>      → 4
+$ grep -c "Observe point query" <log>   → 0
+```
+
+`mode=point_query` is **present** in the hosted log — the inverse of the Slice 37 check,
+which required it to be absent — and the temporary non-gate observation step from
+Decision 5 did **not** survive to `main`, exactly as acceptance criterion 7 demands.
+
+```text
+mode=point_query provider=uniform   scenario=uniform_100k   p95_ns=60 p99_ns=93  budget_p95_ns=700  budget_p99_ns=1400 headroom_p95=11.7x headroom_p99=15.1x gate=pass
+mode=point_query provider=uniform   scenario=uniform_1m     p95_ns=65 p99_ns=97  budget_p95_ns=670  budget_p99_ns=1400 headroom_p95=10.3x headroom_p99=14.4x gate=pass
+mode=point_query provider=prefixsum scenario=prefixsum_100k p95_ns=75 p99_ns=107 budget_p95_ns=880  budget_p99_ns=1800 headroom_p95=11.7x headroom_p99=16.8x gate=pass
+mode=point_query provider=prefixsum scenario=prefixsum_1m   p95_ns=80 p99_ns=115 budget_p95_ns=1000 budget_p99_ns=2000 headroom_p95=12.5x headroom_p99=17.4x gate=pass
+```
+
+### 251 tests on hosted Linux
+
+`GateFloorTests` — which reads the committed corpus off disk via `#filePath` and holds
+every gated scenario to the 3× floor — runs and passes **inside the CI container**, not
+only on macOS. The floor is enforced on merged code, by the build, on every push.
 
 ## 14. Review-response round
 
