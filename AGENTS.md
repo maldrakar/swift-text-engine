@@ -116,14 +116,14 @@ gate.
 swift test                                                   # host unit tests
 swift build -c release                                       # release build
 swift run -c release ViewportBenchmarks -- --gate            # synthetic gate (blocking); expect gate=pass
-swift run -c release ViewportBenchmarks -- --variable-height --gate   # variable-height local gate
-swift run -c release ViewportBenchmarks -- --variable-height-mutation --gate   # mutate+recompute local gate
-swift run -c release ViewportBenchmarks -- --structural-mutation --gate   # structural insert/delete local gate
-swift run -c release ViewportBenchmarks -- --bulk-structural-mutation --gate   # bulk insert/delete-range local gate
-swift run -c release ViewportBenchmarks -- --line-query --gate   # y->line position-query local gate
-swift run -c release ViewportBenchmarks -- --line-geometry-query --gate   # y->line+box+fraction local gate
-swift run -c release ViewportBenchmarks -- --column-query --gate   # x->cell within-line position-query local gate
-swift run -c release ViewportBenchmarks -- --column-geometry-query --gate   # x->cell+box+fraction within-line local gate
+swift run -c release ViewportBenchmarks -- --variable-height --gate   # variable-height blocking CI gate
+swift run -c release ViewportBenchmarks -- --variable-height-mutation --gate   # mutate+recompute blocking CI gate
+swift run -c release ViewportBenchmarks -- --structural-mutation --gate   # structural insert/delete blocking CI gate
+swift run -c release ViewportBenchmarks -- --bulk-structural-mutation --gate   # bulk insert/delete-range blocking CI gate
+swift run -c release ViewportBenchmarks -- --line-query --gate   # y->line position-query blocking CI gate
+swift run -c release ViewportBenchmarks -- --line-geometry-query --gate   # y->line+box+fraction blocking CI gate
+swift run -c release ViewportBenchmarks -- --column-query --gate   # x->cell within-line position-query blocking CI gate
+swift run -c release ViewportBenchmarks -- --column-geometry-query --gate   # x->cell+box+fraction within-line blocking CI gate
 swift run -c release ViewportBenchmarks -- --point-query --gate   # (x,y)->(line,cell) 2D composite CI gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
