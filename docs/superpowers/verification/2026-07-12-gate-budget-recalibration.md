@@ -1014,11 +1014,148 @@ below the slice's own 3× floor. **This is the finding that triggered the
 re-derivation.** Both are resolved in the merged tree (990 and 800, both
 floor-bound, both at 3.0× derived margin).
 
-## 13b. Hosted proof of the re-derived tree — run `HOSTED_RUN_PLACEHOLDER`
+## 13b. Hosted proof of the re-derived tree — PR-head run `29187553818`
 
-_To be filled from the hosted run of `34bfba1` (the re-derivation commit), at step
-level: all three required jobs `success`, all ten gate steps `success`, 41/41
-`gate=pass` with the re-derived budgets. Not guessed._
+This is the run that validates the budgets that actually merge.
+
+```text
+$ gh run view 29187553818 --json databaseId,headSha,event,status,conclusion
+run_id=29187553818
+head_sha=c909231e6768038e83fd85581d5b528349667c1c
+event=pull_request
+status=completed
+conclusion=success
+```
+
+All three required jobs `success`:
+
+```text
+job=Host tests and benchmark gate   conclusion=success
+job=iOS cross-target compile        conclusion=success
+job=WASM cross-target observation   conclusion=success
+```
+
+### Step-level detail — `Host tests and benchmark gate`
+
+Verified step by step, not inferred from the job's green conclusion:
+
+```text
+ 4. Detect PR change scope                            -> success
+ 5. Complete docs-only PR                             -> skipped   (correct: PR carries Swift)
+ 7. Run host tests                                    -> success
+ 8. Run synthetic benchmark gate                      -> success   (1)
+ 9. Run variable-height benchmark gate                -> success   (2)
+10. Run variable-height mutation benchmark gate       -> success   (3)
+11. Run structural mutation benchmark gate            -> success   (4)
+12. Run bulk structural mutation benchmark gate       -> success   (5)
+13. Run line query benchmark gate                     -> success   (6)
+14. Run line geometry query benchmark gate            -> success   (7)  ** the re-derived one **
+15. Run column query benchmark gate                   -> success   (8)
+16. Run column geometry query benchmark gate          -> success   (9)
+17. Run point query benchmark gate                    -> success   (10)
+18. Run memory shape diagnostic                       -> success
+19. Run RSS memory observation diagnostic             -> success
+20. Observe realistic provider relative performance   -> success   (continue-on-error — genuinely ran)
+41. Complete job                                      -> success
+```
+
+**All ten gate steps individually `success`.** Step 20, the `continue-on-error`
+step, ran rather than silently dying (the Slice 16 lesson). `iOS cross-target
+compile` → `Compile cross-target packages for iOS` `success`; `WASM cross-target
+observation` → `Observe cross-target packages for WASM` `success`.
+`grep -c "mode=point_query"` = **4** — the tenth gate really executes hosted.
+
+### 41/41 `gate=pass` on hosted Linux, against the re-derived budgets
+
+```text
+hosted scenarios=41   gate=pass: 41   gate=fail: 0   ceiling violations=0
+max_headroom_p95=10.2x (structural_mutation|1k_lines_20_visible_overscan_0)   ceiling=50x   OK
+max_headroom_p99=18.5x (bulk_structural_mutation|1k_lines_batch_64)           ceiling=100x  OK
+min_headroom_p95=4.8x  (pipeline|100k_lines_80_visible_overscan_5)
+min_headroom_p99=7.7x  (variable_height_mutation|1m_lines_200_visible_overscan_50)
+```
+
+Every headroom on the calibration machine now sits in a **4.8×–18.5×** band. The
+whole distribution is inside a 4× spread — which is what a calibrated gate suite
+is supposed to look like, and is the sharpest statement available that the budgets
+match the machine they gate.
+
+### The tail scenarios, on hosted, after the fix
+
+The two rows that motivated the re-derivation (§12.2), from this run's own log:
+
+| Scenario | hosted p99 | budget p99 | runtime margin | before the re-derivation |
+| --- | ---: | ---: | ---: | --- |
+| `line_geometry_query\|uniform_1k` | 64 | **990** | **15.5×** | 1.6× (budget 540) |
+| `line_geometry_query\|uniform_1m` | 82 | **800** | **9.8×** | 2.9× (budget 760) |
+
+The tail did not recur in this run (p99 came in at 64 and 82, near the corpus
+medians) — which is exactly why it was dangerous: it is intermittent. The budgets
+now carry the tail's magnitude regardless of whether any given run exhibits it.
+
+### Full hosted table — all 41
+
+| mode\|scenario | p95 | p99 | budget p95 | budget p99 | headroom_p95 | headroom_p99 | gate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| bulk_structural_mutation\|100k_lines_batch_4096 | 166698 | 171171 | 1500000 | 2500000 | 9.0x | 14.6x | pass |
+| bulk_structural_mutation\|100k_lines_batch_64 | 15431 | 15690 | 150000 | 250000 | 9.7x | 15.9x | pass |
+| bulk_structural_mutation\|1k_lines_batch_64 | 6322 | 6486 | 60000 | 120000 | 9.5x | 18.5x | pass |
+| bulk_structural_mutation\|1m_lines_batch_4096 | 339312 | 370526 | 2500000 | 4000000 | 7.4x | 10.8x | pass |
+| bulk_structural_mutation\|1m_lines_batch_64 | 51656 | 55073 | 400000 | 600000 | 7.7x | 10.9x | pass |
+| column_geometry_query\|prefixsum_100k | 67 | 105 | 560 | 1200 | 8.4x | 11.4x | pass |
+| column_geometry_query\|prefixsum_1m | 141 | 169 | 720 | 1500 | 5.1x | 8.9x | pass |
+| column_geometry_query\|uniform_100k | 43 | 75 | 350 | 700 | 8.1x | 9.3x | pass |
+| column_geometry_query\|uniform_1k | 32 | 64 | 260 | 520 | 8.1x | 8.1x | pass |
+| column_geometry_query\|uniform_1m | 48 | 80 | 390 | 780 | 8.1x | 9.8x | pass |
+| column_query\|prefixsum_100k | 64 | 94 | 470 | 940 | 7.3x | 10.0x | pass |
+| column_query\|prefixsum_1m | 83 | 120 | 580 | 1200 | 7.0x | 10.0x | pass |
+| column_query\|uniform_100k | 41 | 72 | 280 | 560 | 6.8x | 7.8x | pass |
+| column_query\|uniform_1k | 24 | 51 | 200 | 400 | 8.3x | 7.8x | pass |
+| column_query\|uniform_1m | 47 | 72 | 320 | 640 | 6.8x | 8.9x | pass |
+| line_geometry_query\|balanced_tree_100k | 377 | 422 | 3000 | 6000 | 8.0x | 14.2x | pass |
+| line_geometry_query\|balanced_tree_1m | 431 | 473 | 3400 | 6800 | 7.9x | 14.4x | pass |
+| line_geometry_query\|uniform_100k | 42 | 75 | 340 | 680 | 8.1x | 9.1x | pass |
+| line_geometry_query\|uniform_1k | 31 | 64 | 250 | 990 | 8.1x | 15.5x | pass |
+| line_geometry_query\|uniform_1m | 56 | 82 | 380 | 800 | 6.8x | 9.8x | pass |
+| line_query\|balanced_tree_100k | 229 | 256 | 1700 | 3400 | 7.4x | 13.3x | pass |
+| line_query\|balanced_tree_1m | 264 | 307 | 2100 | 4200 | 8.0x | 13.7x | pass |
+| line_query\|uniform_100k | 34 | 66 | 280 | 560 | 8.2x | 8.5x | pass |
+| line_query\|uniform_1k | 23 | 55 | 190 | 430 | 8.3x | 7.8x | pass |
+| line_query\|uniform_1m | 39 | 71 | 320 | 640 | 8.2x | 9.0x | pass |
+| pipeline\|100k_lines_80_visible_overscan_5 | 10525 | 10741 | 50000 | 100000 | 4.8x | 9.3x | pass |
+| pipeline\|1k_lines_20_visible_overscan_0 | 2559 | 2714 | 20000 | 50000 | 7.8x | 18.4x | pass |
+| pipeline\|1m_lines_200_visible_overscan_50 | 34033 | 34632 | 280000 | 560000 | 8.2x | 16.2x | pass |
+| point_query\|prefixsum_100k | 119 | 150 | 880 | 1800 | 7.4x | 12.0x | pass |
+| point_query\|prefixsum_1m | 143 | 178 | 1000 | 2000 | 7.0x | 11.2x | pass |
+| point_query\|uniform_100k | 97 | 135 | 700 | 1400 | 7.2x | 10.4x | pass |
+| point_query\|uniform_1m | 81 | 118 | 670 | 1400 | 8.3x | 11.9x | pass |
+| structural_mutation\|100k_lines_80_visible_overscan_5 | 8323 | 8467 | 80000 | 120000 | 9.6x | 14.2x | pass |
+| structural_mutation\|1k_lines_20_visible_overscan_0 | 1962 | 2215 | 20000 | 40000 | 10.2x | 18.1x | pass |
+| structural_mutation\|1m_lines_200_visible_overscan_50 | 30878 | 32243 | 250000 | 400000 | 8.1x | 12.4x | pass |
+| variable_height_mutation\|100k_lines_80_visible_overscan_5 | 2799 | 2898 | 20000 | 25000 | 7.1x | 8.6x | pass |
+| variable_height_mutation\|1k_lines_20_visible_overscan_0 | 788 | 854 | 5000 | 10000 | 6.3x | 11.7x | pass |
+| variable_height_mutation\|1m_lines_200_visible_overscan_50 | 9513 | 9746 | 60000 | 75000 | 6.3x | 7.7x | pass |
+| variable_height\|100k_lines_80_visible_overscan_5 | 1772 | 1850 | 14000 | 28000 | 7.9x | 15.1x | pass |
+| variable_height\|1k_lines_20_visible_overscan_0 | 486 | 541 | 4100 | 8200 | 8.4x | 15.2x | pass |
+| variable_height\|1m_lines_200_visible_overscan_50 | 5529 | 5638 | 45000 | 90000 | 8.1x | 16.0x | pass |
+
+### Why this run's samples are NOT in the corpus
+
+Deliberate, and worth stating so a future reader does not "fix" it: the corpus is
+the **input** to the derivation, and run `29187553818` is the **validation** of its
+output. Appending a validating run's samples back into the corpus would move the
+medians, change the budgets, and require another run to validate *those* — an
+infinite regress. The corpus is a snapshot; the invariant it must satisfy is
+"corpus + script reproduce the committed budgets" (§2b), and it does. A future
+slice that observes a new tail appends it and re-derives, exactly as this one did.
+
+### Head note
+
+The only commit after `34bfba1` (the re-derivation) is `c909231`, **this
+verification record**, which is documentation and changes no measured behaviour —
+and run `29187553818` ran at `c909231`, so it covers every line of Swift, workflow,
+and budget that this slice ships. Any commit after `c909231` is a fill-in of this
+§13b with the run's own results and changes no Swift.
 
 ## Hosted Proof — Pending
 
