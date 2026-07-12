@@ -80,6 +80,19 @@ struct RealisticLineSource: DocumentLineSource {
     }
 }
 
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+// Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
+// binds. Do not hand-edit — re-derive.
+//
+// This mode's samples reach the corpus by a different route than every other gate's.
+// It is the one gated mode CI never runs with --gate: the PR-only observation step runs
+// it bare and keeps the raw benchmark output in a temp file, so no `p95_ns=` line for
+// this mode ever reaches the hosted log. Its per-repetition values ride inside the
+// `mode=realistic_relative_observation` line instead, and
+// .github/scripts/harvest-gate-corpus.sh reads them from there. That is why this mode
+// was missing from the first corpus, and why its budget was the last one in the suite
+// still sitting under the 3x floor after everything else had been re-derived.
 func realisticProviderScenarios() -> [RealisticProviderScenario] {
     [
         RealisticProviderScenario(
@@ -90,8 +103,8 @@ func realisticProviderScenarios() -> [RealisticProviderScenario] {
             viewportHeight: 80.0 * 16.0,
             overscanBefore: 5,
             overscanAfter: 5,
-            p95BudgetNanoseconds: 20_000,
-            p99BudgetNanoseconds: 50_000
+            p95BudgetNanoseconds: 98_000,
+            p99BudgetNanoseconds: 200_000
         )
     ]
 }
