@@ -11,6 +11,10 @@ struct VariableHeightScenario {
     let p99BudgetNanoseconds: Int64
 }
 
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+// Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
+// binds. Do not hand-edit — re-derive.
 func variableHeightScenarios() -> [VariableHeightScenario] {
     [
         VariableHeightScenario(
@@ -19,8 +23,8 @@ func variableHeightScenarios() -> [VariableHeightScenario] {
             viewportHeight: 20.0 * 16.0,
             overscanBefore: 0,
             overscanAfter: 0,
-            p95BudgetNanoseconds: 50_000,
-            p99BudgetNanoseconds: 100_000
+            p95BudgetNanoseconds: 4_100,
+            p99BudgetNanoseconds: 8_200
         ),
         VariableHeightScenario(
             name: "100k_lines_80_visible_overscan_5",
@@ -28,8 +32,8 @@ func variableHeightScenarios() -> [VariableHeightScenario] {
             viewportHeight: 80.0 * 16.0,
             overscanBefore: 5,
             overscanAfter: 5,
-            p95BudgetNanoseconds: 100_000,
-            p99BudgetNanoseconds: 200_000
+            p95BudgetNanoseconds: 14_000,
+            p99BudgetNanoseconds: 28_000
         ),
         VariableHeightScenario(
             name: "1m_lines_200_visible_overscan_50",
@@ -37,8 +41,8 @@ func variableHeightScenarios() -> [VariableHeightScenario] {
             viewportHeight: 200.0 * 16.0,
             overscanBefore: 50,
             overscanAfter: 50,
-            p95BudgetNanoseconds: 250_000,
-            p99BudgetNanoseconds: 500_000
+            p95BudgetNanoseconds: 45_000,
+            p99BudgetNanoseconds: 90_000
         )
     ]
 }

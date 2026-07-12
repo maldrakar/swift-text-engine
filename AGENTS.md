@@ -89,7 +89,8 @@ runs first and feeds the located line index to the horizontal query), returning 
 nested `PointQuery` — `.point(PointLocation)` carrying the located `line` plus a
 `ColumnResolution` (`.cell`/`.blankLine`), `.empty` for an empty document, or
 `.failure`. It adds no new search: O(log N) + O(log M) queries / O(1) core memory,
-both clamp flags preserved. Its `--point-query --gate` is **local (not-yet-CI)**.
+both clamp flags preserved. `--point-query --gate` is its blocking host-job CI
+gate.
 
 ## Package layout
 
@@ -102,6 +103,13 @@ both clamp flags preserved. Its `--point-query --gate` is **local (not-yet-CI)**
   live here, NOT in the core.
 - `Tests/TextEngineCoreTests` — XCTest only. (`swift test` also prints a
   "0 tests in 0 suites" line for the empty Swift Testing harness — not a failure.)
+- `Tests/ViewportBenchmarksTests` — the benchmark target's first test target.
+  `GateLogicTests.swift` unit-tests the gate pass/fail logic itself (band
+  boundaries, `budget_exceeded` vs `budget_stale`) against synthetic
+  `BenchmarkSummary` values, independent of any hosted timing.
+  `GateFloorTests.swift` is the other half: it reads the committed corpus and holds
+  **every** gated scenario to the 3x floor on both statistics — the half of the band
+  the runtime gate cannot check (see `## Gate budgets`).
 - `Package.swift` — `swift-tools-version: 6.0`. No `platforms:` declared, so iOS
   builds use the toolchain default deployment target.
 
@@ -111,18 +119,20 @@ both clamp flags preserved. Its `--point-query --gate` is **local (not-yet-CI)**
 swift test                                                   # host unit tests
 swift build -c release                                       # release build
 swift run -c release ViewportBenchmarks -- --gate            # synthetic gate (blocking); expect gate=pass
-swift run -c release ViewportBenchmarks -- --variable-height --gate   # variable-height local gate
-swift run -c release ViewportBenchmarks -- --variable-height-mutation --gate   # mutate+recompute local gate
-swift run -c release ViewportBenchmarks -- --structural-mutation --gate   # structural insert/delete local gate
-swift run -c release ViewportBenchmarks -- --bulk-structural-mutation --gate   # bulk insert/delete-range local gate
-swift run -c release ViewportBenchmarks -- --line-query --gate   # y->line position-query local gate
-swift run -c release ViewportBenchmarks -- --line-geometry-query --gate   # y->line+box+fraction local gate
-swift run -c release ViewportBenchmarks -- --column-query --gate   # x->cell within-line position-query local gate
-swift run -c release ViewportBenchmarks -- --column-geometry-query --gate   # x->cell+box+fraction within-line local gate
-swift run -c release ViewportBenchmarks -- --point-query --gate   # (x,y)->(line,cell) 2D composite local gate
+swift run -c release ViewportBenchmarks -- --variable-height --gate   # variable-height blocking CI gate
+swift run -c release ViewportBenchmarks -- --variable-height-mutation --gate   # mutate+recompute blocking CI gate
+swift run -c release ViewportBenchmarks -- --structural-mutation --gate   # structural insert/delete blocking CI gate
+swift run -c release ViewportBenchmarks -- --bulk-structural-mutation --gate   # bulk insert/delete-range blocking CI gate
+swift run -c release ViewportBenchmarks -- --line-query --gate   # y->line position-query blocking CI gate
+swift run -c release ViewportBenchmarks -- --line-geometry-query --gate   # y->line+box+fraction blocking CI gate
+swift run -c release ViewportBenchmarks -- --column-query --gate   # x->cell within-line position-query blocking CI gate
+swift run -c release ViewportBenchmarks -- --column-geometry-query --gate   # x->cell+box+fraction within-line blocking CI gate
+swift run -c release ViewportBenchmarks -- --point-query --gate   # (x,y)->(line,cell) 2D composite CI gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --help            # all flags
+./.github/scripts/harvest-gate-corpus.sh --limit 40          # hosted CI logs -> corpus rows (append half)
+./.github/scripts/derive-gate-budgets.sh <corpus.tsv> <mode> # corpus -> budgets (re-derive half)
 ./.github/scripts/cross-target-compile.sh --self-test        # shell logic self-test (no toolchain)
 ./.github/scripts/cross-target-compile.sh                    # local iOS/WASM cross-compile
 ./.github/scripts/cross-target-compile.sh --targets ios      # iOS-only compile path
@@ -157,17 +167,16 @@ Three jobs:
   → `--bulk-structural-mutation --gate` (blocking) → `--line-query --gate`
   (blocking) → `--line-geometry-query --gate` (blocking)
   → `--column-query --gate` (blocking)
-  → `--column-geometry-query --gate` (blocking) → `--memory-shape`
+  → `--column-geometry-query --gate` (blocking) → `--point-query --gate`
+  (blocking) → `--memory-shape`
   → `--memory-observation` → realistic relative
   observation (PR-only,
-  `continue-on-error`). The synthetic, static variable-height, mutation
-  variable-height, structural-mutation, bulk-structural-mutation, line-query,
-  line-geometry-query, column-query, and column-geometry-query gates **fail the
-  job on perf regression**.
-  Benchmark budgets
-  are still macOS-calibrated unless hosted Linux x86_64 evidence explicitly
-  justifies a retune. SwiftPM build artifacts use `/tmp/text-engine-host-build`,
-  not workspace `.build`.
+  `continue-on-error`). Ten blocking gates: synthetic, static variable-height,
+  mutation variable-height, structural-mutation, bulk-structural-mutation,
+  line-query, line-geometry-query, column-query, column-geometry-query, and
+  point-query — all **fail the job on perf regression**.
+  Budget calibration is not restated here — see `## Gate budgets` below. SwiftPM
+  build artifacts use `/tmp/text-engine-host-build`, not workspace `.build`.
 - **iOS cross-target compile** on `macos-latest`: iOS device + simulator are
   **blocking** for both `TextEngineCore` and `TextEngineReferenceProviders`, via
   `./.github/scripts/cross-target-compile.sh --targets ios`. This is the only
@@ -208,6 +217,79 @@ current admin user can bypass it. Required checks are configured and enforced
 for normal PR flow, but bypass-capable actors can still override the ruleset.
 Last verified: 2026-06-16 via `gh api`; see
 `docs/superpowers/verification/2026-06-16-swift-ci-required-checks.md`.
+
+## Gate budgets
+
+A gate that cannot fail is not a gate. Every gated scenario's hosted headroom
+(`headroom = budget / observed latency`) must stay inside a band; `--gate`
+enforces the upper bound itself, failing with `gate=fail reason=budget_stale`
+when it doesn't.
+
+**The band**: floor 3x, ceilings `headroom_p95 <= 50x` and `headroom_p99 <=
+100x`.
+
+- The **floor** (3x) is what the runtime gate structurally *cannot* see: `--gate`
+  compares a budget against **this** run's latency, so it catches a budget that is
+  too loose but is blind to one sitting too close to the worst hosted sample — and
+  that is the budget that goes red on a clean tree from runner noise alone.
+  `Tests/ViewportBenchmarksTests/GateFloorTests.swift` is therefore what enforces it:
+  it re-reads the corpus on every `swift test` and fails if any gated scenario's
+  budget drops below `3 x max(hosted)` on **either** statistic, or if a gated
+  scenario has no hosted evidence at all. The floor covers both statistics because
+  the gate can fail on either one.
+- The **p99 ceiling is exactly double the p95 ceiling, and is derived from it,
+  not chosen independently**. The recipe guarantees `budget_p99 >= 2 *
+  budget_p95` by construction, while observed p99 can equal observed p95 on a
+  nanosecond-quantized clock — so any p99 ceiling below 100x would condemn
+  budgets that are perfectly in-band on p95. Written as `2 * maxHeadroomP95`
+  in `Sources/ViewportBenchmarks/BenchmarkModels.swift` so it cannot silently
+  drift from the p95 ceiling.
+- **Hosted Linux x86_64 is the calibration authority, not local macOS.**
+  Hosted runs 2-3x slower (measured this slice: 2.1-2.7x), so it binds: a
+  budget that holds there holds locally with room to spare, and the reverse is
+  false.
+
+**The recipe** is two committed scripts, not a table to copy — harvest fresh
+hosted evidence, then re-derive from it:
+
+```bash
+# 1. append: pull hosted samples out of CI logs into the corpus
+./.github/scripts/harvest-gate-corpus.sh --limit 40 \
+  >> docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv
+
+# 2. re-derive: <mode> may be spelled point-query or point_query; a mode with no
+#    corpus rows is an error, not an empty success
+./.github/scripts/derive-gate-budgets.sh \
+  docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv <mode>
+
+budget_p95 = round_up_2sf(max(8 x median(hosted p95), 3 x max(hosted p95)))
+budget_p99 = round_up_2sf(max(2 x budget_p95, 8 x median(p99), 3 x max(p99)))
+```
+
+The 3x floor covers both statistics because the gate fails on either.
+
+`--realistic-provider` is the one gated mode CI never runs with `--gate` (the
+PR-only observation step runs it bare and keeps the benchmark output in a temp
+file), so its samples reach the corpus only through the
+`mode=realistic_relative_observation` line, which the harvester knows how to read.
+That is why it was the last budget still under the floor after the rest of the
+suite had been re-derived. Every gated scenario now carries corpus rows, and
+`GateFloorTests` fails if a new one ever doesn't.
+
+**Never hand-type a budget.** Slices 27/31/33/35/37 shipped copy-pasted
+"starter budgets" that ran 815x-3000x loose, and no gate could fail for five
+slices as a result. Re-derive from fresh hosted evidence instead.
+
+**When an optimization trips the ceiling, raise the budget — never the
+ceiling.** A genuine speed-up (Slices 29/30 cut `lineAt` from O(log^2 N) to
+O(log N)) or faster hardware will push headroom past the ceiling and turn a
+gate red on a clean tree. That is the ceiling working as designed. Re-derive
+that budget from fresh hosted evidence in the same PR that caused the shift.
+
+**The two failure reasons are opposite instructions**, and the gate says
+which one applies: `reason=budget_exceeded` means the code got slower — fix
+the code. `reason=budget_stale` means the budget no longer reflects reality —
+re-derive it.
 
 ## Development workflow ("slices")
 

@@ -10,27 +10,35 @@ struct LineGeometryQueryScenario {
     let p99BudgetNanoseconds: Int64
 }
 
-// Budgets mirror the --line-query local gate: lineGeometryAt is lineAt plus a
-// constant two offset(ofLine:) probes, so it stays well within the same headroom.
-// Uniform uses the O(log N) fallback; balanced-tree scenarios exercise the native
-// O(log N) index descent plus the two generic O(log N) geometry probes.
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+// Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
+// binds. Do not hand-edit — re-derive.
+//
+// uniform_1k's p99 budget is far wider than the usual 2x coupling with its p95 budget,
+// and that is not a typo: hosted runners show a heavy p99 tail on the smallest uniform
+// scenarios, so the recipe's 3x floor over max(observed p99) -- not the 8x-median term --
+// is what sets the number. Run
+// `.github/scripts/derive-gate-budgets.sh <corpus> line_geometry_query` to see today's
+// medians, maxima, and which term binds; no figure is quoted here because the next corpus
+// append would silently falsify it.
 func lineGeometryQueryScenarios() -> [LineGeometryQueryScenario] {
     [
         LineGeometryQueryScenario(name: "uniform_1k", providerName: "uniform",
                                   lineCount: 1_000, useBalancedTree: false,
-                                  p95BudgetNanoseconds: 30_000, p99BudgetNanoseconds: 60_000),
+                                  p95BudgetNanoseconds: 250, p99BudgetNanoseconds: 990),
         LineGeometryQueryScenario(name: "uniform_100k", providerName: "uniform",
                                   lineCount: 100_000, useBalancedTree: false,
-                                  p95BudgetNanoseconds: 60_000, p99BudgetNanoseconds: 120_000),
+                                  p95BudgetNanoseconds: 340, p99BudgetNanoseconds: 680),
         LineGeometryQueryScenario(name: "uniform_1m", providerName: "uniform",
                                   lineCount: 1_000_000, useBalancedTree: false,
-                                  p95BudgetNanoseconds: 120_000, p99BudgetNanoseconds: 240_000),
+                                  p95BudgetNanoseconds: 380, p99BudgetNanoseconds: 800),
         LineGeometryQueryScenario(name: "balanced_tree_100k", providerName: "balanced_tree",
                                   lineCount: 100_000, useBalancedTree: true,
-                                  p95BudgetNanoseconds: 300_000, p99BudgetNanoseconds: 600_000),
+                                  p95BudgetNanoseconds: 3_000, p99BudgetNanoseconds: 6_000),
         LineGeometryQueryScenario(name: "balanced_tree_1m", providerName: "balanced_tree",
                                   lineCount: 1_000_000, useBalancedTree: true,
-                                  p95BudgetNanoseconds: 600_000, p99BudgetNanoseconds: 1_200_000),
+                                  p95BudgetNanoseconds: 3_400, p99BudgetNanoseconds: 6_800),
     ]
 }
 

@@ -36,6 +36,15 @@ func benchmarkScenarios() -> [BenchmarkScenario] {
             p95BudgetNanoseconds: 50_000,
             p99BudgetNanoseconds: 100_000
         ),
+        // Budget re-derived from hosted Linux x86_64 by
+        // .github/scripts/derive-gate-budgets.sh against
+        // docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+        // The prior budget sat BELOW the recipe's 3x floor over the worst observed
+        // hosted p95 -- close enough to a sample already seen that runner noise alone
+        // would eventually turn this blocking gate red on a clean tree. GateFloorTests
+        // now pins that floor for every gated scenario. Do not hand-edit -- re-derive.
+        // (The other two scenarios in this file were already above the floor and keep
+        // their pre-slice-38 values.)
         BenchmarkScenario(
             name: "1m_lines_200_visible_overscan_50",
             lineCount: 1_000_000,
@@ -43,8 +52,8 @@ func benchmarkScenarios() -> [BenchmarkScenario] {
             viewportHeight: 200.0 * 16.0,
             overscanBefore: 50,
             overscanAfter: 50,
-            p95BudgetNanoseconds: 100_000,
-            p99BudgetNanoseconds: 200_000
+            p95BudgetNanoseconds: 280_000,
+            p99BudgetNanoseconds: 560_000
         )
     ]
 }

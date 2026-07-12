@@ -10,6 +10,11 @@ struct ColumnQueryScenario {
     let p99BudgetNanoseconds: Int64
 }
 
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+// Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
+// binds. Do not hand-edit — re-derive.
+//
 // Large cell counts exist only to exercise binary-search depth (real lines are
 // short). uniform_* use UniformColumnMetrics (core); prefixsum_* use
 // PrefixSumColumnMetrics (reference providers) — the realistic proportional case.
@@ -18,19 +23,19 @@ func columnQueryScenarios() -> [ColumnQueryScenario] {
     [
         ColumnQueryScenario(name: "uniform_1k", providerName: "uniform",
                             columnCount: 1_000, useVariableAdvance: false,
-                            p95BudgetNanoseconds: 30_000, p99BudgetNanoseconds: 60_000),
+                            p95BudgetNanoseconds: 200, p99BudgetNanoseconds: 400),
         ColumnQueryScenario(name: "uniform_100k", providerName: "uniform",
                             columnCount: 100_000, useVariableAdvance: false,
-                            p95BudgetNanoseconds: 60_000, p99BudgetNanoseconds: 120_000),
+                            p95BudgetNanoseconds: 280, p99BudgetNanoseconds: 560),
         ColumnQueryScenario(name: "uniform_1m", providerName: "uniform",
                             columnCount: 1_000_000, useVariableAdvance: false,
-                            p95BudgetNanoseconds: 120_000, p99BudgetNanoseconds: 240_000),
+                            p95BudgetNanoseconds: 320, p99BudgetNanoseconds: 640),
         ColumnQueryScenario(name: "prefixsum_100k", providerName: "prefixsum",
                             columnCount: 100_000, useVariableAdvance: true,
-                            p95BudgetNanoseconds: 60_000, p99BudgetNanoseconds: 120_000),
+                            p95BudgetNanoseconds: 470, p99BudgetNanoseconds: 940),
         ColumnQueryScenario(name: "prefixsum_1m", providerName: "prefixsum",
                             columnCount: 1_000_000, useVariableAdvance: true,
-                            p95BudgetNanoseconds: 120_000, p99BudgetNanoseconds: 240_000),
+                            p95BudgetNanoseconds: 580, p99BudgetNanoseconds: 1_200),
     ]
 }
 

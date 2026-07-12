@@ -69,6 +69,18 @@ func runProviderOperation<Source: DocumentLineSource>(
     }
 }
 
+// One decimal place, without Foundation: `String(format:)` would drag Foundation
+// into a target that has none, and the benchmark target must stay free of it.
+// Returns the complete field value, `x` suffix included, so the unbounded case
+// reads `inf` rather than `infx`.
+func formatHeadroom(_ headroom: Double) -> String {
+    if !headroom.isFinite {
+        return "inf"
+    }
+    let tenths = Int64((headroom * 10.0).rounded())
+    return "\(tenths / 10).\(tenths % 10)x"
+}
+
 func formatSummary(_ summary: BenchmarkSummary, includeGate: Bool) -> String {
     var output = "mode=\(summary.mode.outputName)"
     if let providerName = summary.providerName {
@@ -91,14 +103,28 @@ func formatSummary(_ summary: BenchmarkSummary, includeGate: Bool) -> String {
     output += " failures=\(summary.failureCount)"
 
     if includeGate {
+        // The budgets are the only thing that can genuinely be absent here; headroom is
+        // non-nil exactly when its budget is, so unwrapping it separately would guard an
+        // invariant that does not exist.
         guard let p95BudgetNanoseconds = summary.p95BudgetNanoseconds,
-              let p99BudgetNanoseconds = summary.p99BudgetNanoseconds else {
+              let p99BudgetNanoseconds = summary.p99BudgetNanoseconds,
+              let headroomP95 = summary.headroomP95,
+              let headroomP99 = summary.headroomP99 else {
             preconditionFailure("gate output requires budget values")
         }
 
+        // One evaluation of the gate decision, printed twice -- so `gate=` and `reason=`
+        // cannot disagree.
+        let reason = summary.gateFailureReason
+
         output += " budget_p95_ns=\(p95BudgetNanoseconds)"
         output += " budget_p99_ns=\(p99BudgetNanoseconds)"
-        output += " gate=\(summary.passesGate ? "pass" : "fail")"
+        output += " headroom_p95=\(formatHeadroom(headroomP95))"
+        output += " headroom_p99=\(formatHeadroom(headroomP99))"
+        output += " gate=\(reason == nil ? "pass" : "fail")"
+        if let reason {
+            output += " reason=\(reason.rawValue)"
+        }
     }
 
     output += " checksum=\(summary.checksum)"
