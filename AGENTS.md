@@ -89,7 +89,8 @@ runs first and feeds the located line index to the horizontal query), returning 
 nested `PointQuery` — `.point(PointLocation)` carrying the located `line` plus a
 `ColumnResolution` (`.cell`/`.blankLine`), `.empty` for an empty document, or
 `.failure`. It adds no new search: O(log N) + O(log M) queries / O(1) core memory,
-both clamp flags preserved. Its `--point-query --gate` is **local (not-yet-CI)**.
+both clamp flags preserved. `--point-query --gate` is its blocking host-job CI
+gate.
 
 ## Package layout
 
@@ -102,6 +103,10 @@ both clamp flags preserved. Its `--point-query --gate` is **local (not-yet-CI)**
   live here, NOT in the core.
 - `Tests/TextEngineCoreTests` — XCTest only. (`swift test` also prints a
   "0 tests in 0 suites" line for the empty Swift Testing harness — not a failure.)
+- `Tests/ViewportBenchmarksTests` — the benchmark target's first test target;
+  `GateLogicTests.swift` unit-tests the gate pass/fail logic itself (band
+  boundaries, `budget_exceeded` vs `budget_stale`) against synthetic
+  `BenchmarkSummary` values, independent of any hosted timing.
 - `Package.swift` — `swift-tools-version: 6.0`. No `platforms:` declared, so iOS
   builds use the toolchain default deployment target.
 
@@ -119,7 +124,7 @@ swift run -c release ViewportBenchmarks -- --line-query --gate   # y->line posit
 swift run -c release ViewportBenchmarks -- --line-geometry-query --gate   # y->line+box+fraction local gate
 swift run -c release ViewportBenchmarks -- --column-query --gate   # x->cell within-line position-query local gate
 swift run -c release ViewportBenchmarks -- --column-geometry-query --gate   # x->cell+box+fraction within-line local gate
-swift run -c release ViewportBenchmarks -- --point-query --gate   # (x,y)->(line,cell) 2D composite local gate
+swift run -c release ViewportBenchmarks -- --point-query --gate   # (x,y)->(line,cell) 2D composite CI gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --help            # all flags
@@ -157,17 +162,16 @@ Three jobs:
   → `--bulk-structural-mutation --gate` (blocking) → `--line-query --gate`
   (blocking) → `--line-geometry-query --gate` (blocking)
   → `--column-query --gate` (blocking)
-  → `--column-geometry-query --gate` (blocking) → `--memory-shape`
+  → `--column-geometry-query --gate` (blocking) → `--point-query --gate`
+  (blocking) → `--memory-shape`
   → `--memory-observation` → realistic relative
   observation (PR-only,
-  `continue-on-error`). The synthetic, static variable-height, mutation
-  variable-height, structural-mutation, bulk-structural-mutation, line-query,
-  line-geometry-query, column-query, and column-geometry-query gates **fail the
-  job on perf regression**.
-  Benchmark budgets
-  are still macOS-calibrated unless hosted Linux x86_64 evidence explicitly
-  justifies a retune. SwiftPM build artifacts use `/tmp/text-engine-host-build`,
-  not workspace `.build`.
+  `continue-on-error`). Ten blocking gates: synthetic, static variable-height,
+  mutation variable-height, structural-mutation, bulk-structural-mutation,
+  line-query, line-geometry-query, column-query, column-geometry-query, and
+  point-query — all **fail the job on perf regression**.
+  Budget calibration is not restated here — see `## Gate budgets` below. SwiftPM
+  build artifacts use `/tmp/text-engine-host-build`, not workspace `.build`.
 - **iOS cross-target compile** on `macos-latest`: iOS device + simulator are
   **blocking** for both `TextEngineCore` and `TextEngineReferenceProviders`, via
   `./.github/scripts/cross-target-compile.sh --targets ios`. This is the only
