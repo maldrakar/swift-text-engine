@@ -25,7 +25,8 @@ enum GateLimits {
     // The budget must stay within this multiple of observed latency, or it is
     // guarding nothing. Calibrated against the fastest machine in play (local
     // macOS arm64, which runs 2-3x faster than hosted CI and so shows the highest
-    // headroom): no scenario exceeds 23x there, leaving >= 2.2x of margin.
+    // headroom): worst observed scenario is 25.9x (bulk_structural_mutation|100k_lines_batch_4096),
+    // leaving 1.9x of margin.
     static let maxHeadroomP95: Double = 50.0
 
     // The derivation formula sets budget_p99 = max(2 * budget_p95, 8 *
@@ -35,7 +36,8 @@ enum GateLimits {
     // binding one. Measured worst local p99 headroom today is 44.5x
     // (variable_height|1m_lines_200_visible_overscan_50), leaving 2.2x of
     // margin -- the mirror of p95's worst 25.9x against its 50x ceiling.
-    static let maxHeadroomP99: Double = 100.0
+    // Computed as 2x p95 to prevent silent drift if maxHeadroomP95 is tightened.
+    static let maxHeadroomP99: Double = 2 * maxHeadroomP95
 }
 
 enum GateFailureReason: String {

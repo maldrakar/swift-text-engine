@@ -170,6 +170,16 @@ final class GateLogicTests: XCTestCase {
         XCTAssertFalse(line.contains("gate="), line)
     }
 
+    // The formatHeadroom function guards !headroom.isFinite to return "inf" rather
+    // than trapping. This test pins that guard with an actual gate-output scenario.
+    func testZeroLatencyFormattingDoesNotTrap() {
+        let s = summary(p95: 0, p99: 0, budgetP95: 330, budgetP99: 660)
+        let output = formatSummary(s, includeGate: true)
+        XCTAssertTrue(output.contains(" headroom_p95=inf"), output)
+        XCTAssertTrue(output.contains(" gate=fail"), output)
+        XCTAssertTrue(output.contains(" reason=budget_stale"), output)
+    }
+
     // The p95-only ceiling cannot see an inflated p99 budget, so pin it statically
     // over the real scenario tables.
     func testEveryScenarioTableKeepsP99AtLeastTwiceP95() {
