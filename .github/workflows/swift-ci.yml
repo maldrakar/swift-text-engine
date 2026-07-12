@@ -123,6 +123,10 @@ jobs:
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --column-geometry-query --gate
 
+      - name: Observe point query benchmark latency
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --point-query
+
       - name: Run memory shape diagnostic
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-shape
