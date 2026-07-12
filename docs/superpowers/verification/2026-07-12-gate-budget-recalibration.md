@@ -1149,13 +1149,29 @@ infinite regress. The corpus is a snapshot; the invariant it must satisfy is
 "corpus + script reproduce the committed budgets" (§2b), and it does. A future
 slice that observes a new tail appends it and re-derives, exactly as this one did.
 
-### Head note
+### Head note — CORRECTED
 
-The only commit after `34bfba1` (the re-derivation) is `c909231`, **this
-verification record**, which is documentation and changes no measured behaviour —
-and run `29187553818` ran at `c909231`, so it covers every line of Swift, workflow,
-and budget that this slice ships. Any commit after `c909231` is a fill-in of this
-§13b with the run's own results and changes no Swift.
+The original text here claimed that "any commit after `c909231` … changes no Swift."
+**That was false when written, and is recorded rather than quietly deleted**, because
+it is the same defect the rest of this slice exists to kill: a document asserting
+something the tree contradicts.
+
+Two rounds of Swift landed after run `29187553818`:
+
+- `4adc8f3` (`fix: make the gate-budget comments re-derivable instead of restated`) —
+  comments plus one test, three Swift files. Hosted run **`29189613106`** covered it,
+  green on all three required jobs.
+- §14 below (the review-response round) — a new gated budget, a new test file, a
+  refactor, two new scripts. Its hosted run is recorded in §13c.
+
+The lesson is now a rule rather than a footnote: **the hosted-proof section is the
+last thing written, after the final Swift commit, never before it.** A proof written
+against a head that then moves is not a proof.
+
+## 13c. Hosted proof of the final head
+
+Recorded in §13c once the review-response round (§14) has a hosted run on the actual
+PR head. Not guessed here.
 
 ## Hosted Proof — Pending
 
@@ -1172,6 +1188,131 @@ recorded by a genuinely docs-only follow-up PR once `main` carries the merge:
 
 Merge parentage (`git rev-list --parents -1 <merge>` → `<merge> 5e2abf7 <pr-head>`)
 will be recorded alongside it to confirm the proof anchors the actually-merged head.
+
+## 14. Review-response round
+
+A six-perspective code review of the branch found no P0 and no P1, and three P2s.
+All are fixed here. The headline: **the slice had recalibrated every gated mode
+except the one it could not see.**
+
+### 14a. `--realistic-provider` was gated, uncalibrated, and under the floor
+
+`--gate` is valid with `--realistic-provider`, and `## Gate budgets` claims the band
+covers *every* gated scenario — but the corpus had **zero** `realistic_provider` rows,
+so nothing could re-derive it and nothing checked it. It was also the worst budget in
+the repo:
+
+```text
+$ grep -c realistic docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv   # before
+0
+```
+
+Hosted evidence from the era when this mode *did* run as a blocking gate
+(`docs/superpowers/verification/2026-06-08-hosted-realistic-provider-gate-ci.md:83`):
+
+```text
+mode=realistic_provider ... p95_ns=19745 p99_ns=25845 ... budget_p95_ns=20000 budget_p99_ns=50000 gate=pass
+```
+
+`19745` against a `20000` budget is **1.01× headroom** — a gate one runner hiccup away
+from red, on a mode whose budget no one had looked at since Slice 11.
+
+**Why the corpus missed it.** The harvest reads hosted lines that carry
+`p95_ns=`/`p99_ns=`. This is the one gated mode CI never runs with `--gate`: the PR-only
+observation step runs it bare and keeps the raw benchmark output in a temp file, so no
+such line for this mode ever reaches the log. Its per-repetition values ride inside the
+`mode=realistic_relative_observation` line instead — which the original harvest command
+did not read.
+
+### 14b. Both halves of the loop are now committed
+
+`.github/scripts/harvest-gate-corpus.sh` is new: it turns hosted CI logs into corpus
+rows and understands **both** line shapes, including the relative-observation line. It
+validated itself against the existing corpus — replaying the corpus's own 25 run IDs
+reproduced every committed row, short only of the one run whose log has aged out of
+retention:
+
+```text
+$ ./.github/scripts/harvest-gate-corpus.sh --runs <the corpus's 25 run ids>
+warn=log_unavailable run=28371455301
+rows: 905     # every mode reproduced exactly, minus that run's rows, plus 128 new realistic_provider rows
+```
+
+`.github/scripts/derive-gate-budgets.sh` no longer answers a typo with silence:
+
+```text
+$ ./.github/scripts/derive-gate-budgets.sh <corpus> bogus_mode
+error=no_corpus_rows mode=bogus_mode known=column_query,variable_height_mutation,...
+$ echo $?
+1
+$ ./.github/scripts/derive-gate-budgets.sh <corpus> point-query   # hyphens now accepted
+point_query|prefixsum_100k  n=6 ...
+```
+
+### 14c. The realistic-provider budget, re-derived
+
+128 hosted samples harvested from the corpus's own run set, then run through the same
+recipe as every other budget:
+
+```text
+realistic_provider|100k_lines_10mb_text  n=128  p95[med=12130 max=18298]  p99[med=12423 max=21752]
+                                         budget_p95=98000  budget_p99=200000
+                                         margin_p95=5.4x   margin_p99=9.2x
+```
+
+`20_000 / 50_000` → **`98_000 / 200_000`**. The corpus now derives **42** scenarios — the
+full gated set, with no mode left uncovered.
+
+**No other budget moved.** Diffing the full derivation before and after the append yields
+exactly one added line (the new `realistic_provider` row) and zero changed lines, which is
+the point: the corpus grew, and the other 41 budgets are still what the recipe says.
+
+### 14d. The 3× floor is now executable
+
+`Tests/ViewportBenchmarksTests/GateFloorTests.swift` reads the committed corpus and holds
+every gated scenario to `3 × max(hosted)` on **both** statistics, plus a coverage assertion
+that a gated scenario with no hosted evidence is itself a failure. Demonstrated to be
+load-bearing rather than decorative — restoring the old realistic-provider budget makes it
+fail with the diagnosis, not just a red X:
+
+```text
+XCTAssertGreaterThanOrEqual failed: ("20000") is less than ("54894") -
+realistic_provider|100k_lines_10mb_text: p95 budget 20000 is below 3x the worst hosted p95
+(18298, n=128) — it will go red on a clean tree; re-derive with .github/scripts/derive-gate-budgets.sh
+```
+
+This closes the review's structural objection: the ceiling was executable, the floor was a
+table in a document. Both are code now.
+
+### 14e. Everything else the review found
+
+- `formatSummary` evaluated the gate decision twice (once for `gate=`, once for `reason=`);
+  it now evaluates once, so the two fields cannot disagree. `headroomP95`/`headroomP99` were
+  nine copy-pasted lines each and are now one shared helper.
+- The `GateLimits` comment claimed the excluded mutation tables "sit below 2× their p95";
+  three of them sit at **exactly** 2×. The `GateLogicTests` comment listed "variable-height"
+  as deliberately absent while the test iterates `variableHeightScenarios()` — it meant
+  `variableHeightMutationScenarios()`. Both corrected.
+- Two comments still quoted measured numbers (`330ns`, `39,381ns`, `2.9x`) in the very slice
+  whose final commit was "make the gate-budget comments re-derivable instead of restated".
+  They now point at the script instead.
+- The spec's Evidence table is marked **SUPERSEDED**: it is the design-time snapshot, and
+  eleven of its budgets moved before ship.
+
+### 14f. Full local re-verification after the round
+
+```text
+swift build -c release          → Build complete!
+swift test                      → Executed 251 tests, with 0 failures   (249 + 2 floor tests)
+rg -n "Foundation" Sources/TextEngineCore              → no matches
+rg -n "Foundation" Sources/TextEngineReferenceProviders → no matches
+all 11 gate modes (42 scenarios) → 42/42 gate=pass
+  headroom_p95 range: 9.3x – 24.1x   (ceiling 50x)
+  headroom_p99 range: 13.8x – 43.0x  (ceiling 100x)
+```
+
+`realistic_provider` local headroom moved from **3.5×** (thinnest in the suite, and ~1.0× on
+hosted) to **18.6×** — inside the band on the machine the budget was actually cut for.
 
 ## Working tree
 

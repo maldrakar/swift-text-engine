@@ -492,6 +492,15 @@ can be re-run rather than taken on trust.
 
 ### Hosted p95/p99 (ns) and resulting budgets
 
+> **SUPERSEDED — do not copy these numbers.** This is the *design-time* snapshot (20 runs,
+> 575 samples). Implementation re-harvested every available hosted run and the corpus grew;
+> eleven budgets moved, and `--realistic-provider` — absent here entirely — was later found
+> below the floor and re-derived too. The **shipped** budgets are whatever
+> `./.github/scripts/derive-gate-budgets.sh docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv`
+> prints today, and `GateFloorTests` fails the build if a table drifts from that evidence.
+> The table is kept as the record of what the design reasoned from — this slice exists
+> precisely because someone once copied a budget out of a document.
+
 Budgets by the Decision 2 formula; margins are over the **worst** observed sample, which
 is the quantity the 3× floor protects.
 
