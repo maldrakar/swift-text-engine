@@ -209,6 +209,59 @@ for normal PR flow, but bypass-capable actors can still override the ruleset.
 Last verified: 2026-06-16 via `gh api`; see
 `docs/superpowers/verification/2026-06-16-swift-ci-required-checks.md`.
 
+## Gate budgets
+
+A gate that cannot fail is not a gate. Every gated scenario's hosted headroom
+(`headroom = budget / observed latency`) must stay inside a band; `--gate`
+enforces the upper bound itself, failing with `gate=fail reason=budget_stale`
+when it doesn't.
+
+**The band**: floor 3x, ceilings `headroom_p95 <= 50x` and `headroom_p99 <=
+100x`.
+
+- The **floor** (3x) is a derivation input, not a live gate check — a budget
+  set below 3x of max-observed latency will eventually go red on a clean tree
+  from runner noise alone. It covers both statistics, because the gate can
+  fail on either one.
+- The **p99 ceiling is exactly double the p95 ceiling, and is derived from it,
+  not chosen independently**. The recipe guarantees `budget_p99 >= 2 *
+  budget_p95` by construction, while observed p99 can equal observed p95 on a
+  nanosecond-quantized clock — so any p99 ceiling below 100x would condemn
+  budgets that are perfectly in-band on p95. Written as `2 * maxHeadroomP95`
+  in `Sources/ViewportBenchmarks/BenchmarkModels.swift` so it cannot silently
+  drift from the p95 ceiling.
+- **Hosted Linux x86_64 is the calibration authority, not local macOS.**
+  Hosted runs 2-3x slower (measured this slice: 2.1-2.7x), so it binds: a
+  budget that holds there holds locally with room to spare, and the reverse is
+  false.
+
+**The recipe** is a committed script, not a table to copy:
+
+```bash
+./.github/scripts/derive-gate-budgets.sh \
+  docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv <mode>
+
+budget_p95 = round_up_2sf(max(8 x median(hosted p95), 3 x max(hosted p95)))
+budget_p99 = round_up_2sf(max(2 x budget_p95, 8 x median(p99), 3 x max(p99)))
+```
+
+The 3x floor covers both statistics because the gate fails on either.
+
+**Never hand-type a budget.** Slices 27/31/33/35/37 shipped copy-pasted
+"starter budgets" that ran 815x-3000x loose, and no gate could fail for five
+slices as a result. Re-derive from fresh hosted evidence instead.
+
+**When an optimization trips the ceiling, raise the budget — never the
+ceiling.** A genuine speed-up (Slices 29/30 cut `lineAt` from O(log^2 N) to
+O(log N)) or faster hardware will push headroom past the ceiling and turn a
+gate red on a clean tree. That is the ceiling working as designed. Re-derive
+that budget from fresh hosted evidence in the same PR that caused the shift.
+
+**The two failure reasons are opposite instructions**, and the gate says
+which one applies: `reason=budget_exceeded` means the code got slower — fix
+the code. `reason=budget_stale` means the budget no longer reflects reality —
+re-derive it.
+
 ## Development workflow ("slices")
 
 Work ships in numbered **slices**, each a small vertical increment with a full
