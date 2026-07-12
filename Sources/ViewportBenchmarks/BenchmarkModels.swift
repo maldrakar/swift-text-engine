@@ -23,45 +23,36 @@ struct RealisticProviderScenario {
 
 enum GateLimits {
     // A budget far above observed latency guards nothing, so the gate fails when
-    // headroom is too LOOSE as well as when it is exceeded.
+    // headroom is too LOOSE (`budget_stale`) as well as when it is exceeded. The
+    // band, the 3x floor, and the rule that an optimization raises the BUDGET and
+    // never the ceiling all live in AGENTS.md "## Gate budgets".
     //
-    // This ceiling is calibrated against the FASTEST machine in play. Budgets are
-    // derived from hosted Linux x86_64 samples, but local macOS arm64 runs 2-3x
-    // faster, so the same budget shows its highest headroom locally. A ceiling has
-    // to clear what the fastest machine reports, or it would condemn budgets that
-    // are correctly calibrated for the machine they were derived on. That reasoning
-    // fixes the ceiling's role; it does not depend on any particular measurement.
+    // The ceiling must clear what the FASTEST machine in play reports: budgets are
+    // derived from hosted Linux x86_64, but local macOS arm64 runs 2-3x faster and
+    // therefore shows the same budget's highest headroom. A ceiling below that would
+    // condemn budgets correctly calibrated for the machine they were derived on.
     //
-    // Deliberately NO "worst observed is X.Yx" figure here. Headroom is
-    // budget / observed, so every budget re-derivation moves it without touching
-    // this file -- which is exactly how the previous version of this comment came
-    // to state numbers that were no longer true. To find today's worst, run the ten
-    // gate modes and read the headroom_p95= field; recorded measurements live in
-    // docs/superpowers/verification/2026-07-12-gate-budget-recalibration.md.
+    // No "worst observed is X.Yx" figure appears here on purpose: headroom is
+    // budget / observed, so every re-derivation moves it without touching this file.
+    // Run the gate modes and read `headroom_p95=` to see today's worst.
     static let maxHeadroomP95: Double = 50.0
 
-    // Exactly twice the p95 ceiling, and computed from it so that tightening the
-    // p95 ceiling cannot silently decouple the two.
+    // Doubled, not chosen independently, and computed from maxHeadroomP95 so the two
+    // cannot silently drift apart.
     //
-    // Why 2x is the right coupling -- structural, not measured: the derivation
-    // recipe (.github/scripts/derive-gate-budgets.sh) sets
-    //   budget_p99 = max(2 * budget_p95, 8 * median(p99), 3 * max(p99))
-    // so a recipe-derived budget_p99 is >= 2 * budget_p95 BY CONSTRUCTION. Yet
-    // observed p99 can EQUAL observed p95: these operations are sub-microsecond and
-    // the clock is ns-quantized, so both quantiles routinely land on the same tick.
-    // A scenario can therefore show ~2x its p95 headroom on p99 while being
-    // perfectly in-band on p95. Any p99 ceiling tighter than 2 * maxHeadroomP95
-    // would condemn budgets the recipe itself produced.
+    // Why 2x is the right coupling -- structural, not measured: the recipe in
+    // .github/scripts/derive-gate-budgets.sh sets budget_p99 to at least twice
+    // budget_p95, so a recipe-derived p99 budget clears 2x BY CONSTRUCTION. Yet
+    // observed p99 can EQUAL observed p95 -- these operations are sub-microsecond and
+    // the clock is ns-quantized, so both quantiles routinely land on the same tick. A
+    // scenario can therefore show ~2x its p95 headroom on p99 while sitting perfectly
+    // in-band on p95, and any tighter p99 ceiling would condemn budgets the recipe
+    // itself produced.
     //
-    // Scope of the >= 2x guarantee: it holds for budgets the recipe produced. The
-    // mutation tables predate the recipe and were left alone because they were
-    // already correctly calibrated; their p99 budgets sit below 2x their p95, so
-    // for them this ceiling is slack and never wrongly binds. GateLogicTests
-    // asserts the >= 2x property over exactly the recipe-derived tables.
-    //
-    // Observed p99 headroom is even less quotable than p95: on the fastest scenarios
-    // p99 is effectively a single tail sample and swings by more than 1.5x between
-    // runs of an UNCHANGED binary. Re-measure it; never trust a number written here.
+    // The mutation tables predate the recipe and keep their pre-slice-38 budgets, whose
+    // p99 sits at or below 2x their p95 -- so for them this ceiling is slack and never
+    // wrongly binds. GateLogicTests pins the >= 2x property over the recipe-derived
+    // tables only; GateFloorTests pins the floor over every gated scenario.
     static let maxHeadroomP99: Double = 2 * maxHeadroomP95
 }
 
@@ -88,24 +79,19 @@ struct BenchmarkSummary {
     let p95BudgetNanoseconds: Int64?
     let p99BudgetNanoseconds: Int64?
 
+    // A workload too cheap for the clock measures 0 ns, which makes headroom unbounded
+    // rather than undefined -- and `.infinity` is above every ceiling, so the gate fails.
+    // That is the right answer: a scenario measuring zero guards nothing.
+    private static func headroom(budget: Int64, observed: Int64) -> Double {
+        observed <= 0 ? .infinity : Double(budget) / Double(observed)
+    }
+
     var headroomP95: Double? {
-        guard let p95BudgetNanoseconds else {
-            return nil
-        }
-        if p95Nanoseconds <= 0 {
-            return .infinity
-        }
-        return Double(p95BudgetNanoseconds) / Double(p95Nanoseconds)
+        p95BudgetNanoseconds.map { BenchmarkSummary.headroom(budget: $0, observed: p95Nanoseconds) }
     }
 
     var headroomP99: Double? {
-        guard let p99BudgetNanoseconds else {
-            return nil
-        }
-        if p99Nanoseconds <= 0 {
-            return .infinity
-        }
-        return Double(p99BudgetNanoseconds) / Double(p99Nanoseconds)
+        p99BudgetNanoseconds.map { BenchmarkSummary.headroom(budget: $0, observed: p99Nanoseconds) }
     }
 
     // A gate that cannot fail is not a gate. `budgetStale` is what makes an
@@ -122,10 +108,10 @@ struct BenchmarkSummary {
         if p95Nanoseconds > p95BudgetNanoseconds || p99Nanoseconds > p99BudgetNanoseconds {
             return .budgetExceeded
         }
-        if let headroomP95, headroomP95 > GateLimits.maxHeadroomP95 {
-            return .budgetStale
-        }
-        if let headroomP99, headroomP99 > GateLimits.maxHeadroomP99 {
+
+        let p95 = BenchmarkSummary.headroom(budget: p95BudgetNanoseconds, observed: p95Nanoseconds)
+        let p99 = BenchmarkSummary.headroom(budget: p99BudgetNanoseconds, observed: p99Nanoseconds)
+        if p95 > GateLimits.maxHeadroomP95 || p99 > GateLimits.maxHeadroomP99 {
             return .budgetStale
         }
         return nil
