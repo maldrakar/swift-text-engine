@@ -72,15 +72,40 @@ workflow *re-run* contributes nothing — six runs means six distinct pushes.
 | # | run id | head | note |
 |---|---|---|---|
 | 1 | `29279467574` | `dbb6538` | Task 4: the observational CI step's first run. Four `mode=point_geometry_query` lines confirmed at step level. |
-| 2 | *pending* | | this commit (verification-record skeleton) |
-| 3 | *pending* | | |
+| 2 | `29280327104` | `56cfb49` | Verification-record skeleton + pre-registered prediction. Green. |
+| 3 | *pending* | | this commit (§4 local evidence) |
 | 4 | *pending* | | |
 | 5 | *pending* | | |
 | 6 | *pending* | | |
 
 ---
 
-## 4. Local test suite, release build, Foundation scan — *pending*
+## 4. Local test suite, release build, Foundation scan
+
+```
+$ swift test
+	 Executed 274 tests, with 0 failures (0 unexpected) in 2.311 (2.323) seconds
+```
+
+274 XCTest tests, **0 failures**. (`swift test` also prints a "0 tests in 0 suites" line for the
+empty Swift Testing harness — the documented harmless artifact, not a failure.) The count rose
+267 → 271 → 274 across Tasks 1–3: 16 hardcoded-expectation tests, the parity oracles and the
+probe-count pin, and the three benchmark-options tests.
+
+```
+$ swift build -c release
+Build complete!
+```
+
+```
+$ rg -n "Foundation" Sources/TextEngineCore
+$ echo $?
+1
+```
+
+Empty — exit 1, no matches. The core stays **Foundation-free**, as the hard constraint requires.
+The new core file `Sources/TextEngineCore/PointGeometryQuery.swift` imports nothing at all: it is a
+pure `extension ViewportVirtualizer`, stdlib-only.
 
 ## 5. All eleven benchmark modes' gate output — *pending*
 
