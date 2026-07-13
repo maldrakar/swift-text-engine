@@ -73,8 +73,8 @@ workflow *re-run* contributes nothing — six runs means six distinct pushes.
 |---|---|---|---|
 | 1 | `29279467574` | `dbb6538` | Task 4: the observational CI step's first run. Four `mode=point_geometry_query` lines confirmed at step level. |
 | 2 | `29280327104` | `56cfb49` | Verification-record skeleton + pre-registered prediction. Green. |
-| 3 | *pending* | | this commit (§4 local evidence) |
-| 4 | *pending* | | |
+| 3 | `29282508259` | `2994781` | §4 local evidence. Green. |
+| 4 | *pending* | | this commit (§8 absolute check) |
 | 5 | *pending* | | |
 | 6 | *pending* | | |
 
@@ -117,12 +117,48 @@ Per scenario: `max/median` on both statistics, and **which term set the budget**
 (`8 × median`) or the `3 × max` floor. Any floor-governed budget is a budget set by *one sample*,
 and this record is the only place that fact is visible before the append-only corpus freezes it.
 
-## 8. The absolute check (observed hosted p99 vs. the 1 µs product line) — *pending*
+## 8. The absolute check — observed hosted p99 vs. the 1 µs product line
 
-An observation, **not** a gate. The brief's "turn 60 FPS into a measurable headless budget" is
-recorded nowhere else in the project. Note in advance that the derived *regression* budgets already
-exceed 1 µs on p99 for `point_query`, so the two thresholds are different objects: a future
-absolute-budget slice must reconcile them rather than assume they agree.
+An **observation, not a gate**. The project brief's ambition ("turn 60 FPS into a measurable
+headless budget") implies an absolute per-query ceiling, which this repo records nowhere else. A
+single hit-test at 60 FPS has ~16.6 ms of frame; a **1 µs** ceiling for one point query is three
+orders of magnitude inside that, and is the round number used here as the product line.
+
+Every hosted `point_geometry_query` p99 observed so far, across runs 1–3 (ns):
+
+| scenario | run 1 | run 2 | run 3 | worst | vs. 1 µs |
+|---|---|---|---|---|---|
+| uniform_100k | 153 | 142 | 117 | 153 | **6.5× inside** |
+| uniform_1m | 133 | 132 | 120 | 133 | **7.5× inside** |
+| prefixsum_100k | 176 | 243 | 122 | 243 | **4.1× inside** |
+| prefixsum_1m | 218 | 184 | 129 | 218 | **4.6× inside** |
+
+The geometry-bearing 2D hit-test clears the 1 µs product line by 4–7× on the *slowest* hosted
+sample of the *slowest* provider, on a million-line document. That is the number a UI integrator
+actually cares about, and it is comfortable.
+
+**These two thresholds are different objects and must not be conflated.** The 1 µs line is an
+*absolute product* ceiling. The gate budgets derived in §6 are *regression* budgets — deliberately
+loose multiples of observed latency (`max(8 × median, 3 × max)`), whose job is to catch a code
+change that makes things slower, not to assert a product requirement. They already exceed 1 µs on
+p99 for `point_query` today. A future absolute-budget slice must **reconcile** them, not assume
+they agree: a scenario can pass every regression gate while breaching an absolute ceiling, and vice
+versa.
+
+### Run-to-run spread — an early warning, before the harvest
+
+Hosted runners vary a lot, and the variance is not noise to be averaged away silently — under an
+**append-only** corpus with a `3 × max` floor, one slow sample is frozen into the budget forever
+(Slice 38 review, P2 #2, still open). Recorded here while it is still visible:
+
+- Run 3 came in uniformly **fast** (p95 80–96) versus runs 1–2 (p95 109–231). Same code, same
+  commit-adjacent tree — this is runner-to-runner variance, roughly a 2× swing.
+- `prefixsum_100k` shows the widest spread so far: p95 of **145 / 231 / 90**. The 231 is a genuine
+  outlier candidate.
+
+§7 reports, per scenario, whether the median term (`8 × median`) or the `3 × max` floor set the
+final budget — because a floor-governed budget is a budget set by one sample, and this record is
+the only place that fact is visible before the corpus freezes it.
 
 ## 9. Hosted PR-head run, and the post-merge `push` run — *pending*
 
