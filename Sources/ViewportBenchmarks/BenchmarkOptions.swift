@@ -77,7 +77,7 @@ struct BenchmarkOptions {
       --column-query        Run x->cell within-line position-query benchmark. Combine with --gate to enforce budgets.
       --column-geometry-query  Run x->cell+box+fraction within-line geometry query benchmark. Combine with --gate to enforce budgets.
       --point-query         Run (x,y)->(line,cell) 2D composite position-query benchmark. Combine with --gate to enforce budgets.
-      --point-geometry-query  Run (x,y)->(line+box+fraction, cell+box+fraction) 2D geometry query benchmark. Not yet gateable: budgets pending hosted derivation.
+      --point-geometry-query  Run (x,y)->(line+box+fraction, cell+box+fraction) 2D geometry query benchmark. Combine with --gate to enforce budgets.
       --memory-shape        Run deterministic core-owned memory-shape diagnostics.
       --memory-observation  Run host RSS observation diagnostics.
       --help                Print this help.
@@ -170,13 +170,7 @@ struct BenchmarkOptions {
             }
         }
 
-        // .pointGeometryQuery is rejected here ONLY until its budgets are derived from
-        // hosted evidence (Slice 39, plan Task 6). Its scenarios carry nil budgets, so
-        // a gate could not enforce anything — and a placeholder is exactly the bug
-        // Slice 38 removed. Remove it from this list in the same commit that fills the
-        // derived budgets in.
-        if enforceGate && (mode == .rangeOnly || mode == .memoryShape || mode == .memoryObservation
-                            || mode == .pointGeometryQuery) {
+        if enforceGate && (mode == .rangeOnly || mode == .memoryShape || mode == .memoryObservation) {
             return .failure("--gate cannot be combined with \(mode.outputName) mode")
         }
 

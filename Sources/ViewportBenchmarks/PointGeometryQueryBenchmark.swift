@@ -21,11 +21,11 @@ private let pointGeometryLineHeight = 16.0
 // only by the four box probes, so their hosted rows are comparable line by line and
 // the composite's own overhead is what the difference measures.
 //
-// Budgets are nil until derived from hosted Linux x86_64 samples by
+// Budgets derived from hosted Linux x86_64 samples by
 // .github/scripts/derive-gate-budgets.sh against the committed corpus at
 // docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv. Hosted is the
 // calibration authority: it runs materially slower than local macOS, so it binds.
-// Never hand-edit these.
+// Never hand-edit these — re-derive.
 //
 // The 3x-over-worst-sample floor does NOT make a thin corpus base safe: over an
 // append-only corpus it freezes a noisy sample in permanently. Re-derive as
@@ -35,16 +35,16 @@ func pointGeometryQueryScenarios() -> [PointGeometryQueryScenario] {
     [
         PointGeometryQueryScenario(name: "uniform_100k", providerName: "uniform",
                                    lineCount: 100_000, useVariableHeights: false,
-                                   p95BudgetNanoseconds: nil, p99BudgetNanoseconds: nil),
+                                   p95BudgetNanoseconds: 640, p99BudgetNanoseconds: 1_300),
         PointGeometryQueryScenario(name: "uniform_1m", providerName: "uniform",
                                    lineCount: 1_000_000, useVariableHeights: false,
-                                   p95BudgetNanoseconds: nil, p99BudgetNanoseconds: nil),
+                                   p95BudgetNanoseconds: 740, p99BudgetNanoseconds: 1_500),
         PointGeometryQueryScenario(name: "prefixsum_100k", providerName: "prefixsum",
                                    lineCount: 100_000, useVariableHeights: true,
-                                   p95BudgetNanoseconds: nil, p99BudgetNanoseconds: nil),
+                                   p95BudgetNanoseconds: 730, p99BudgetNanoseconds: 1_500),
         PointGeometryQueryScenario(name: "prefixsum_1m", providerName: "prefixsum",
                                    lineCount: 1_000_000, useVariableHeights: true,
-                                   p95BudgetNanoseconds: nil, p99BudgetNanoseconds: nil),
+                                   p95BudgetNanoseconds: 780, p99BudgetNanoseconds: 1_600),
     ]
 }
 

@@ -103,7 +103,7 @@ func realisticProviderScenarios() -> [RealisticProviderScenario] {
             viewportHeight: 80.0 * 16.0,
             overscanBefore: 5,
             overscanAfter: 5,
-            p95BudgetNanoseconds: 98_000,
+            p95BudgetNanoseconds: 97_000,
             p99BudgetNanoseconds: 200_000
         )
     ]

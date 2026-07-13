@@ -11,8 +11,8 @@ func structuralMutationScenarios() -> [VariableHeightScenario] {
             viewportHeight: 20.0 * 16.0,
             overscanBefore: 0,
             overscanAfter: 0,
-            p95BudgetNanoseconds: 20_000,
-            p99BudgetNanoseconds: 40_000
+            p95BudgetNanoseconds: 16_000,
+            p99BudgetNanoseconds: 32_000
         ),
         VariableHeightScenario(
             name: "100k_lines_80_visible_overscan_5",
@@ -20,8 +20,8 @@ func structuralMutationScenarios() -> [VariableHeightScenario] {
             viewportHeight: 80.0 * 16.0,
             overscanBefore: 5,
             overscanAfter: 5,
-            p95BudgetNanoseconds: 80_000,
-            p99BudgetNanoseconds: 120_000
+            p95BudgetNanoseconds: 69_000,
+            p99BudgetNanoseconds: 140_000
         ),
         VariableHeightScenario(
             name: "1m_lines_200_visible_overscan_50",
@@ -29,8 +29,8 @@ func structuralMutationScenarios() -> [VariableHeightScenario] {
             viewportHeight: 200.0 * 16.0,
             overscanBefore: 50,
             overscanAfter: 50,
-            p95BudgetNanoseconds: 250_000,
-            p99BudgetNanoseconds: 400_000
+            p95BudgetNanoseconds: 280_000,
+            p99BudgetNanoseconds: 560_000
         )
     ]
 }

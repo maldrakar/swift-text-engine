@@ -11,8 +11,8 @@ func variableHeightMutationScenarios() -> [VariableHeightScenario] {
             viewportHeight: 20.0 * 16.0,
             overscanBefore: 0,
             overscanAfter: 0,
-            p95BudgetNanoseconds: 5_000,
-            p99BudgetNanoseconds: 10_000
+            p95BudgetNanoseconds: 6_500,
+            p99BudgetNanoseconds: 13_000
         ),
         VariableHeightScenario(
             name: "100k_lines_80_visible_overscan_5",
@@ -20,8 +20,8 @@ func variableHeightMutationScenarios() -> [VariableHeightScenario] {
             viewportHeight: 80.0 * 16.0,
             overscanBefore: 5,
             overscanAfter: 5,
-            p95BudgetNanoseconds: 20_000,
-            p99BudgetNanoseconds: 25_000
+            p95BudgetNanoseconds: 24_000,
+            p99BudgetNanoseconds: 48_000
         ),
         VariableHeightScenario(
             name: "1m_lines_200_visible_overscan_50",
@@ -29,8 +29,8 @@ func variableHeightMutationScenarios() -> [VariableHeightScenario] {
             viewportHeight: 200.0 * 16.0,
             overscanBefore: 50,
             overscanAfter: 50,
-            p95BudgetNanoseconds: 60_000,
-            p99BudgetNanoseconds: 75_000
+            p95BudgetNanoseconds: 80_000,
+            p99BudgetNanoseconds: 160_000
         )
     ]
 }

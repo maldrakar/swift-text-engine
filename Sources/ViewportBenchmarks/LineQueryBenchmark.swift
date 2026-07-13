@@ -18,7 +18,7 @@ func lineQueryScenarios() -> [LineQueryScenario] {
     [
         LineQueryScenario(name: "uniform_1k", providerName: "uniform",
                           lineCount: 1_000, useBalancedTree: false,
-                          p95BudgetNanoseconds: 190, p99BudgetNanoseconds: 430),
+                          p95BudgetNanoseconds: 220, p99BudgetNanoseconds: 440),
         LineQueryScenario(name: "uniform_100k", providerName: "uniform",
                           lineCount: 100_000, useBalancedTree: false,
                           p95BudgetNanoseconds: 280, p99BudgetNanoseconds: 560),
