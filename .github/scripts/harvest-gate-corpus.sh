@@ -28,16 +28,110 @@
 #      are taken.
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# Pure selection logic (covered by --self-test, no network required)
+# ---------------------------------------------------------------------------
+
+# Corpus on stdin -> the run ids it already carries, one per line, sorted unique.
+# The run id is the dedup key, not the row: one run legitimately contributes many
+# rows (a realistic_provider run contributes 8), and two of them can be identical.
+# That is why `sort -u` over the corpus is NOT a substitute for this -- it would
+# collapse two genuine repetitions that happened to measure the same nanoseconds.
+harvested_run_ids() {
+  tail -n +2 | cut -f1 | sort -u
+}
+
+# $1 = candidate run ids (newline-separated), $2 = already-harvested ids.
+# Emits one decision per candidate, so the caller never has to re-derive it and
+# --dry-run can print exactly what a real harvest would do.
+plan_runs() {
+  local candidates="$1" harvested="$2" id
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    if [[ -n "$harvested" ]] && printf '%s\n' "$harvested" | grep -qxF -- "$id"; then
+      printf 'skip=already_harvested run=%s\n' "$id"
+    else
+      printf 'plan=harvest run=%s\n' "$id"
+    fi
+  done <<< "$candidates"
+}
+
+# ---------------------------------------------------------------------------
+# Self-test (pure selection logic, no network, no gh)
+# ---------------------------------------------------------------------------
+
+assert_equal() {
+  local expected="$1" actual="$2" label="$3"
+  if [[ "$expected" != "$actual" ]]; then
+    echo "self_test=fail label=$label"
+    echo "  expected: [$expected]"
+    echo "  actual:   [$actual]"
+    exit 1
+  fi
+}
+
+run_self_test() {
+  local fixture
+  fixture="$(mktemp)"
+  # A corpus already carrying runs 111 and 222. Run 222 has several rows, as a
+  # realistic_provider run genuinely does -- the run id, not the row, is the key.
+  printf 'run_id\tmode\tscenario\tp95_ns\tp99_ns\n' > "$fixture"
+  printf '111\tline_query\tuniform_1k\t24\t54\n' >> "$fixture"
+  printf '222\trealistic_provider\t100k_lines_10mb_text\t12130\t12423\n' >> "$fixture"
+  printf '222\trealistic_provider\t100k_lines_10mb_text\t12130\t12423\n' >> "$fixture"
+
+  assert_equal "111
+222" "$(harvested_run_ids < "$fixture")" "harvested_run_ids drops the header and dedups"
+
+  # The bug this guards: a corpus append that re-harvests a run it already has
+  # double-weights that run in median(), the term governing most budgets.
+  assert_equal "skip=already_harvested run=111
+plan=harvest run=333
+skip=already_harvested run=222
+plan=harvest run=444" \
+    "$(plan_runs "111
+333
+222
+444" "$(harvested_run_ids < "$fixture")")" \
+    "plan_runs skips runs already in the corpus"
+
+  # No corpus given (rebuilding from scratch, e.g. after the parser learns a new
+  # line shape) -- every candidate must be harvested.
+  assert_equal "plan=harvest run=111
+plan=harvest run=333" "$(plan_runs "111
+333" "")" "plan_runs harvests everything when no corpus is given"
+
+  # A header-only corpus is empty, not a skip-everything corpus.
+  local empty
+  empty="$(mktemp)"
+  printf 'run_id\tmode\tscenario\tp95_ns\tp99_ns\n' > "$empty"
+  assert_equal "plan=harvest run=111" \
+    "$(plan_runs "111" "$(harvested_run_ids < "$empty")")" \
+    "plan_runs treats a header-only corpus as empty"
+
+  rm -f "$fixture" "$empty"
+  echo "self_test=pass"
+}
+
+if [[ "${1:-}" == "--self-test" ]]; then
+  run_self_test
+  exit 0
+fi
+
 limit=40
 repo="maldrakar/swift-text-engine"
 runs=""
+corpus=""
+dry_run=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --limit) limit="${2:?--limit needs a value}"; shift 2 ;;
-    --repo)  repo="${2:?--repo needs a value}"; shift 2 ;;
-    --runs)  runs="${2:?--runs needs a comma-separated list}"; shift 2 ;;
-    *) echo "usage: harvest-gate-corpus.sh [--limit N] [--repo OWNER/NAME] [--runs id,id,...]" >&2; exit 2 ;;
+    --limit)   limit="${2:?--limit needs a value}"; shift 2 ;;
+    --repo)    repo="${2:?--repo needs a value}"; shift 2 ;;
+    --runs)    runs="${2:?--runs needs a comma-separated list}"; shift 2 ;;
+    --corpus)  corpus="${2:?--corpus needs a path}"; shift 2 ;;
+    --dry-run) dry_run=1; shift ;;
+    *) echo "usage: harvest-gate-corpus.sh [--limit N] [--repo OWNER/NAME] [--runs id,id,...] [--corpus PATH] [--dry-run] [--self-test]" >&2; exit 2 ;;
   esac
 done
 
@@ -48,8 +142,31 @@ else
     --json databaseId --jq '.[].databaseId')"
 fi
 
-printf '%s\n' "$run_ids" | while read -r id; do
-  [[ -n "$id" ]] || continue
+# An unreadable --corpus fails closed. Silently treating it as empty would harvest
+# every run and re-append the whole corpus -- the exact duplication this guards.
+harvested=""
+if [[ -n "$corpus" ]]; then
+  if [[ ! -r "$corpus" ]]; then
+    echo "error=corpus_unreadable path=$corpus" >&2
+    exit 2
+  fi
+  harvested="$(harvested_run_ids < "$corpus")"
+fi
+
+plan_runs "$run_ids" "$harvested" | while read -r decision; do
+  id="${decision##*run=}"
+
+  # Skipping happens BEFORE the log is fetched, so a re-harvest costs no API calls
+  # for runs already in the corpus. stderr, so it never lands in the corpus itself.
+  if [[ "$decision" == skip=* ]]; then
+    echo "$decision" >&2
+    continue
+  fi
+
+  if [[ "$dry_run" == 1 ]]; then
+    echo "$decision" >&2
+    continue
+  fi
 
   # A run whose log has aged out of retention, or that never produced benchmark
   # lines, must not abort the harvest: skip it loudly and keep going. Without the
