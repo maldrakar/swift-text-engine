@@ -74,8 +74,8 @@ workflow *re-run* contributes nothing — six runs means six distinct pushes.
 | 1 | `29279467574` | `dbb6538` | Task 4: the observational CI step's first run. Four `mode=point_geometry_query` lines confirmed at step level. |
 | 2 | `29280327104` | `56cfb49` | Verification-record skeleton + pre-registered prediction. Green. |
 | 3 | `29282508259` | `2994781` | §4 local evidence. Green. |
-| 4 | *pending* | | this commit (§8 absolute check) |
-| 5 | *pending* | | |
+| 4 | `29284799129` | `b1cf819` | §8 absolute check + spread warning. Green. |
+| 5 | *pending* | | this commit (§5 full gate sweep) |
 | 6 | *pending* | | |
 
 ---
@@ -107,7 +107,49 @@ Empty — exit 1, no matches. The core stays **Foundation-free**, as the hard co
 The new core file `Sources/TextEngineCore/PointGeometryQuery.swift` imports nothing at all: it is a
 pure `extension ViewportVirtualizer`, stdlib-only.
 
-## 5. All eleven benchmark modes' gate output — *pending*
+## 5. The full gate sweep — nothing this slice added moved anything that already existed
+
+Local macOS (arm64), release build, at this branch's head. Every pre-existing gated mode, run with
+`--gate`:
+
+```
+--gate                                 exit=0 gate=pass:3 gate=fail:0
+--variable-height --gate               exit=0 gate=pass:3 gate=fail:0
+--variable-height-mutation --gate      exit=0 gate=pass:3 gate=fail:0
+--structural-mutation --gate           exit=0 gate=pass:3 gate=fail:0
+--bulk-structural-mutation --gate      exit=0 gate=pass:5 gate=fail:0
+--line-query --gate                    exit=0 gate=pass:5 gate=fail:0
+--line-geometry-query --gate           exit=0 gate=pass:5 gate=fail:0
+--column-query --gate                  exit=0 gate=pass:5 gate=fail:0
+--column-geometry-query --gate         exit=0 gate=pass:5 gate=fail:0
+--point-query --gate                   exit=0 gate=pass:4 gate=fail:0
+```
+
+3+3+3+3+5+5+5+5+5+4 = **41 gated scenarios, 41 `gate=pass`, 0 `gate=fail`**, every mode exiting 0.
+41 is the correct total (Slice 38 established it empirically; the plan's "42" was an arithmetic
+slip). The slice is strictly additive to the gate surface: it adds a mode, and moves nothing.
+
+The eleventh mode, `--point-geometry-query`, is **not** in this list because it is not gateable yet
+— `--gate` is refused for it until §6 derives its budgets. Bare, it runs clean:
+
+```
+mode=point_geometry_query provider=uniform   scenario=uniform_100k   ... p95_ns=47 p99_ns=52 failures=0 checksum=4687694617200924928
+mode=point_geometry_query provider=uniform   scenario=uniform_1m     ... p95_ns=36 p99_ns=37 failures=0 checksum=6036755761047907072
+mode=point_geometry_query provider=prefixsum scenario=prefixsum_100k ... p95_ns=53 p99_ns=59 failures=0 checksum=1712152282485110528
+mode=point_geometry_query provider=prefixsum scenario=prefixsum_1m   ... p95_ns=61 p99_ns=64 failures=0 checksum=5915921755926273280
+```
+
+`failures=0` on all four. Note these are **local** numbers; hosted Linux runs materially slower and
+is the calibration authority (§6).
+
+> **Tooling trap, recorded so the next agent does not lose an hour to it.** The plan's Task 6 Step 5
+> sweeps the gates with `for m in "--variable-height --gate" ...; do swift run ... -- $m; done`.
+> This repo's shell is **zsh**, which — unlike bash — does **not** word-split an unquoted parameter
+> expansion. `$m` is passed as one literal argument, the binary rejects it as an unknown flag, and
+> the command exits 1 with *no output at all*. The sweep then reports nine of ten gates as
+> `exit=1 gate=pass:0`, which is indistinguishable from a catastrophic regression. It is not one.
+> Use a function taking `"$@"`, or an array. And when a sweep says "everything broke", reproduce a
+> single case directly before believing it.
 
 ## 6. Harvest + derivation (corpus diff, verbatim `derive-gate-budgets.sh` output) — *pending*
 
