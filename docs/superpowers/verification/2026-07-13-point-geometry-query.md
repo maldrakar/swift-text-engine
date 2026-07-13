@@ -75,8 +75,8 @@ workflow *re-run* contributes nothing — six runs means six distinct pushes.
 | 2 | `29280327104` | `56cfb49` | Verification-record skeleton + pre-registered prediction. Green. |
 | 3 | `29282508259` | `2994781` | §4 local evidence. Green. |
 | 4 | `29284799129` | `b1cf819` | §8 absolute check + spread warning. Green. |
-| 5 | *pending* | | this commit (§5 full gate sweep) |
-| 6 | *pending* | | |
+| 5 | `29285302031` | `b783208` | §5 full gate sweep (41/41). Green. |
+| 6 | *pending* | | this commit (§5b checksum stability) — completes the six-run base |
 
 ---
 
@@ -150,6 +150,36 @@ is the calibration authority (§6).
 > `exit=1 gate=pass:0`, which is indistinguishable from a catastrophic regression. It is not one.
 > Use a function taking `"$@"`, or an array. And when a sweep says "everything broke", reproduce a
 > single case directly before believing it.
+
+## 5b. Checksum stability across architectures — the "workload unchanged" anchor, tested
+
+This mode's checksum deliberately folds the **geometry** — both boxes, both fractions — not just the
+indices, by reinterpreting each `Double`'s raw IEEE-754 bit pattern and mixing it with a distinct
+odd multiplier per field. That design carries two claims worth testing rather than asserting:
+
+1. **A drifted fraction or a swapped axis must change it.** Distinct odd multipliers per field
+   (19 / 3 / 5 / 7 for the line, 23 / 11 / 13 / 17 for the cell) mean a purely additive
+   cross-field transposition does not cancel — this closes the weakness the Slice 37 review
+   recorded as its P3 #5, where an axis swap was invisible to an additive fold.
+2. **It must be reproducible across runs and platforms**, or it is useless as an anchor. The
+   argument is that Swift does not enable fast-math and `+ - * /` are exactly-rounded under
+   IEEE-754, so the bit patterns are stable.
+
+Claim 2 is the falsifiable one, and it holds. Hosted **Linux x86_64** (run `29279467574`) versus
+local **macOS arm64** — two different architectures, two different toolchain hosts:
+
+| scenario | hosted Linux x86_64 | local macOS arm64 | |
+|---|---|---|---|
+| uniform_100k | 4687694617200924928 | 4687694617200924928 | identical |
+| uniform_1m | 6036755761047907072 | 6036755761047907072 | identical |
+| prefixsum_100k | 1712152282485110528 | 1712152282485110528 | identical |
+| prefixsum_1m | 5915921755926273280 | 5915921755926273280 | identical |
+
+**Bit-identical on all four**, across architectures, while the *latencies* on the same runs differ
+by 2–3×. That is exactly the separation the anchor needs: the checksum tracks the computed geometry
+and is blind to timing, so a future slice can use "checksums unchanged" as genuine evidence that the
+measured workload did not move — including the boxes and fractions, which the sibling
+`--line-geometry-query` / `--column-geometry-query` folds do not cover at all.
 
 ## 6. Harvest + derivation (corpus diff, verbatim `derive-gate-budgets.sh` output) — *pending*
 
