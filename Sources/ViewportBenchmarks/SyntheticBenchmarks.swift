@@ -142,6 +142,8 @@ func runScenario(
                 preconditionFailure("column geometry query mode uses runColumnGeometryQueryScenario")
             case .pointQuery:
                 preconditionFailure("point query mode uses runPointQueryScenario")
+            case .pointGeometryQuery:
+                preconditionFailure("point geometry query mode uses runPointGeometryQueryScenario")
             case .memoryShape:
                 preconditionFailure("memory shape mode uses runMemoryShapeDiagnostics")
             case .memoryObservation:

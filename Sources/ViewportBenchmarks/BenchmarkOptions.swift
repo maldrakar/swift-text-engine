@@ -11,6 +11,7 @@ enum BenchmarkMode {
     case columnQuery
     case columnGeometryQuery
     case pointQuery
+    case pointGeometryQuery
     case memoryShape
     case memoryObservation
 
@@ -40,6 +41,8 @@ enum BenchmarkMode {
             return "column_geometry_query"
         case .pointQuery:
             return "point_query"
+        case .pointGeometryQuery:
+            return "point_geometry_query"
         case .memoryShape:
             return "memory_shape"
         case .memoryObservation:
@@ -59,7 +62,7 @@ struct BenchmarkOptions {
     let enforceGate: Bool
 
     static let usage = """
-    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--bulk-structural-mutation] [--line-query] [--line-geometry-query] [--column-query] [--column-geometry-query] [--point-query] [--memory-shape] [--memory-observation] [--help]
+    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--bulk-structural-mutation] [--line-query] [--line-geometry-query] [--column-query] [--column-geometry-query] [--point-query] [--point-geometry-query] [--memory-shape] [--memory-observation] [--help]
 
     Options:
       --range-only          Run only viewport range recompute benchmark.
@@ -74,6 +77,7 @@ struct BenchmarkOptions {
       --column-query        Run x->cell within-line position-query benchmark. Combine with --gate to enforce budgets.
       --column-geometry-query  Run x->cell+box+fraction within-line geometry query benchmark. Combine with --gate to enforce budgets.
       --point-query         Run (x,y)->(line,cell) 2D composite position-query benchmark. Combine with --gate to enforce budgets.
+      --point-geometry-query  Run (x,y)->(line+box+fraction, cell+box+fraction) 2D geometry query benchmark. Not yet gateable: budgets pending hosted derivation.
       --memory-shape        Run deterministic core-owned memory-shape diagnostics.
       --memory-observation  Run host RSS observation diagnostics.
       --help                Print this help.
@@ -146,6 +150,11 @@ struct BenchmarkOptions {
                     return .failure("--point-query cannot be combined with another mode")
                 }
                 mode = .pointQuery
+            case "--point-geometry-query":
+                if mode != .pipeline {
+                    return .failure("--point-geometry-query cannot be combined with another mode")
+                }
+                mode = .pointGeometryQuery
             case "--memory-shape":
                 if mode != .pipeline {
                     return .failure("--memory-shape cannot be combined with another mode")
@@ -161,7 +170,13 @@ struct BenchmarkOptions {
             }
         }
 
-        if enforceGate && (mode == .rangeOnly || mode == .memoryShape || mode == .memoryObservation) {
+        // .pointGeometryQuery is rejected here ONLY until its budgets are derived from
+        // hosted evidence (Slice 39, plan Task 6). Its scenarios carry nil budgets, so
+        // a gate could not enforce anything — and a placeholder is exactly the bug
+        // Slice 38 removed. Remove it from this list in the same commit that fills the
+        // derived budgets in.
+        if enforceGate && (mode == .rangeOnly || mode == .memoryShape || mode == .memoryObservation
+                            || mode == .pointGeometryQuery) {
             return .failure("--gate cannot be combined with \(mode.outputName) mode")
         }
 
