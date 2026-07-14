@@ -3,6 +3,11 @@ import TextEngineReferenceProviders
 
 // Reuses VariableHeightScenario, variableHeights(lineCount:), and
 // deterministicScrollOffset from VariableHeightBenchmark.swift / BenchmarkSupport.swift.
+//
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+// Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
+// binds. Do not hand-edit — re-derive.
 func variableHeightMutationScenarios() -> [VariableHeightScenario] {
     [
         VariableHeightScenario(

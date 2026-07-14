@@ -9,10 +9,12 @@ extension ViewportVirtualizer {
     /// provider-native hooks) and **no arithmetic of its own** — every box and
     /// fraction is produced by the single existing implementation on that axis, so
     /// each component is equal, by construction, to what the corresponding 1D query
-    /// would have returned. Over `pointAt` it adds exactly four constant probes (two
-    /// `offset(ofLine:)`, two `columnOffset(inLine:column:)`), so it never adds a log
-    /// factor and its per-provider cost class equals `pointAt`'s: O(log N) + O(log M)
-    /// queries, O(1) core memory, zero allocation beyond the returned value structs.
+    /// would have returned. Over `pointAt` it adds only a constant number of probes —
+    /// up to four (two `offset(ofLine:)`, two `columnOffset(inLine:column:)`) on a
+    /// located cell, fewer on a blank line or a failure path, where the horizontal
+    /// probes are never taken — so it never adds a log factor and its per-provider
+    /// cost class equals `pointAt`'s: O(log N) + O(log M) queries, O(1) core memory,
+    /// zero allocation beyond the returned value structs.
     ///
     /// The vertical query runs first: its failure short-circuits (the horizontal
     /// query needs a valid `inLine`, which only a vertical success can supply) and an

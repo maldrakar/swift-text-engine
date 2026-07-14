@@ -96,8 +96,9 @@ geometry-bearing companion: it composes `lineGeometryAt` with `columnGeometryAt`
 returning both axes' boxes, within-box fractions, and clamp flags in a nested
 `PointGeometryQuery` (`.geometry(PointGeometryLocation)` carrying a
 `LineGeometryLocation` plus a `ColumnGeometryResolution` — `.cell`/`.blankLine`),
-adding no search and no arithmetic, only four constant probes, so its cost class
-equals `pointAt`'s. Caret snapping stays a caller concern.
+adding no search and no arithmetic, only a constant number of probes (up to four on
+a located cell, fewer on a blank line or a failure path), so its cost class equals
+`pointAt`'s. Caret snapping stays a caller concern.
 `--point-geometry-query --gate` is derived-budget gateable, but runs in CI under
 `continue-on-error` — **observational, not yet a blocking gate** (promotion is
 Slice 40).

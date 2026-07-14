@@ -6,9 +6,17 @@ struct PointGeometryQueryScenario {
     let providerName: String
     let lineCount: Int
     let useVariableHeights: Bool     // true -> PrefixSumLineMetrics, false -> UniformLineMetrics
-    // Optional BY DESIGN. A nil budget means "no hosted evidence yet", and the gate
-    // reports `missing_budget` rather than passing. Fill these ONLY from
+    // Optional BY DESIGN — "no hosted evidence yet". Fill these ONLY from
     // .github/scripts/derive-gate-budgets.sh; never by hand.
+    //
+    // A nil budget does NOT survive `--gate` cleanly: `BenchmarkModels.swift`'s
+    // `gateFailureReason` does correctly return `.missingBudget` for a nil budget, but
+    // `formatSummary(includeGate:)` (BenchmarkSupport.swift) unwraps the budget fields
+    // with a `guard ... else { preconditionFailure(...) }` BEFORE `gateFailureReason`
+    // ever runs — so the process traps rather than printing `gate=fail
+    // reason=missing_budget`. This table is the only scenario table in the repo with
+    // `Optional` budgets, so it is the only one where adding a scenario with a nil
+    // budget and running `--point-geometry-query --gate` hits that trap.
     let p95BudgetNanoseconds: Int64?
     let p99BudgetNanoseconds: Int64?
 }
