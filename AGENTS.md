@@ -294,6 +294,22 @@ budget_p99 = round_up_2sf(max(2 x budget_p95, 8 x median(p99), 3 x max(p99)))
 
 The 3x floor covers both statistics because the gate fails on either.
 
+**A harvest re-derives every mode, not the one you came for.** Each hosted run
+measures *all* the gated modes, so appending it raises `max(hosted)` — and can move
+the median — for scenarios your slice never touched. Two consequences, both learned
+the hard way in Slice 39:
+
+- After harvesting, **sweep every mode** (`derive-gate-budgets.sh <corpus.tsv>` with
+  no mode argument prints them all) and re-commit every budget the recipe now
+  produces differently. Deriving only your own mode leaves the others silently
+  *not reproducing* from the committed corpus, which breaks the "derived, never
+  hand-typed" invariant for them until some unrelated slice happens to re-touch them.
+- A post-harvest **`GateFloorTests` failure is `budget_stale`, not an engine
+  regression**: the new samples raised a floor under an unchanged budget. Re-derive
+  that scenario; do not go hunting for a slowdown in the core. (Budgets sitting
+  within a few percent of their floor are normal — whenever the `3 x max` term
+  governs, `round_up_2sf` lands just above it *by construction*.)
+
 The corpus is **append-only**, and the run id is its dedup key — one run
 legitimately contributes many rows (a `realistic_provider` run contributes 8), and
 two of them can be byte-identical. So `sort -u` over the corpus is **not** a
