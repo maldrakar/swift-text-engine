@@ -652,7 +652,7 @@ Seven findings were confirmed and are fixed in `0d135e6`, `989c39b` and `6cd286a
 | 2 | `GateLogicTests` had become a second hand-maintained copy of `GateFloorTests.everyGatedBudget()` — and the copies had already **drifted inside this branch** (`3673a43` covered eleven tables and missed the gated twelfth; `a5ff213` repaired it) | `everyGatedBudget()` is now the test target's single registry; both halves of the band iterate it |
 | 3 | Acceptance criterion 9 (the checksum catches an axis swap or a drifted fraction) was asserted by a **comment and nothing else** | `PointGeometryChecksumTests` exercises the fold directly |
 | 4 | Acceptance criterion 2: Decision 7's row "line located; line width not finite or ≤ 0" had **no test** — the only `.invalidColumnMetrics` test reaches the error through the *origin-shift* guard, a different branch | Zero-width and non-finite-width rows added, plus the non-finite half of the vertical total-height row |
-| 5 | Acceptance criterion 1: the oracles ran on **two** pairings, not the four named ones. No reference provider met `pointGeometryAt` in any test | `PointGeometryAtReferenceProviderTests` added, incl. `BalancedTreeLineMetrics` — the one provider overriding the vertical search hook — asserting its native descent equals the generic fallback on geometry, fractions and clamps |
+| 5 | Acceptance criterion 1: the oracles ran on **two** pairings, not the four named ones. No reference provider met `pointGeometryAt` in any test | **Only half-fixed, and this row said otherwise — see §11 #2.** `PointGeometryAtReferenceProviderTests` did put the shipped providers in front of the query (incl. `BalancedTreeLineMetrics`, the one provider overriding the vertical search hook, asserted equal to the generic fallback). But its other four tests are hard-coded expectations, not oracles, and the **oracles** still ran on two pairings, neither of them a real provider. AC1 was met in §11, not here |
 | 6 | Mode-flag mutual exclusion was untested for **every** mode | Both directions pinned for this flag |
 | 7 | The scenario-table comment claimed the two point modes "differ only by the four box probes", contradicting the same file's checksum comment (this mode's timed loop carries a heavier fold) | Comment corrected: read the delta as an **upper bound** on the probes' cost, not as their value |
 
@@ -726,3 +726,113 @@ the sweep must therefore cover all of them, and that a post-harvest `GateFloorTe
 - The probe-count pin cannot be fooled by the binary search: the counting wrappers instrument the
   search probes too, but those cancel exactly in the `pointAt`-vs-`pointGeometryAt` difference
   (identical deterministic calls), leaving only the +2 / +2 box probes.
+
+---
+
+## 11. Second post-review round (2026-07-14)
+
+A follow-up review of the post-fix head returned three P2s. All three reproduced against the
+tree, and all three are fixed here. Two of them were *created* by the first fix round — the
+kind of regression a round of fixes is most likely to introduce and least likely to re-check.
+
+### 11.1 The CI step had gone failure-blind, contradicting Decision 5
+
+`b378554` flipped the hosted step from a bare run to `--point-geometry-query --gate` and left
+`continue-on-error: true` on it. That flag swallows **every** non-zero exit, not just a budget
+one — so the step could no longer redden the host job for *any* reason: `failureCount != 0`, a
+`preconditionFailure`, or a crashed binary. Nothing blocking executed the point-geometry
+scenario table at all. Decision 5's own text ("budget-blind, *not* failure-blind… the step is
+blocking on **correctness**"; "only the realistic-provider step carries `continue-on-error`")
+described a workflow that had stopped existing, and this is the trap the repo already fell into
+in Slice 16 (a dead `continue-on-error` step).
+
+**Demonstrated, not argued.** With `pointGeometryLineHeight` set to `0.0` — every operation
+returns `.failure(.invalidLineMetrics)`:
+
+```
+$ swift run -c release ViewportBenchmarks -- --point-geometry-query          # bare
+exit=1
+$ swift run -c release ViewportBenchmarks -- --point-geometry-query --gate   # what CI ran
+exit=1        <- swallowed by continue-on-error; host job stays GREEN
+```
+
+**Fix**: two steps. A bare run **without** `continue-on-error` (correctness: blocking), then the
+gated run **with** it (budget: observational until Slice 40, which deletes both halves at once).
+
+The bare step keeps its benchmark lines **out of the hosted log** on success, and that is load-
+bearing, not tidiness: `harvest-gate-corpus.sh` harvests every `p95_ns=`/`p99_ns=` line in a
+run's log, and its dedup key is the **run id**, not the row. A second point-geometry step
+printing summaries would therefore put *two* rows per scenario into every future harvest of the
+same run — double-weighting that run in `median()`, the term that governs most budgets, and
+doing it for one mode only. The realistic-provider step already solves this by keeping its
+output in a temp file; this step copies it. On failure the output *is* dumped, and there the
+gated step never runs, so the row count is still one.
+
+### 11.2 Acceptance criterion 1 was still unmet, and §10 #5 called it Fixed
+
+AC1 asks for the parity oracles **and** the reconstruction property on all four pairings —
+`{UniformLineMetrics, PrefixSumLineMetrics} × {UniformColumnMetrics, PrefixSumColumnMetrics}`.
+What actually existed: the oracles ran on two pairings (Uniform×Uniform and a hand-built
+Array×Array double), the reconstruction property on one, and `TextEngineCoreTests` **cannot**
+reach the `PrefixSum*` providers at all — it depends on `TextEngineCore` alone (`Package.swift`).
+The five tests added in round 1 are four hard-coded expectations plus one provider-vs-provider
+comparison; none is an oracle. Neither mixed pairing was tested, though the benchmark's
+`prefixsum_*` scenarios run exactly one of them.
+
+The correctness risk was small (the query is a generic composition with no arithmetic of its
+own, and the only provider with a native descent was covered). The *process* risk was not: §10
+listed it under "### Fixed", so the next agent would not have re-checked it.
+
+**Fix**: the oracles moved to `Tests/TextEngineReferenceProvidersTests/PointGeometryAtOracleTests.swift`
+— the one target with both dependencies — and now run over the full 2×2 grid, each pairing
+getting all three oracles *and* the reconstruction property (which skips clamped axes, where the
+fraction is pinned by design, and asserts a minimum in-range hit count so the skip cannot make it
+vacuous). The core-side `PointGeometryAtEquivalenceTests` is deleted rather than duplicated: its
+hand-built doubles took the same generic binary-search fallback both `PrefixSum` providers take,
+and the grid's fixtures keep what they were there for (variable heights, a blank line).
+
+### 11.3 `--gate` was opt-out while the registry was opt-in
+
+`--gate` was rejected by a **deny-list** of three modes, so every new `BenchmarkMode` became
+gate-accepting the moment it existed. The checking half is the opposite shape:
+`everyGatedBudget()` is twelve hand-written `for` loops — and this branch made it the single
+registry *both* halves of the band read (the 3× floor in `GateFloorTests`, `p99 >= 2 × p95` in
+`GateLogicTests`). A mode forgotten there would be gated, budget-bearing, and invisible to both.
+Not hypothetical: that drift happened **inside this branch** (`3673a43` covered eleven tables and
+missed the gated twelfth; `a5ff213` repaired it), when nothing but an eye could catch it.
+
+**Fix**: `BenchmarkMode: CaseIterable` + `var isGateable: Bool` as an **exhaustive switch** (a new
+case is now a compile error until answered), the deny-list replaced by `!mode.isGateable`, and two
+guards — every gateable mode must register at least one scenario, and no ungateable mode may
+register any.
+
+### Mutation-tested, not assumed
+
+1. **Delete the `pointGeometryQueryScenarios()` loop from `everyGatedBudget()`** (i.e. re-commit
+   the exact `3673a43` drift) → `testEveryGateableModeIsRegistered` fails: *"point_geometry_query:
+   --gate accepts this mode, but everyGatedBudget() registers no scenario for it"*.
+2. **Feed `y` into the horizontal axis** (`columnGeometryAt(x: y, …)` inside `pointGeometryAt`) →
+   all four grid pairings fail, 1297 assertions.
+3. **`pointGeometryLineHeight = 0.0`** → the new bare CI step exits 1 (see §11.1); before this
+   round, the only step running that table swallowed it.
+
+### Evidence after the fixes
+
+```
+$ swift test
+	 Executed 290 tests, with 0 failures (0 unexpected)      # 286 -> 290
+$ swift build -c release
+Build complete!
+$ swift run -c release ViewportBenchmarks -- --point-geometry-query --gate
+gate=pass x4, exit=0
+$ swift run -c release ViewportBenchmarks -- --gate
+mode=pipeline … gate=pass
+$ for m in --range-only --memory-shape --memory-observation; do … --gate; done
+error=--gate cannot be combined with range_only mode
+error=--gate cannot be combined with memory_shape mode
+error=--gate cannot be combined with memory_observation mode     # deny-list -> isGateable: unchanged behavior
+$ rg -n "Foundation" Sources/TextEngineCore ; echo $?
+1                                                          # empty
+```
+
+No budget value and no corpus row was touched in this round.

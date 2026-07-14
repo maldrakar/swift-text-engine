@@ -99,9 +99,11 @@ returning both axes' boxes, within-box fractions, and clamp flags in a nested
 adding no search and no arithmetic, only a constant number of probes (up to four on
 a located cell, fewer on a blank line or a failure path), so its cost class equals
 `pointAt`'s. Caret snapping stays a caller concern.
-`--point-geometry-query --gate` is derived-budget gateable, but runs in CI under
-`continue-on-error` — **observational, not yet a blocking gate** (promotion is
-Slice 40).
+`--point-geometry-query` is derived-budget gateable, and CI runs it as **two steps**:
+a bare run that is **blocking on correctness**, then a `--gate` run under
+`continue-on-error` that is **observational on latency, not yet a blocking gate**
+(promotion is Slice 40, which deletes both halves at once). One step cannot be both:
+`continue-on-error` swallows every non-zero exit, budget and correctness alike.
 
 ## Package layout
 
@@ -120,7 +122,16 @@ Slice 40).
   `BenchmarkSummary` values, independent of any hosted timing.
   `GateFloorTests.swift` is the other half: it reads the committed corpus and holds
   **every** gated scenario to the 3x floor on both statistics — the half of the band
-  the runtime gate cannot check (see `## Gate budgets`).
+  the runtime gate cannot check (see `## Gate budgets`). It also owns
+  `everyGatedBudget()`, the **single registry** of gated scenarios that both halves
+  of the band iterate. Which modes `--gate` accepts is the exhaustive
+  `BenchmarkMode.isGateable` switch (never a deny-list — that makes a new mode
+  gateable by default), and a test pins the two to each other: a gateable mode with
+  no scenarios registered fails, and so does the reverse.
+- `Tests/TextEngineReferenceProvidersTests` — the only test target that can see both
+  the core and the shipped providers, so cross-provider oracles (e.g. the
+  `pointGeometryAt` 2x2 provider grid) belong here. `TextEngineCoreTests` depends on
+  `TextEngineCore` alone and physically cannot reach `PrefixSum*`/`BalancedTree*`.
 - `Package.swift` — `swift-tools-version: 6.0`. No `platforms:` declared, so iOS
   builds use the toolchain default deployment target.
 
@@ -183,18 +194,23 @@ Three jobs:
   (blocking) → `--line-geometry-query --gate` (blocking)
   → `--column-query --gate` (blocking)
   → `--column-geometry-query --gate` (blocking) → `--point-query --gate`
-  (blocking) → `--point-geometry-query --gate` (`continue-on-error`, not
-  blocking) →
+  (blocking) → `--point-geometry-query` bare (blocking on **correctness**) →
+  `--point-geometry-query --gate` (`continue-on-error`, observational on
+  latency) →
   `--memory-shape`
   → `--memory-observation` → realistic relative
   observation (PR-only,
   `continue-on-error`). Ten blocking gates: synthetic, static variable-height,
   mutation variable-height, structural-mutation, bulk-structural-mutation,
   line-query, line-geometry-query, column-query, column-geometry-query, and
-  point-query — all **fail the job on perf regression**. The
-  point-geometry-query step now runs `--gate` on hosted Linux too, but stays
-  `continue-on-error` so it cannot fail the job; promotion to an eleventh
-  blocking gate is Slice 40.
+  point-query — all **fail the job on perf regression**. Point-geometry-query is
+  split in two on purpose: `continue-on-error` swallows *every* non-zero exit, so
+  a lone gated step under it would also swallow `failureCount != 0` and crashes —
+  the Slice 16 dead-step trap. The bare step keeps correctness blocking and its
+  summary lines **out of the log** (the harvester reads every `p95_ns=` line in a
+  run, so a second printing step would double-weight that run in `median()`).
+  Slice 40 promotes the mode by deleting the bare step and the
+  `continue-on-error` together.
   Budget calibration is not restated here — see `## Gate budgets` below. SwiftPM
   build artifacts use `/tmp/text-engine-host-build`, not workspace `.build`.
 - **iOS cross-target compile** on `macos-latest`: iOS device + simulator are
