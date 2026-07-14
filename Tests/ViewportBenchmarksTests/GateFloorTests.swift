@@ -117,6 +117,39 @@ func everyGatedBudget() -> [GatedBudget] {
 
 final class GateFloorTests: XCTestCase {
 
+    // Closes the loop between the two halves of the registry. `BenchmarkMode.isGateable`
+    // decides which modes `--gate` ACCEPTS; `everyGatedBudget()` is the hand-written list
+    // of what the band then CHECKS. Nothing but this test makes the second track the
+    // first: a new gateable mode whose `for s in ...Scenarios()` loop was never added
+    // would be gate-accepting, budget-bearing, and invisible to both the 3x floor and the
+    // p99 >= 2 * p95 invariant. That drift is not hypothetical -- it happened inside this
+    // branch (3673a43 covered eleven tables and missed the gated twelfth; a5ff213 fixed
+    // it), back when the miss could only be caught by eye.
+    func testEveryGateableModeIsRegistered() {
+        let registeredModes = Set(everyGatedBudget().map { $0.key.split(separator: "|")[0] })
+
+        for mode in BenchmarkMode.allCases where mode.isGateable {
+            XCTAssertTrue(
+                registeredModes.contains(Substring(mode.outputName)),
+                "\(mode.outputName): --gate accepts this mode, but everyGatedBudget() "
+                    + "registers no scenario for it — add its scenarios loop there, or make "
+                    + "BenchmarkMode.isGateable return false for it")
+        }
+    }
+
+    // The converse: a mode that is NOT gateable must not smuggle budgets into the band
+    // either, or the floor test would hold a scenario to hosted evidence that no gate
+    // will ever read.
+    func testNoUngateableModeIsRegistered() {
+        let registeredModes = Set(everyGatedBudget().map { $0.key.split(separator: "|")[0] })
+
+        for mode in BenchmarkMode.allCases where !mode.isGateable {
+            XCTAssertFalse(
+                registeredModes.contains(Substring(mode.outputName)),
+                "\(mode.outputName): registered in everyGatedBudget(), but --gate rejects it")
+        }
+    }
+
     // A budget with no hosted evidence behind it is a hand-typed budget, whatever else
     // it is. --realistic-provider was exactly that until its samples were harvested:
     // a gated mode the corpus had never seen, whose budget nothing could re-derive.

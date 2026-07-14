@@ -1,4 +1,4 @@
-enum BenchmarkMode {
+enum BenchmarkMode: CaseIterable {
     case pipeline
     case rangeOnly
     case realisticProvider
@@ -47,6 +47,40 @@ enum BenchmarkMode {
             return "memory_shape"
         case .memoryObservation:
             return "memory_observation"
+        }
+    }
+
+    // Whether `--gate` is accepted for this mode. Deliberately an EXHAUSTIVE switch and
+    // not a deny-list: with a deny-list (`mode != .rangeOnly && ...`) a newly added mode
+    // is gateable the moment it exists, silently and by default -- budget-bearing, yet
+    // invisible to `everyGatedBudget()`, which is hand-written. Both halves of the band
+    // (the 3x floor in GateFloorTests, p99 >= 2 * p95 in GateLogicTests) read that
+    // registry, so such a mode would be gated and unchecked at once. Adding a case here
+    // is now a compile error until it is answered, and `testEveryGateableModeIsRegistered`
+    // then fails until its scenarios are registered.
+    //
+    // The three false cases have no budgets by nature: --range-only is a component
+    // timing, and the two memory modes assert an invariant / observe RSS rather than
+    // measure latency.
+    var isGateable: Bool {
+        switch self {
+        case .pipeline,
+             .realisticProvider,
+             .variableHeight,
+             .variableHeightMutation,
+             .structuralMutation,
+             .bulkStructuralMutation,
+             .lineQuery,
+             .lineGeometryQuery,
+             .columnQuery,
+             .columnGeometryQuery,
+             .pointQuery,
+             .pointGeometryQuery:
+            return true
+        case .rangeOnly,
+             .memoryShape,
+             .memoryObservation:
+            return false
         }
     }
 }
@@ -170,7 +204,7 @@ struct BenchmarkOptions {
             }
         }
 
-        if enforceGate && (mode == .rangeOnly || mode == .memoryShape || mode == .memoryObservation) {
+        if enforceGate && !mode.isGateable {
             return .failure("--gate cannot be combined with \(mode.outputName) mode")
         }
 
