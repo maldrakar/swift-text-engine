@@ -632,6 +632,87 @@ step level.
 
 ---
 
+## 10. Post-review fixes (multi-perspective review of the PR head, 2026-07-14)
+
+An eight-reviewer pass over the branch (plus independent fact-checking of every finding)
+returned **no P0 and no P1**. It confirmed the slice's central claim rather than accepting
+it: three reviewers independently re-ran `derive-gate-budgets.sh` against the committed
+corpus and **all 46 gated budgets reproduce byte-for-byte** — nothing is hand-typed. The
+core diff is exactly the two files acceptance criterion 3 allows (+98/-0), and the
+Foundation scan is empty.
+
+Seven findings were confirmed and are fixed in `0d135e6`, `989c39b` and `6cd286a`. One
+(the near-floor budget cluster) was **not** fixed here, deliberately — see below.
+
+### Fixed
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | The point-geometry table was the only one carrying `Int64?` budgets; a nil budget traps in `formatSummary` (the `preconditionFailure` runs *before* `gateFailureReason` can report `.missingBudget`) instead of failing legibly | Fields narrowed to `Int64`; the state is now unrepresentable, and the three unwrap sites it forced into the test target are gone |
+| 2 | `GateLogicTests` had become a second hand-maintained copy of `GateFloorTests.everyGatedBudget()` — and the copies had already **drifted inside this branch** (`3673a43` covered eleven tables and missed the gated twelfth; `a5ff213` repaired it) | `everyGatedBudget()` is now the test target's single registry; both halves of the band iterate it |
+| 3 | Acceptance criterion 9 (the checksum catches an axis swap or a drifted fraction) was asserted by a **comment and nothing else** | `PointGeometryChecksumTests` exercises the fold directly |
+| 4 | Acceptance criterion 2: Decision 7's row "line located; line width not finite or ≤ 0" had **no test** — the only `.invalidColumnMetrics` test reaches the error through the *origin-shift* guard, a different branch | Zero-width and non-finite-width rows added, plus the non-finite half of the vertical total-height row |
+| 5 | Acceptance criterion 1: the oracles ran on **two** pairings, not the four named ones. No reference provider met `pointGeometryAt` in any test | `PointGeometryAtReferenceProviderTests` added, incl. `BalancedTreeLineMetrics` — the one provider overriding the vertical search hook — asserting its native descent equals the generic fallback on geometry, fractions and clamps |
+| 6 | Mode-flag mutual exclusion was untested for **every** mode | Both directions pinned for this flag |
+| 7 | The scenario-table comment claimed the two point modes "differ only by the four box probes", contradicting the same file's checksum comment (this mode's timed loop carries a heavier fold) | Comment corrected: read the delta as an **upper bound** on the probes' cost, not as their value |
+
+### Mutation-tested, not assumed
+
+A test that passes proves nothing until you watch it fail. All three new guards were
+broken on purpose and observed to go red, then the tree was restored:
+
+1. **Flatten every checksum multiplier to `1`** (an additive fold) →
+   `testAnAxisSwapChangesTheChecksum` fails: *"the fold is blind to an axis swap"*. This is
+   exactly the Slice 37 P3 #5 weakness, and the test catches it.
+2. **Drop the geometry from the fold** (leaving `--point-query`'s index-only accumulator) →
+   `testADriftedFractionChangesTheChecksum` fails with both checksums equal at `95`.
+3. **Set `point_geometry_query|uniform_100k`'s p99 budget to 1200** (below `2 × 640`) →
+   the shared-registry invariant test fails, proving the unified registry genuinely reaches
+   *this slice's own table* — the table the pre-fix duplicate had silently missed.
+
+### Evidence after the fixes
+
+```
+$ swift test
+	 Executed 286 tests, with 0 failures (0 unexpected)      # 274 -> 286
+$ swift build -c release
+Build complete!
+$ rg -n "Foundation" Sources/TextEngineCore ; echo $?
+1                                                          # empty
+```
+
+Full gate sweep, all eleven `--gate`-capable modes: **45 `gate=pass`, 0 `gate=fail`**, every
+mode exiting 0 (3+3+3+3+5+5+5+5+5+4+4).
+
+**The four `--point-geometry-query` checksums are bit-identical to the values recorded in
+§5b and §9** (`4687694617200924928`, `6036755761047907072`, `1712152282485110528`,
+`5915921755926273280`), so the refactor provably moved **no measured path** — the anchor
+this mode's checksum exists to provide, doing its job on the first change that tested it.
+No budget value and no corpus row was touched: the budgets committed in `a23e559` still
+reproduce from the recipe.
+
+### Deliberately NOT fixed: the near-floor budget cluster
+
+Two reviewers raised the six budgets sitting at or within ~5% of the `3 × max` floor (§7b),
+worst case `line_geometry_query|uniform_1k` p99 at **0.0% margin**. The fact-check reproduced
+every number — and then **falsified the causal story**: re-running the derivation against
+`main`'s corpus shows three of those six rows had **identical maxima and identical budgets
+there already** (330→330, 265→265, 92→92), sitting at 0.0% / 0.6% / 1.4% *before this branch
+existed*. The tripwire was armed by Slice 38, not by this slice; this slice's marginal
+contribution is two tightened rows plus one new one, growing the cluster from three to six.
+
+The blast radius is also self-arresting: the corpus is a committed file, so a floor breach can
+only enter through a PR that appends rows — and `GateFloorTests` is blocking on *that* PR.
+
+So the repair stays where it was already scheduled (Slice 40, Slice 38 review P2 #2: the
+`3 × max` floor over an append-only corpus is a one-way ratchet). What this slice owed and now
+pays is the **warning**, moved out of this record and into the file the next agent actually
+loads: `AGENTS.md`'s `## Gate budgets` now states that a harvest re-derives *every* mode, that
+the sweep must therefore cover all of them, and that a post-harvest `GateFloorTests` failure is
+`budget_stale` — not an engine regression to hunt.
+
+---
+
 ## Notes carried from the task reviews
 
 - The three parity oracles are **not** equal in strength, and this record must not imply they are.
