@@ -21,13 +21,4 @@ final class PointGeometryQueryOptionsTests: XCTestCase {
         XCTAssertTrue(options.enforceGate)
     }
 
-    // Every budget in this mode comes from .github/scripts/derive-gate-budgets.sh run
-    // against the committed corpus. A nil here would mean a gate that cannot fail;
-    // a hand-typed number would mean a gate that never could.
-    func testEveryScenarioCarriesADerivedBudget() {
-        for scenario in pointGeometryQueryScenarios() {
-            XCTAssertNotNil(scenario.p95BudgetNanoseconds, "\(scenario.name) has no p95 budget")
-            XCTAssertNotNil(scenario.p99BudgetNanoseconds, "\(scenario.name) has no p99 budget")
-        }
-    }
 }

@@ -56,7 +56,7 @@ private func loadCorpus() throws -> [String: CorpusExtremes] {
     return extremes
 }
 
-private struct GatedBudget {
+struct GatedBudget {
     let key: String
     let p95: Int64
     let p99: Int64
@@ -64,7 +64,13 @@ private struct GatedBudget {
 
 // Every scenario any --gate mode enforces. The mode key comes from BenchmarkMode's own
 // outputName, so it cannot drift from what the benchmark prints and the corpus records.
-private func everyGatedBudget() -> [GatedBudget] {
+//
+// This is THE registry of gated scenarios for the whole test target, not just for the
+// floor test: GateLogicTests' p99 >= 2 * p95 invariant iterates it too. Both halves of
+// the band therefore see the same list, and a new gated mode is registered here once.
+// It was two hand-maintained lists until they drifted — the second one shipped missing a
+// table that was already gated — so do not grow a second copy.
+func everyGatedBudget() -> [GatedBudget] {
     var budgets: [GatedBudget] = []
     func add(_ mode: BenchmarkMode, _ name: String, _ p95: Int64, _ p99: Int64) {
         budgets.append(GatedBudget(key: "\(mode.outputName)|\(name)", p95: p95, p99: p99))
@@ -104,12 +110,7 @@ private func everyGatedBudget() -> [GatedBudget] {
         add(.pointQuery, s.name, s.p95BudgetNanoseconds, s.p99BudgetNanoseconds)
     }
     for s in pointGeometryQueryScenarios() {
-        guard let p95 = s.p95BudgetNanoseconds, let p99 = s.p99BudgetNanoseconds else {
-            XCTFail("point_geometry_query|\(s.name) is gated but carries no budget — "
-                    + "derive it with .github/scripts/derive-gate-budgets.sh")
-            continue
-        }
-        add(.pointGeometryQuery, s.name, p95, p99)
+        add(.pointGeometryQuery, s.name, s.p95BudgetNanoseconds, s.p99BudgetNanoseconds)
     }
     return budgets
 }

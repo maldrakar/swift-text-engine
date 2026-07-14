@@ -6,28 +6,29 @@ struct PointGeometryQueryScenario {
     let providerName: String
     let lineCount: Int
     let useVariableHeights: Bool     // true -> PrefixSumLineMetrics, false -> UniformLineMetrics
-    // Optional BY DESIGN — "no hosted evidence yet". Fill these ONLY from
-    // .github/scripts/derive-gate-budgets.sh; never by hand.
-    //
-    // A nil budget does NOT survive `--gate` cleanly: `BenchmarkModels.swift`'s
-    // `gateFailureReason` does correctly return `.missingBudget` for a nil budget, but
-    // `formatSummary(includeGate:)` (BenchmarkSupport.swift) unwraps the budget fields
-    // with a `guard ... else { preconditionFailure(...) }` BEFORE `gateFailureReason`
-    // ever runs — so the process traps rather than printing `gate=fail
-    // reason=missing_budget`. This table is the only scenario table in the repo with
-    // `Optional` budgets, so it is the only one where adding a scenario with a nil
-    // budget and running `--point-geometry-query --gate` hits that trap.
-    let p95BudgetNanoseconds: Int64?
-    let p99BudgetNanoseconds: Int64?
+    // Non-optional, like every other gated scenario table. The mode shipped with
+    // `Optional` budgets while it had no hosted evidence and `--gate` was refused for it,
+    // so there was nowhere to hand-type a placeholder; once the budgets were derived that
+    // state stopped being representable on purpose. A scenario with no budget is not a
+    // thing this table can express: derive first, then add the row.
+    let p95BudgetNanoseconds: Int64
+    let p99BudgetNanoseconds: Int64
 }
 
 private let pointGeometryColumnsPerLine = 256
 private let pointGeometryColumnWidth = 8.0
 private let pointGeometryLineHeight = 16.0
 
-// Scenarios mirror --point-query one for one, deliberately: the two modes then differ
-// only by the four box probes, so their hosted rows are comparable line by line and
-// the composite's own overhead is what the difference measures.
+// Scenarios mirror --point-query one for one, deliberately: same providers, same line
+// counts, same sampler, so the two modes' hosted rows are comparable line by line.
+//
+// What the row-to-row difference is NOT is a clean measurement of the composite's own
+// overhead. This mode's timed loop also carries a heavier checksum fold than
+// --point-query's (six bit-pattern folds and two index multiplies against two plain
+// adds — see the fold comment below), and that work is inside the timed region. The
+// fold is a handful of integer ops against a ~100 ns composite, so it does not move a
+// budget; but read the delta as an UPPER BOUND on the four box probes' cost, not as
+// their value.
 //
 // Budgets derived from hosted Linux x86_64 samples by
 // .github/scripts/derive-gate-budgets.sh against the committed corpus at
