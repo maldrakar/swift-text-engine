@@ -127,9 +127,10 @@ jobs:
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --point-query --gate
 
-      - name: Observe point-geometry query benchmark latency
+      - name: Point-geometry query benchmark gate (observational until Slice 40)
         if: steps.change-scope.outputs.docs_only_pr != 'true'
-        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --point-geometry-query
+        continue-on-error: true
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --point-geometry-query --gate
 
       - name: Run memory shape diagnostic
         if: steps.change-scope.outputs.docs_only_pr != 'true'

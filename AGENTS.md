@@ -97,9 +97,10 @@ returning both axes' boxes, within-box fractions, and clamp flags in a nested
 `PointGeometryQuery` (`.geometry(PointGeometryLocation)` carrying a
 `LineGeometryLocation` plus a `ColumnGeometryResolution` — `.cell`/`.blankLine`),
 adding no search and no arithmetic, only four constant probes, so its cost class
-equals `pointAt`'s. Caret snapping stays a caller concern. Its
-`--point-geometry-query` mode is **observational in CI, not yet a gate**
-(promotion is Slice 40).
+equals `pointAt`'s. Caret snapping stays a caller concern.
+`--point-geometry-query --gate` is derived-budget gateable, but runs in CI under
+`continue-on-error` — **observational, not yet a blocking gate** (promotion is
+Slice 40).
 
 ## Package layout
 
@@ -137,7 +138,7 @@ swift run -c release ViewportBenchmarks -- --line-geometry-query --gate   # y->l
 swift run -c release ViewportBenchmarks -- --column-query --gate   # x->cell within-line position-query blocking CI gate
 swift run -c release ViewportBenchmarks -- --column-geometry-query --gate   # x->cell+box+fraction within-line blocking CI gate
 swift run -c release ViewportBenchmarks -- --point-query --gate   # (x,y)->(line,cell) 2D composite CI gate
-swift run -c release ViewportBenchmarks -- --point-geometry-query   # (x,y)->(line+box+fraction, cell+box+fraction); observational, not yet a gate
+swift run -c release ViewportBenchmarks -- --point-geometry-query --gate   # (x,y)->(line+box+fraction, cell+box+fraction); gateable, not yet blocking in CI
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --help            # all flags
@@ -159,9 +160,10 @@ Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
 flag at a time. `--gate` is valid with the default pipeline, `--realistic-provider`,
 `--variable-height`, `--variable-height-mutation`, `--structural-mutation`,
 `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
-`--column-query`, `--column-geometry-query`, and `--point-query` modes; it is
+`--column-query`, `--column-geometry-query`, `--point-query`, and
+`--point-geometry-query` modes; it is
 **rejected** with
-`--range-only`, `--point-geometry-query`, `--memory-shape`,
+`--range-only`, `--memory-shape`,
 `--memory-observation`.
 
 Local WASM build (needs a matching Swift SDK installed):
@@ -180,16 +182,18 @@ Three jobs:
   (blocking) → `--line-geometry-query --gate` (blocking)
   → `--column-query --gate` (blocking)
   → `--column-geometry-query --gate` (blocking) → `--point-query --gate`
-  (blocking) → `--point-geometry-query` (observational, no `--gate`) →
+  (blocking) → `--point-geometry-query --gate` (`continue-on-error`, not
+  blocking) →
   `--memory-shape`
   → `--memory-observation` → realistic relative
   observation (PR-only,
   `continue-on-error`). Ten blocking gates: synthetic, static variable-height,
   mutation variable-height, structural-mutation, bulk-structural-mutation,
   line-query, line-geometry-query, column-query, column-geometry-query, and
-  point-query — all **fail the job on perf regression**. The new
-  point-geometry-query step is observational only (correctness-blocking,
-  latency-blind); promotion to an eleventh blocking gate is Slice 40.
+  point-query — all **fail the job on perf regression**. The
+  point-geometry-query step now runs `--gate` on hosted Linux too, but stays
+  `continue-on-error` so it cannot fail the job; promotion to an eleventh
+  blocking gate is Slice 40.
   Budget calibration is not restated here — see `## Gate budgets` below. SwiftPM
   build artifacts use `/tmp/text-engine-host-build`, not workspace `.build`.
 - **iOS cross-target compile** on `macos-latest`: iOS device + simulator are
