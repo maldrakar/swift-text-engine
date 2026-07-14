@@ -228,6 +228,14 @@ final class GateLogicTests: XCTestCase {
         for s in bulkStructuralMutationScenarios() {
             budgets.append(("bulk_structural_mutation|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
         }
+        for s in pointGeometryQueryScenarios() {
+            guard let p95 = s.p95BudgetNanoseconds, let p99 = s.p99BudgetNanoseconds else {
+                XCTFail("point_geometry_query|\(s.name) is gated but carries no budget — "
+                        + "derive it with .github/scripts/derive-gate-budgets.sh")
+                continue
+            }
+            budgets.append(("point_geometry_query|\(s.name)", p95, p99))
+        }
 
         XCTAssertFalse(budgets.isEmpty)
         for (name, p95, p99) in budgets {
