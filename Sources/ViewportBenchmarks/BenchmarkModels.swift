@@ -49,10 +49,11 @@ enum GateLimits {
     // in-band on p95, and any tighter p99 ceiling would condemn budgets the recipe
     // itself produced.
     //
-    // The mutation tables predate the recipe and keep their pre-slice-38 budgets, whose
-    // p99 sits at or below 2x their p95 -- so for them this ceiling is slack and never
-    // wrongly binds. GateLogicTests pins the >= 2x property over the recipe-derived
-    // tables only; GateFloorTests pins the floor over every gated scenario.
+    // Every gated scenario table -- mutation tables included -- is now produced by the
+    // recipe in .github/scripts/derive-gate-budgets.sh from the committed corpus, so this
+    // ceiling never wrongly binds by construction. GateLogicTests pins the >= 2x property
+    // over every recipe-derived table; GateFloorTests pins the floor over every gated
+    // scenario.
     static let maxHeadroomP99: Double = 2 * maxHeadroomP95
 }
 

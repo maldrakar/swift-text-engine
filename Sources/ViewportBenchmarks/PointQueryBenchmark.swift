@@ -19,11 +19,13 @@ private let pointLineHeight = 16.0
 // Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
 // binds. Do not hand-edit — re-derive.
 //
-// This mode had no hosted history at all when it was promoted, so it rests on the
-// thinnest corpus base of any gated mode and is the likeliest to need an upward
-// re-derivation as evidence accumulates. Run
+// This mode had no hosted history at all when it was promoted, so its budgets rest on
+// whatever the corpus has accumulated for it since -- newly-gated modes generally carry
+// thinner evidence than long-gated ones and are the likelier candidates for an upward
+// re-derivation as more hosted runs land. Run
 // `.github/scripts/derive-gate-budgets.sh <corpus> point_query` to see today's n,
-// medians, maxima, and which term binds.
+// medians, maxima, and which term binds; GateFloorTests.swift's everyGatedBudget()
+// enumerates every mode this reasoning applies to.
 //
 // Horizontal provider is UniformColumnMetrics in every scenario: line-agnostic,
 // O(1) memory, valid for every located line, still O(log M) search per line.
