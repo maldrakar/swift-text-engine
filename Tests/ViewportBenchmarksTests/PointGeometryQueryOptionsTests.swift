@@ -21,4 +21,23 @@ final class PointGeometryQueryOptionsTests: XCTestCase {
         XCTAssertTrue(options.enforceGate)
     }
 
+    // "Only one mode flag at a time" (AGENTS.md, ## Commands) is enforced by a guard per
+    // flag, and nothing tested any of them. A dropped guard would not fail loudly: the
+    // binary would silently run whichever mode won the argument scan, so a gate step could
+    // measure the wrong workload and still report gate=pass.
+    func testCombiningWithAnEarlierModeFlagIsRejected() {
+        guard case let .failure(message) = BenchmarkOptions.parse(
+            ["--point-query", "--point-geometry-query"]) else {
+            return XCTFail("two mode flags must be rejected, not silently resolved")
+        }
+        XCTAssertTrue(message.contains("--point-geometry-query"), message)
+    }
+
+    func testCombiningWithALaterModeFlagIsRejected() {
+        guard case let .failure(message) = BenchmarkOptions.parse(
+            ["--point-geometry-query", "--memory-shape"]) else {
+            return XCTFail("two mode flags must be rejected, not silently resolved")
+        }
+        XCTAssertTrue(message.contains("--memory-shape"), message)
+    }
 }

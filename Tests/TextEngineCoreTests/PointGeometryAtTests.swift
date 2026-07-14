@@ -84,6 +84,16 @@ final class PointGeometryAtTests: XCTestCase {
             .failure(.invalidLineMetrics))
     }
 
+    // ...and the other half of the same row: a total height that is not finite. offset(0)
+    // must still be 0, or the origin probe fires first and this row is never reached.
+    func testNonFiniteTotalHeightIsFailure() {
+        let v = ClosureLineMetrics(lineCount: 4, offsetForLine: { $0 == 0 ? 0.0 : .infinity })
+        let h = UniformColumnMetrics(columnsPerLine: 4, columnWidth: 8.0)
+        XCTAssertEqual(
+            ViewportVirtualizer.pointGeometryAt(x: 0.0, y: 0.0, lineMetrics: v, columnMetrics: h),
+            .failure(.invalidLineMetrics))
+    }
+
     func testNegativeColumnCountOnLocatedLineIsFailureAndDiscardsTheLine() {
         let v = UniformLineMetrics(lineCount: 4, lineHeight: 16.0)
         XCTAssertEqual(
@@ -99,6 +109,28 @@ final class PointGeometryAtTests: XCTestCase {
         // Every cell offset is shifted by 5, so columnOffset(_, 0) == 5 != 0.
         let h = ArrayColumnMetrics(advancesPerLine: Array(repeating: [8.0, 8.0], count: 4),
                                    originShift: 5.0)
+        XCTAssertEqual(
+            ViewportVirtualizer.pointGeometryAt(x: 5.0, y: 20.0, lineMetrics: v, columnMetrics: h),
+            .failure(.invalidColumnMetrics))
+    }
+
+    // The OTHER .invalidColumnMetrics row: the located line's cells sum to a width that is
+    // not finite or <= 0. This is a different guard from the origin probe above — a line
+    // that reports cells but no width is a line the provider has not measured — and the
+    // `columnCount == 0` short-circuit means a blank line never reaches it (it is
+    // .blankLine, not a failure).
+    func testNonPositiveLineWidthOnLocatedLineIsFailure() {
+        let v = UniformLineMetrics(lineCount: 4, lineHeight: 16.0)
+        // Two cells per line, every advance 0 -> columnCount 2, total width 0.
+        let h = ArrayColumnMetrics(advancesPerLine: Array(repeating: [0.0, 0.0], count: 4))
+        XCTAssertEqual(
+            ViewportVirtualizer.pointGeometryAt(x: 5.0, y: 20.0, lineMetrics: v, columnMetrics: h),
+            .failure(.invalidColumnMetrics))
+    }
+
+    func testNonFiniteLineWidthOnLocatedLineIsFailure() {
+        let v = UniformLineMetrics(lineCount: 4, lineHeight: 16.0)
+        let h = ArrayColumnMetrics(advancesPerLine: Array(repeating: [8.0, .infinity], count: 4))
         XCTAssertEqual(
             ViewportVirtualizer.pointGeometryAt(x: 5.0, y: 20.0, lineMetrics: v, columnMetrics: h),
             .failure(.invalidColumnMetrics))
