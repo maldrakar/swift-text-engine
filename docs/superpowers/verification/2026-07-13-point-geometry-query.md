@@ -364,9 +364,75 @@ formula.
 | uniform_100k | 1.475 | 640 | 354 | median (comfortable) | 1.333 | 1280 | derived (2×budget_p95) |
 | uniform_1m | 1.370 | 736 | 378 | median (comfortable) | 1.197 | 1480 | derived (2×budget_p95) |
 
-**No scenario in this slice is floor-governed** (`3×max`) on either statistic — all four p95
-budgets are set by the median term, and all four p99 budgets are set by the derived `2×budget_p95`
-term (itself built from an all-median-governed p95), not by their own p99 median or max.
+**No scenario among this slice's own four new `point_geometry_query` budgets is floor-governed**
+(`3×max`) on either statistic — all four p95 budgets are set by the median term, and all four p99
+budgets are set by the derived `2×budget_p95` term (itself built from an all-median-governed p95),
+not by their own p99 median or max. **This claim is scoped to those four budgets only** — it is not
+a whole-repo statement, and must not be read as one. It performs no floor-governance analysis on
+the other 19 pre-existing budgets §6b's harvest also re-derived; §7b below does exactly that
+analysis and finds six budgets, across the whole repo, sitting at or within ~5% of the floor.
+
+## 7b. Floor-margin tripwire — six budgets repo-wide now sit within ~5% of the 3× floor
+
+§6b already flagged that the harvest pulled two pre-existing budgets below the floor
+(`line_query|uniform_1k`, `column_query|uniform_100k`) and both were re-derived to clear it. What
+neither §6b nor §7 checked is *how much* clearance the re-derivation left — on any of the 19
+budgets it moved, not just those two. Re-checking every gated budget in the repo against
+`3 × max(hosted)` finds six sitting at or within ~5% of that floor after this slice, three of which
+this slice never touched at all:
+
+Independently verified against the committed corpus
+(`docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv`) and
+`./.github/scripts/derive-gate-budgets.sh` directly — not transcribed from any prior report:
+
+| budget | stat | committed | 3 × max(hosted) | margin |
+|---|---|---|---|---|
+| `line_geometry_query\|uniform_1k` | p99 | 990 | 990 | **0.0%** |
+| `line_query\|uniform_1k` | p95 | 220 | 219 | 0.5% |
+| `line_geometry_query\|uniform_1m` | p99 | 800 | 795 | 0.6% |
+| `column_query\|uniform_100k` | p99 | 620 | 612 | 1.3% |
+| `line_query\|uniform_100k` | p95 | 280 | 276 | 1.4% |
+| `point_geometry_query\|prefixsum_100k` | p95 | 730 | 693 | 5.3% |
+
+(Verification commands: `./.github/scripts/derive-gate-budgets.sh <corpus> line-query
+line-geometry-query column-query point-geometry-query` for the derived `max(hosted)` figures per
+statistic, cross-checked against the committed `p95BudgetNanoseconds`/`p99BudgetNanoseconds`
+literals in each scenario table; a full sweep of every gated mode confirms these six are the
+tightest — the seventh-tightest margin is 11.9%, a clean gap above this group.)
+
+**Three of these six — `line_geometry_query|uniform_1k`, `line_geometry_query|uniform_1m`, and
+`line_query|uniform_100k` — were not edited by this slice's re-derivation at all.** Their committed
+values were already exactly what the recipe produces; the harvest simply raised the corpus's hosted
+maxima for those scenarios (new samples from the six runs in §3, which measured every gated mode,
+not just `point_geometry_query`) until an unchanged, already-committed budget now sits on the newly
+higher floor. The other three (`line_query|uniform_1k`, `column_query|uniform_100k` from §6b, plus
+`point_geometry_query|prefixsum_100k`, this slice's own near-miss already named in §7's spread
+table) were freshly derived by this slice and landed close to the floor by construction.
+
+**Why the margin clusters near zero instead of spreading out.** `round_up_2sf` rounds a value up to
+its nearest 2-significant-figure ceiling. Whenever the `3 × max(hosted)` term governs a budget (as
+opposed to `8 × median`), the pre-rounding value already equals the floor exactly — rounding up to
+2 significant figures can only add the smallest increment 2-sig-fig precision allows, typically a
+fraction of a percent to low single digits, occasionally landing exactly on a round number that
+coincides with the floor (the 0.0% row above). A floor-governed budget is therefore *always*
+close to the floor by construction — this is not a coincidence specific to these six, it is what
+"floor-governed" means arithmetically.
+
+**Why this matters for `swift test`, not just for the gate.** `GateFloorTests` re-reads the corpus
+on every `swift test` run — a **blocking** CI step on every PR — and fails if any gated budget sits
+below `3 × max(hosted)` on either statistic. A margin already this thin means a single future hosted
+sample nudging any of these six scenarios' maxima up by roughly a nanosecond is enough to flip the
+corresponding `GateFloorTests` assertion red, on a clean tree, with no code change and no `--gate`
+regression involved. That failure would block *all* PRs, not just ones touching these scenarios,
+until the budget is re-derived.
+
+**This is the Slice 38 review's P2 #2 (the append-only-corpus, `3×max`-floor ratchet) biting in
+practice, not a new defect** — it was already tracked as open work for Slice 40, and nothing at this
+slice's HEAD is incorrect: every committed budget here still reproduces byte-for-byte from the
+recipe against the committed corpus. The next harvest — plausibly Slice 40's own — is the likeliest
+trigger. **Slice 40 should expect a `swift test` failure of exactly this shape from `GateFloorTests`
+after harvesting fresh evidence, diagnose it as `budget_stale` by re-running the derive recipe (not
+as a regression to hunt for in the engine), and re-derive rather than debug a surprise.**
 
 **`prefixsum_100k` p95 is a near-miss worth naming explicitly.** Its `max/median` ratio is **2.538**
 — only ~5% below the 2.667 threshold at which the `3×max` floor would take over (728 vs 693, a gap
@@ -461,6 +527,31 @@ Every hosted `point_geometry_query` p99 observed so far, across runs 1–3 (ns):
 The geometry-bearing 2D hit-test clears the 1 µs product line by 4–7× on the *slowest* hosted
 sample of the *slowest* provider, on a million-line document. That is the number a UI integrator
 actually cares about, and it is comfortable.
+
+> **Correction (added post-review, full six-run corpus).** The table above is captioned "across
+> runs 1–3" and predates the full six-run harvest recorded in §3 — it is stale by omission, not by
+> error. Recomputed here directly against
+> `docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv`'s `point_geometry_query` rows
+> across all six harvested runs (not transcribed from the table above):
+>
+> | scenario | run 1 | run 2 | run 3 | run 4 | run 5 | run 6 | worst (n=6) | vs. 1 µs |
+> |---|---|---|---|---|---|---|---|---|
+> | uniform_100k | 153 | 142 | 117 | 90 | 117 | 156 | **156** | **6.4× inside** |
+> | uniform_1m | 133 | 132 | 120 | 93 | 132 | 158 | **158** | **6.3× inside** |
+> | prefixsum_100k | 176 | 243 | 122 | 98 | 141 | 252 | **252** | **4.0× inside** |
+> | prefixsum_1m | 218 | 184 | 129 | 101 | 143 | 203 | **218** | **4.6× inside** |
+>
+> (run order matches §3: run 4 = `29284799129`, run 5 = `29285302031`, run 6 = `29285933609`.)
+>
+> `prefixsum_100k`'s true worst is **252 ns, not 243**, and `uniform_1m`'s is **158 ns, not 133** —
+> both driven by run 6, which the runs-1–3 table never saw. `uniform_100k` also moves, 153 → 156.
+> `prefixsum_1m`'s worst was already inside the runs-1–3 window, so it is unchanged.
+>
+> **The conclusion is unaffected.** Even at the true six-run worst, every scenario still clears the
+> 1 µs product line comfortably — the range narrows from the stale 4.1×–7.5× to **4.0×–6.4×**, still
+> three orders of magnitude inside a 60 FPS frame budget. The point this section exists to make —
+> that this absolute ceiling and the regression budgets derived in §6 are different objects a future
+> slice must reconcile, not assume agree — stands exactly as written below, unchanged.
 
 **These two thresholds are different objects and must not be conflated.** The 1 µs line is an
 *absolute product* ceiling. The gate budgets derived in §6 are *regression* budgets — deliberately
