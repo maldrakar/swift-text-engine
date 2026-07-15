@@ -4,12 +4,12 @@ Branch: `slice-39-point-geometry-query` · PR: [#84](https://github.com/maldraka
 Plan: `docs/superpowers/plans/2026-07-13-point-geometry-query.md`
 Spec: `docs/superpowers/specs/2026-07-13-point-geometry-query-design.md`
 
-> **Status: COMPLETE except for the post-merge `push` run.** This file was committed early on
-> purpose and filled incrementally: budgets here may only be **derived** from hosted Linux CI
-> samples of this PR's own runs, and each push to the PR minted one such run, so the record was
-> both the evidence trail and the vehicle that produced the evidence. Every section is now filled
-> from real commands and real hosted runs. The one remaining *pending* item is §9's post-merge
-> `push` run id, which cannot exist before the user merges PR #84.
+> **Status: COMPLETE.** This file was committed early on purpose and filled incrementally: budgets
+> here may only be **derived** from hosted Linux CI samples of this PR's own runs, and each push to
+> the PR minted one such run, so the record was both the evidence trail and the vehicle that
+> produced the evidence. Every section is filled from real commands and real hosted runs — including
+> §9's post-merge `push` run (`29426572267` on merge commit `163f4ad`), added by the docs-only
+> follow-up PR after PR #84 merged 2026-07-15.
 
 ---
 
@@ -621,14 +621,56 @@ the entire point of deriving budgets from real evidence instead of hand-typing l
 this gate red — check `reason=budget_exceeded` (code got slower, fix the code) versus
 `reason=budget_stale` (budget needs re-deriving) before assuming either.
 
-### Post-merge `push` run
+### Post-merge `push` run: `29426572267` (merge commit `163f4ad`)
 
-**Pending.** Proof of merged code is anchored in the post-merge `push` run on `main`, not only the
-PR-head run above — a PR run tests the merge commit's *tree*, not necessarily what actually lands on
-`main` after the merge. Per the established pattern (Slices 31–38), this is filled in by a small
-docs-only follow-up PR once the user merges PR #84, recording the `push`-triggered run id and
-confirming its `--point-geometry-query --gate` step also reads `gate=pass` on all four scenarios at
-step level.
+Proof of merged code is anchored here, not only in the PR-head run above — a PR run tests the merge
+commit's *tree*, not necessarily what actually lands on `main` after the merge. PR #84 merged
+2026-07-15 as `163f4ad`; merge parentage confirms it carries the reviewed head
+(`git rev-parse 163f4ad^2` → `6e0f1de`, the PR-head commit). The `push`-triggered run on that commit
+is `29426572267`, and **all three required jobs concluded `success`**: `Host tests and benchmark
+gate`, `iOS cross-target compile`, `WASM cross-target observation`.
+
+Read at **step level**, not job conclusion (the standing rule — a `continue-on-error` step can fail
+silently under a green job; AGENTS.md memory notes, the Slice 16 lesson):
+
+- **Change scope** — `mode=docs_only_pr event=push result=not_pull_request docs_only_pr=false`: the
+  heavy path ran; this merge to `main` was not classified docs-only.
+- **`swift test`** — `Executed 290 tests, with 0 failures` on the merged tree, matching the local and
+  §10/§11 post-fix count.
+- **Point-geometry correctness step** (bare, blocking) —
+  `point_geometry_query correctness=pass (summary lines withheld from the log by design)`: the
+  scenario table executed under a step that *can* redden the job, and did not. Its benchmark lines
+  stay out of the log by design (§11.1), so this run contributes exactly one row per scenario to any
+  future harvest.
+- **Point-geometry gate step** (`--point-geometry-query --gate`, observational under
+  `continue-on-error` until Slice 40) — all four `gate=pass` at step level:
+
+```
+mode=point_geometry_query provider=uniform   scenario=uniform_100k   ... p95_ns=141 p99_ns=161 failures=0 budget_p95_ns=640 budget_p99_ns=1300 headroom_p95=4.5x headroom_p99=8.1x  gate=pass checksum=4687694617200924928
+mode=point_geometry_query provider=uniform   scenario=uniform_1m     ... p95_ns=155 p99_ns=169 failures=0 budget_p95_ns=740 budget_p99_ns=1500 headroom_p95=4.8x headroom_p99=8.9x  gate=pass checksum=6036755761047907072
+mode=point_geometry_query provider=prefixsum scenario=prefixsum_100k ... p95_ns=130 p99_ns=146 failures=0 budget_p95_ns=730 budget_p99_ns=1500 headroom_p95=5.6x headroom_p99=10.3x gate=pass checksum=1712152282485110528
+mode=point_geometry_query provider=prefixsum scenario=prefixsum_1m   ... p95_ns=141 p99_ns=158 failures=0 budget_p95_ns=780 budget_p99_ns=1600 headroom_p95=5.5x headroom_p99=10.1x gate=pass checksum=5915921755926273280
+```
+
+The four checksums are **bit-identical** to the PR-head run above and to the cross-architecture
+values in §5b — merging moved no measured path. Runtime headroom on merged `main` is p95 4.5x–5.6x /
+p99 8.1x–10.3x, inside the 3x–50x/100x band; the PR-head run measured 3.3x–6.9x p95 on the same four
+scenarios, so both sit comfortably in-band and the spread between them is ordinary shared-runner
+variance, not a change in the code.
+
+- **Whole-run gate tally** (`gh run view 29426572267 --log | grep -oE "gate=pass|gate=fail" | sort |
+  uniq -c`) — **45 `gate=pass`, 0 `gate=fail`**, matching the PR-head run and the "46 gated budgets
+  minus `realistic_provider`" arithmetic in §6b.
+- **iOS cross-target compile** (blocking) — `ios_device=pass ios_simulator=pass` for **both**
+  `TextEngineCore` and `TextEngineReferenceProviders`.
+- **WASM cross-target observation** (observational) — `wasm=skipped wasm_embedded=skipped
+  reason=sdk_unavailable blocking=false`: the expected non-blocking skip when no matching Swift SDK
+  is provisioned on the runner.
+
+With this run recorded, the slice's verification is complete: the derived budgets are exercised under
+`--gate` on merged `main`, the correctness step is blocking and green, and the iOS constraint holds.
+Slice 40 promotes the observational gate step to blocking — deleting the bare step and the
+`continue-on-error` together — and is the home for the near-floor ratchet flagged in §7b.
 
 ---
 
