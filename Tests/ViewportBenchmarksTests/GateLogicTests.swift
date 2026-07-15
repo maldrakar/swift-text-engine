@@ -180,56 +180,28 @@ final class GateLogicTests: XCTestCase {
         XCTAssertTrue(output.contains(" reason=budget_stale"), output)
     }
 
-    // The p95-only ceiling cannot see an inflated p99 budget, so pin it statically
-    // over the real scenario tables. The recipe sets budget_p99 to at least twice
-    // budget_p95, so every budget it produces satisfies p99 >= 2 * p95 -- and a
-    // hand-edit must not quietly break the invariant that
-    // GateLimits.maxHeadroomP99 = 2 * maxHeadroomP95 rests on.
+    // The p95-only ceiling cannot see an inflated p99 budget, so pin it statically over
+    // every gated scenario. All budgets in this repo are produced by
+    // .github/scripts/derive-gate-budgets.sh from the committed corpus (see AGENTS.md
+    // "## Gate budgets"), and the recipe sets budget_p99 to at least twice budget_p95 by
+    // construction, so every table it produces satisfies p99 >= 2 * p95 -- and a
+    // hand-edit or partial re-derivation must not quietly break the invariant that
+    // GateLimits.maxHeadroomP99 = 2 * maxHeadroomP95 rests on. A failure here means the
+    // offending table needs re-deriving via the recipe.
     //
-    // Deliberately absent: structuralMutationScenarios(), variableHeightMutationScenarios()
-    // and bulkStructuralMutationScenarios(). Their budgets predate the recipe and were left
-    // alone because they were already correctly calibrated; several sit at exactly 2x and
-    // others below it, so the table as a whole would fail. Do NOT "complete" this list with
-    // them -- the fix would be a re-derivation, not a wider assertion.
-    //
-    // (variableHeightScenarios() is the STATIC variable-height table and IS recipe-derived,
-    // so it belongs here. It is not the mutation table its name resembles.)
-    //
-    // benchmarkScenarios() contributes three pipeline scenarios of which only `1m` was
-    // re-derived; the other two keep pre-slice-38 budgets that happen to satisfy the
-    // invariant. GateFloorTests is what holds every gated scenario to the 3x floor.
-    func testEveryRecipeDerivedScenarioTableKeepsP99AtLeastTwiceP95() {
-        var budgets: [(String, Int64, Int64)] = []
-        for s in benchmarkScenarios() {
-            budgets.append(("pipeline|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
-        }
-        for s in realisticProviderScenarios() {
-            budgets.append(("realistic_provider|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
-        }
-        for s in lineQueryScenarios() {
-            budgets.append(("line_query|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
-        }
-        for s in lineGeometryQueryScenarios() {
-            budgets.append(("line_geometry_query|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
-        }
-        for s in columnQueryScenarios() {
-            budgets.append(("column_query|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
-        }
-        for s in columnGeometryQueryScenarios() {
-            budgets.append(("column_geometry_query|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
-        }
-        for s in pointQueryScenarios() {
-            budgets.append(("point_query|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
-        }
-        for s in variableHeightScenarios() {
-            budgets.append(("variable_height|\(s.name)", s.p95BudgetNanoseconds, s.p99BudgetNanoseconds))
-        }
-
+    // The scenario list comes from GateFloorTests' everyGatedBudget(), which is the test
+    // target's single registry of gated scenarios. This test used to carry its own copy;
+    // the copies drifted (one shipped missing a table that was already gated), and a mode
+    // present in only one list is silently exempt from that list's invariant.
+    // GateFloorTests is the companion assertion, holding the same scenarios to the 3x floor.
+    func testEveryGatedBudgetKeepsP99AtLeastTwiceP95() {
+        let budgets = everyGatedBudget()
         XCTAssertFalse(budgets.isEmpty)
-        for (name, p95, p99) in budgets {
+
+        for budget in budgets {
             XCTAssertGreaterThanOrEqual(
-                p99, 2 * p95,
-                "\(name): p99 budget \(p99) is below 2x the p95 budget \(p95)")
+                budget.p99, 2 * budget.p95,
+                "\(budget.key): p99 budget \(budget.p99) is below 2x the p95 budget \(budget.p95)")
         }
     }
 }

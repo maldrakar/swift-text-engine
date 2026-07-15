@@ -14,6 +14,10 @@ struct SyntheticLineSource: DocumentLineSource {
     }
 }
 
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv. Hosted is
+// the calibration authority: it runs 2-3x slower than local macOS, so it binds. Do
+// not hand-edit -- re-derive.
 func benchmarkScenarios() -> [BenchmarkScenario] {
     [
         BenchmarkScenario(
@@ -23,8 +27,8 @@ func benchmarkScenarios() -> [BenchmarkScenario] {
             viewportHeight: 20.0 * 16.0,
             overscanBefore: 0,
             overscanAfter: 0,
-            p95BudgetNanoseconds: 20_000,
-            p99BudgetNanoseconds: 50_000
+            p95BudgetNanoseconds: 21_000,
+            p99BudgetNanoseconds: 42_000
         ),
         BenchmarkScenario(
             name: "100k_lines_80_visible_overscan_5",
@@ -33,18 +37,14 @@ func benchmarkScenarios() -> [BenchmarkScenario] {
             viewportHeight: 80.0 * 16.0,
             overscanBefore: 5,
             overscanAfter: 5,
-            p95BudgetNanoseconds: 50_000,
-            p99BudgetNanoseconds: 100_000
+            p95BudgetNanoseconds: 84_000,
+            p99BudgetNanoseconds: 170_000
         ),
-        // Budget re-derived from hosted Linux x86_64 by
-        // .github/scripts/derive-gate-budgets.sh against
-        // docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
-        // The prior budget sat BELOW the recipe's 3x floor over the worst observed
-        // hosted p95 -- close enough to a sample already seen that runner noise alone
-        // would eventually turn this blocking gate red on a clean tree. GateFloorTests
-        // now pins that floor for every gated scenario. Do not hand-edit -- re-derive.
-        // (The other two scenarios in this file were already above the floor and keep
-        // their pre-slice-38 values.)
+        // This scenario's budget was the first one re-derived under the Slice 38 floor
+        // recipe: the prior hand-typed value sat below 3x the worst observed hosted
+        // p95 -- close enough to a sample already seen that runner noise alone would
+        // eventually turn this blocking gate red on a clean tree. GateFloorTests now
+        // pins that floor for every gated scenario in this file, not just this one.
         BenchmarkScenario(
             name: "1m_lines_200_visible_overscan_50",
             lineCount: 1_000_000,
@@ -142,6 +142,8 @@ func runScenario(
                 preconditionFailure("column geometry query mode uses runColumnGeometryQueryScenario")
             case .pointQuery:
                 preconditionFailure("point query mode uses runPointQueryScenario")
+            case .pointGeometryQuery:
+                preconditionFailure("point geometry query mode uses runPointGeometryQueryScenario")
             case .memoryShape:
                 preconditionFailure("memory shape mode uses runMemoryShapeDiagnostics")
             case .memoryObservation:

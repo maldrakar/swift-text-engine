@@ -15,6 +15,10 @@ struct BulkStructuralMutationScenario {
     let p99BudgetNanoseconds: Int64
 }
 
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+// Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
+// binds. Do not hand-edit — re-derive.
 func bulkStructuralMutationScenarios() -> [BulkStructuralMutationScenario] {
     [
         // Small batch (K=64): typical paste/selection.
@@ -26,8 +30,8 @@ func bulkStructuralMutationScenarios() -> [BulkStructuralMutationScenario] {
             overscanAfter: 0,
             batchSize: 64,
             operationsPerSample: 256,
-            p95BudgetNanoseconds: 60_000,
-            p99BudgetNanoseconds: 120_000
+            p95BudgetNanoseconds: 51_000,
+            p99BudgetNanoseconds: 110_000
         ),
         BulkStructuralMutationScenario(
             name: "100k_lines_batch_64",
@@ -37,8 +41,8 @@ func bulkStructuralMutationScenarios() -> [BulkStructuralMutationScenario] {
             overscanAfter: 5,
             batchSize: 64,
             operationsPerSample: 256,
-            p95BudgetNanoseconds: 150_000,
-            p99BudgetNanoseconds: 250_000
+            p95BudgetNanoseconds: 130_000,
+            p99BudgetNanoseconds: 260_000
         ),
         BulkStructuralMutationScenario(
             name: "1m_lines_batch_64",
@@ -48,8 +52,8 @@ func bulkStructuralMutationScenarios() -> [BulkStructuralMutationScenario] {
             overscanAfter: 50,
             batchSize: 64,
             operationsPerSample: 256,
-            p95BudgetNanoseconds: 400_000,
-            p99BudgetNanoseconds: 600_000
+            p95BudgetNanoseconds: 450_000,
+            p99BudgetNanoseconds: 900_000
         ),
         // Large batch (K=4096): large paste / range delete.
         BulkStructuralMutationScenario(
@@ -60,8 +64,8 @@ func bulkStructuralMutationScenarios() -> [BulkStructuralMutationScenario] {
             overscanAfter: 5,
             batchSize: 4_096,
             operationsPerSample: 16,
-            p95BudgetNanoseconds: 1_500_000,
-            p99BudgetNanoseconds: 2_500_000
+            p95BudgetNanoseconds: 1_400_000,
+            p99BudgetNanoseconds: 2_800_000
         ),
         BulkStructuralMutationScenario(
             name: "1m_lines_batch_4096",
@@ -71,8 +75,8 @@ func bulkStructuralMutationScenarios() -> [BulkStructuralMutationScenario] {
             overscanAfter: 50,
             batchSize: 4_096,
             operationsPerSample: 16,
-            p95BudgetNanoseconds: 2_500_000,
-            p99BudgetNanoseconds: 4_000_000
+            p95BudgetNanoseconds: 2_900_000,
+            p99BudgetNanoseconds: 5_800_000
         )
     ]
 }

@@ -127,6 +127,37 @@ jobs:
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --point-query --gate
 
+      # Two steps, because one cannot be both budget-blind and failure-blocking.
+      # `continue-on-error` swallows EVERY non-zero exit, so a lone gated step under it
+      # would also swallow `failureCount != 0`, a `preconditionFailure`, or a crash --
+      # nothing would then execute the point-geometry scenario table under a blocking
+      # step (the Slice 16 dead-step trap). This bare run keeps **correctness** blocking;
+      # the gated run below keeps the **budget** observational until Slice 40, which
+      # deletes this step and the `continue-on-error` on that one together.
+      #
+      # Its benchmark lines stay OUT of the log on success, for the same reason the
+      # realistic-provider step keeps its output in a temp file: harvest-gate-corpus.sh
+      # harvests every `p95_ns=`/`p99_ns=` line in a run's log, so a second step printing
+      # point-geometry summaries would put two rows per scenario into every future
+      # harvest of that run and double-weight it in median(). On failure the output is
+      # dumped -- and there the gated step never runs, so the row count is still one.
+      - name: Run point geometry query benchmark (correctness; blocking)
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
+        run: |
+          out="${RUNNER_TEMP:-/tmp}/point-geometry-correctness.txt"
+          if swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --point-geometry-query > "$out" 2>&1; then
+            echo "point_geometry_query correctness=pass (summary lines withheld from the log by design)"
+          else
+            echo "point_geometry_query correctness=fail; benchmark output follows"
+            cat "$out"
+            exit 1
+          fi
+
+      - name: Point-geometry query benchmark gate (budget observational until Slice 40)
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
+        continue-on-error: true
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --point-geometry-query --gate
+
       - name: Run memory shape diagnostic
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-shape

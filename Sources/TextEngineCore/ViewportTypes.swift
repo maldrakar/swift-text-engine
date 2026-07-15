@@ -223,3 +223,35 @@ public enum ColumnResolution: Equatable {
     case cell(ColumnLocation)             // a real cell was located (index + horizontal clamp)
     case blankLine                        // located line has no cells (columnCount(inLine:) == 0)
 }
+
+/// The geometry-bearing 2D result: `pointGeometryAt`'s answer.
+///
+/// `PointQuery`'s shape with each component swapped for its geometry-bearing
+/// counterpart — `LineLocation` -> `LineGeometryLocation`, `ColumnLocation` ->
+/// `ColumnGeometryLocation`.
+public enum PointGeometryQuery: Equatable {
+    case geometry(PointGeometryLocation)  // a line was located (its cell may be blank)
+    case empty                            // empty document: lineCount == 0
+    case failure(ViewportValidationError) // vertical or horizontal validation failure
+}
+
+public struct PointGeometryLocation: Equatable {
+    /// The located line's box + within-line fraction + vertical clamp, verbatim
+    /// from `lineGeometryAt`. Always a real line — carried even when the cell is
+    /// `.blankLine`, because the caret box of an empty line is exactly what a
+    /// consumer needs there.
+    public let line: LineGeometryLocation
+    /// The located cell's box + within-cell fraction + horizontal clamp, or
+    /// `.blankLine` if the located line has no cells.
+    public let column: ColumnGeometryResolution
+
+    public init(line: LineGeometryLocation, column: ColumnGeometryResolution) {
+        self.line = line
+        self.column = column
+    }
+}
+
+public enum ColumnGeometryResolution: Equatable {
+    case cell(ColumnGeometryLocation)     // a real cell was located, with its box
+    case blankLine                        // located line has no cells (columnCount(inLine:) == 0)
+}

@@ -3,6 +3,11 @@ import TextEngineReferenceProviders
 
 // Reuses VariableHeightScenario, variableHeights(lineCount:), and
 // deterministicScrollOffset from VariableHeightBenchmark.swift / BenchmarkSupport.swift.
+//
+// Budgets derived from hosted Linux x86_64 by .github/scripts/derive-gate-budgets.sh
+// against docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv.
+// Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
+// binds. Do not hand-edit — re-derive.
 func variableHeightMutationScenarios() -> [VariableHeightScenario] {
     [
         VariableHeightScenario(
@@ -11,8 +16,8 @@ func variableHeightMutationScenarios() -> [VariableHeightScenario] {
             viewportHeight: 20.0 * 16.0,
             overscanBefore: 0,
             overscanAfter: 0,
-            p95BudgetNanoseconds: 5_000,
-            p99BudgetNanoseconds: 10_000
+            p95BudgetNanoseconds: 6_500,
+            p99BudgetNanoseconds: 13_000
         ),
         VariableHeightScenario(
             name: "100k_lines_80_visible_overscan_5",
@@ -20,8 +25,8 @@ func variableHeightMutationScenarios() -> [VariableHeightScenario] {
             viewportHeight: 80.0 * 16.0,
             overscanBefore: 5,
             overscanAfter: 5,
-            p95BudgetNanoseconds: 20_000,
-            p99BudgetNanoseconds: 25_000
+            p95BudgetNanoseconds: 24_000,
+            p99BudgetNanoseconds: 48_000
         ),
         VariableHeightScenario(
             name: "1m_lines_200_visible_overscan_50",
@@ -29,8 +34,8 @@ func variableHeightMutationScenarios() -> [VariableHeightScenario] {
             viewportHeight: 200.0 * 16.0,
             overscanBefore: 50,
             overscanAfter: 50,
-            p95BudgetNanoseconds: 60_000,
-            p99BudgetNanoseconds: 75_000
+            p95BudgetNanoseconds: 80_000,
+            p99BudgetNanoseconds: 160_000
         )
     ]
 }
