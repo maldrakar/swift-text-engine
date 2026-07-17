@@ -134,6 +134,22 @@ re-derive." The change makes that signal **self-healing** (the budget comes back
 the spike leaves the window) rather than a permanent ratchet. It does not, and should not,
 silence it.
 
+## Brief Alignment
+
+This slice does not touch the brief's «превратить "60 FPS" в измеримый headless budget»
+criterion, and cannot weaken it. Gate budgets are **regression** budgets — anchored to each
+scenario's own recent hosted median (3–8× over it), not to the 16.67 ms frame. The
+frame-facing **absolute product budget** is a separate, still-unbuilt mechanism (Slice 38
+Option C, the Recommended Next Step here). The window changes only *threshold calibration*,
+never the engine's absolute latency, and it changes it in the safe direction — recent
+worst-case instead of all-time worst — so budgets tighten rather than creep upward. A
+tighter threshold is a **more** sensitive regression gate, not a weaker one. Absolute
+figures are already orders below a frame and the window does not move them up (`pipeline|1m`
+viewport compute p99 ≈ 0.56 ms ≈ 3.4 % of a frame; every query gate is hundreds of ns). If
+anything, leaving the one-way ratchet unfixed is what would erode the brief's story over
+time — budgets creeping toward the frame for years — so stopping it is a **prerequisite**
+for a clean absolute 60 FPS budget, not an obstacle to it.
+
 ## Decisions
 
 ### Decision 1 — Trailing window over the most recent N runs
