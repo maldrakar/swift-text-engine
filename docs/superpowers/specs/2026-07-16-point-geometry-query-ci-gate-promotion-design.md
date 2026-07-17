@@ -16,6 +16,11 @@ This is Slice 40 of SwiftTextEngine, following the Slice 39 post-slice review:
 docs/superpowers/reviews/2026-07-15-slice-39-post-slice-review.md
 ```
 
+That review is **not in `main` or in this branch**: it lives on the unmerged branch
+`slice-39-post-slice-review` (commit `dc29e14`), per the standing convention that
+the user merges review PRs. Read it with
+`git show dc29e14:docs/superpowers/reviews/2026-07-15-slice-39-post-slice-review.md`.
+
 The project brief in `docs/initial-project-brief.md` requires regression
 benchmarks to block merge when performance regresses
 (*"Регрессионные бенчмарки блокируют merge при деградации производительности"*).
@@ -305,6 +310,13 @@ a key's median, and the `8×median` term governs most budgets, so a *looser*
 re-derived budget is a correct result to commit, not a derivation bug to chase.
 Hand-editing one back down is the hand-typed-budget prohibition.
 
+**The append and the re-derivation are one commit.** `GateFloorTests` reads the
+*committed* corpus, and `swift test` is a blocking CI step (`swift-ci.yml:86-88`),
+so a commit that appends rows without re-deriving in the same commit can leave the
+tree red on `budget_stale`. With six budgets within ~5% of their floor and one at
+0.0%, that is likely rather than hypothetical. Slice 39 landed them together
+(`a23e559`); so does this slice.
+
 ### Decision 4 — Keep the host job order and the required contexts
 
 The surviving point-geometry-query gate stays where the gated step is today —
@@ -339,7 +351,9 @@ Foundation) and asserts, **for `--point-geometry-query`**:
 - exactly one step's `run:` payload carries the `--point-geometry-query` token;
 - that step also passes `--gate`;
 - that step carries no `continue-on-error`;
-- that step carries the sibling `docs_only_pr` guard;
+- that step's `if:` is the **literal** `steps.change-scope.outputs.docs_only_pr != 'true'`
+  — asserted as a literal, *not* by comparing against a sibling step's `if:`, so no
+  other step's shape can flip this test red or green;
 - that step is named `Run point geometry query benchmark gate`;
 - that step sits after the point-query gate step and before the memory-shape step.
 
@@ -348,10 +362,21 @@ a one-time hand check.
 
 **Parsing contract** (there is no YAML parser — the package is zero-dependency and
 Foundation ships none, so this is hand-rolled and must be specified, not left to
-the implementer): split the job's steps on lines matching `^      - name:`; within
-a step block, match flags only against the `run:` payload with `#` comment lines
-excluded, read `continue-on-error` from the block's own keys, and read the guard
-from its `if:`. Compare **whitespace-separated tokens**, never substrings.
+the implementer):
+
+- **Scope to the host job first.** `swift-ci.yml` defines **three** jobs whose
+  steps all indent identically at `      - name:`, and four step names
+  (`Check out repository`, `Detect PR change scope`, `Complete docs-only PR`,
+  `Show toolchain`) repeat verbatim in all three — so a whole-file split makes
+  every name lookup ambiguous by construction (30 steps file-wide vs the host
+  job's 20). Take the region from `  host-tests-and-benchmark-gate:` to the next
+  line at indent ≤ 2, and split on `^      - name:` **within** it.
+- **Match flags against the `run:` payload only**, with `#` comment lines
+  excluded — the rationale comment this slice deletes names `continue-on-error`
+  twice *inside* a step block, so a naive block scan would misread it.
+- Read `continue-on-error` from the block's own keys and the guard from its `if:`.
+- Compare **whitespace-separated tokens**, never substrings.
+
 `repositoryRoot()` is `private` to `GateFloorTests.swift`; hoist it into a shared
 test helper or duplicate it with a comment naming its twin.
 
@@ -403,6 +428,16 @@ The Slice 39 post-merge push run (`29426572267`) is the first unharvested run an
 is the most valuable sample in this harvest: it is the only `point_geometry_query`
 evidence that is not from the Slice 39 PR head.
 
+**`--limit` is a most-recent-N window, not a reach-back guarantee.** With no
+`--runs`, the harvester asks `gh run list --workflow swift-ci.yml --limit N` for the
+N most recent runs, so too small a limit silently drops the run AC5 requires.
+Verified 2026-07-17: `29426572267` sits inside the `--limit 40` window (which then
+spans `29430079405` … `29111247857`) — but every push to this branch shifts that
+window. So run `--dry-run` **first** and assert `plan=harvest run=29426572267`
+appears, widening `--limit` until it does. Do **not** fall back to
+`--runs 29426572267`: that harvests one run and silently skips every other
+unharvested one, contradicting Decision 3's sweep.
+
 ### Documentation (`AGENTS.md`)
 
 - **Architecture paragraph** (`AGENTS.md:94-106`) — the `pointGeometryAt`
@@ -423,8 +458,12 @@ evidence that is not from the Slice 39 PR head.
 - **Commands** (`AGENTS.md:153`) — drop the "gateable, not yet blocking in CI"
   qualifier from the `--point-geometry-query --gate` line.
 - **Package layout** (`AGENTS.md:119-130`) — add `WorkflowShapeTests.swift` beside
-  `GateLogicTests.swift` / `GateFloorTests.swift` as the third guard in the
-  `Tests/ViewportBenchmarksTests` description.
+  `GateLogicTests.swift` / `GateFloorTests.swift` as the third *described* guard.
+  Note the bullet describes only the two `Gate*` files while the directory already
+  holds four — Slice 39 added `PointGeometryChecksumTests.swift` and
+  `PointGeometryQueryOptionsTests.swift` without documenting them. That omission is
+  pre-existing, out of scope here, and a candidate for the post-slice review; do not
+  silently fold it in.
 
 ### Verification record
 
@@ -468,7 +507,10 @@ with exact commands, exit statuses, and representative output. At minimum:
    point-query gate and the memory-shape diagnostic, which is what pins AC1's name
    and ordering clauses); it is red against the pre-collapse workflow — with its
    red assertion message recorded in the verification record — green after, and it
-   runs in `swift test`. It implicates no other mode in either state.
+   runs in `swift test`. No other mode's CI shape can turn it red or green.
+   (Invariant 6 necessarily looks up the point-query gate and memory-shape steps
+   **by name** as ordering anchors; that is positional bookkeeping, not an
+   assertion about those modes.)
 4. Both Decision 2 rules survive the deletion as mode-independent prose: the
    one-printing-step rule is in `AGENTS.md` `## Gate budgets`, and the
    `continue-on-error`-cannot-be-a-gate (Slice 16 dead-step) rule is in
