@@ -249,4 +249,32 @@ final class GateFloorTests: XCTestCase {
         XCTAssertEqual(all?.maxP95, 999)
         XCTAssertEqual(all?.maxP99, 999)
     }
+
+    // Pins the ONE documented N across languages. derive-gate-budgets.sh computes the
+    // window in awk, GateFloorTests in Swift; nothing else forces them equal. The
+    // asymmetric self-guard (Decision 3) catches only test-N > derive-N; this catches
+    // the silent-pass direction too. Reads the bare `WINDOW=<int>` assignment by prefix.
+    func testWindowConstantMatchesDeriveScript() throws {
+        let scriptURL = repositoryRoot()
+            .appendingPathComponent(".github/scripts/derive-gate-budgets.sh")
+        let text = try String(contentsOf: scriptURL, encoding: .utf8)
+
+        let assignment = text.split(separator: "\n").first { $0.hasPrefix("WINDOW=") }
+        guard let assignment else {
+            XCTFail("derive-gate-budgets.sh has no top-level `WINDOW=` assignment for the "
+                + "pin test to read")
+            return
+        }
+        let digits = assignment.dropFirst("WINDOW=".count).prefix { $0.isNumber }
+        guard let scriptWindow = Int(digits) else {
+            XCTFail("could not parse an integer from `\(assignment)`")
+            return
+        }
+
+        XCTAssertEqual(
+            scriptWindow, windowSize,
+            "WINDOW=\(scriptWindow) in derive-gate-budgets.sh disagrees with windowSize="
+                + "\(windowSize) in GateFloorTests.swift — the two consumers would window "
+                + "the corpus differently. Update AGENTS.md's one documented N and both sites.")
+    }
 }
