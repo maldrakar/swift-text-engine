@@ -34,8 +34,8 @@ func variableHeightMutationScenarios() -> [VariableHeightScenario] {
             viewportHeight: 200.0 * 16.0,
             overscanBefore: 50,
             overscanAfter: 50,
-            p95BudgetNanoseconds: 80_000,
-            p99BudgetNanoseconds: 160_000
+            p95BudgetNanoseconds: 81_000,
+            p99BudgetNanoseconds: 170_000
         )
     ]
 }

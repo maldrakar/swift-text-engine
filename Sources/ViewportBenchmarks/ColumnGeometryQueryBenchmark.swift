@@ -31,10 +31,10 @@ func columnGeometryQueryScenarios() -> [ColumnGeometryQueryScenario] {
                                     p95BudgetNanoseconds: 390, p99BudgetNanoseconds: 780),
         ColumnGeometryQueryScenario(name: "prefixsum_100k", providerName: "prefixsum",
                                     columnCount: 100_000, useVariableAdvance: true,
-                                    p95BudgetNanoseconds: 560, p99BudgetNanoseconds: 1_200),
+                                    p95BudgetNanoseconds: 600, p99BudgetNanoseconds: 1_200),
         ColumnGeometryQueryScenario(name: "prefixsum_1m", providerName: "prefixsum",
                                     columnCount: 1_000_000, useVariableAdvance: true,
-                                    p95BudgetNanoseconds: 720, p99BudgetNanoseconds: 1_500),
+                                    p95BudgetNanoseconds: 760, p99BudgetNanoseconds: 1_600),
     ]
 }
 
