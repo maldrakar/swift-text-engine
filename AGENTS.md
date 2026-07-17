@@ -112,18 +112,22 @@ a located cell, fewer on a blank line or a failure path), so its cost class equa
   live here, NOT in the core.
 - `Tests/TextEngineCoreTests` — XCTest only. (`swift test` also prints a
   "0 tests in 0 suites" line for the empty Swift Testing harness — not a failure.)
-- `Tests/ViewportBenchmarksTests` — the benchmark target's first test target.
+- `Tests/ViewportBenchmarksTests` — the benchmark target's first test target,
+  holding five files.
   `GateLogicTests.swift` unit-tests the gate pass/fail logic itself (band
   boundaries, `budget_exceeded` vs `budget_stale`) against synthetic
   `BenchmarkSummary` values, independent of any hosted timing.
   `GateFloorTests.swift` is the other half: it reads the committed corpus and holds
-  **every** gated scenario to the 3x floor on both statistics — the half of the band
-  the runtime gate cannot check (see `## Gate budgets`). It also owns
-  `everyGatedBudget()`, the **single registry** of gated scenarios that both halves
-  of the band iterate. Which modes `--gate` accepts is the exhaustive
-  `BenchmarkMode.isGateable` switch (never a deny-list — that makes a new mode
-  gateable by default), and a test pins the two to each other: a gateable mode with
-  no scenarios registered fails, and so does the reverse.
+  **every** gated scenario to `3x the windowed (most-recent N=20) max` on both
+  statistics — the half of the band the runtime gate cannot check (see
+  `## Gate budgets`). It also owns `everyGatedBudget()`, the **single registry** of
+  gated scenarios that both halves of the band iterate. Which modes `--gate`
+  accepts is the exhaustive `BenchmarkMode.isGateable` switch (never a deny-list —
+  that makes a new mode gateable by default), and a test pins the two to each
+  other: a gateable mode with no scenarios registered fails, and so does the
+  reverse. It also carries `testWindowConstantMatchesDeriveScript`, pinning its
+  `windowSize` constant to `derive-gate-budgets.sh`'s `WINDOW=` so the two windows
+  cannot drift apart.
   `WorkflowShapeTests.swift` is the third guard: it reads
   `.github/workflows/swift-ci.yml` and pins the point-geometry-query gate step's
   shape — exactly one step carries the flag, its `run:` payload **equals** the
@@ -136,6 +140,13 @@ a located cell, fewer on a blank line or a failure path), so its cost class equa
   none), so it hand-rolls a narrow reader and compares whitespace-separated
   **tokens**, never substrings — `--variable-height` is a prefix of
   `--variable-height-mutation`.
+  `PointGeometryChecksumTests.swift` is the byte-identity checksum guard for
+  `--point-geometry-query`: it pins the checksum to fold the full geometry (both
+  boxes, both fractions), not just the indices, so a zeroed multiplier or a
+  reversion to `--point-query`'s additive index-only fold cannot pass silently.
+  `PointGeometryQueryOptionsTests.swift` is option-parsing coverage for the same
+  flag: mode selection, `--gate` acceptance, and rejection when combined with an
+  earlier mode flag.
 - `Tests/TextEngineReferenceProvidersTests` — the only test target that can see both
   the core and the shipped providers, so cross-provider oracles (e.g. the
   `pointGeometryAt` 2x2 provider grid) belong here. `TextEngineCoreTests` depends on
@@ -313,6 +324,22 @@ hosted evidence, then re-derive from it:
 budget_p95 = round_up_2sf(max(8 x median(hosted p95), 3 x max(hosted p95)))
 budget_p99 = round_up_2sf(max(2 x budget_p95, 8 x median(p99), 3 x max(p99)))
 ```
+
+**`hosted` in the recipe is a trailing window, not full corpus history.** It
+means the most-recent **N=20 distinct runs, keyed on the integer run id** —
+older rows still sit in the corpus but are not counted. The corpus stays
+append-only/full-history; the window is applied only at read time. **Both**
+consumers apply the identical window: `derive-gate-budgets.sh` and
+`GateFloorTests` each hold `N=20`, pinned to one documented value by
+`testWindowConstantMatchesDeriveScript` so they cannot silently drift apart.
+Rationale: a `3x max` floor computed over an ever-growing append-only corpus
+is a one-way ratchet — `max` can only rise, so a budget it governs could only
+loosen, never tighten. The window makes it two-way: an old freak run ages out
+and the budget it forced can tighten back down. What covers that freak's
+*recurrence*, if it happens again, is the median-anchored floor terms (and,
+on p99, the `2 x budget_p95` floor) — not the `3x`-max term, which is exactly
+what just relaxed. p95 carries only the median term as backup, so it is the
+thin axis to watch.
 
 The 3x floor covers both statistics because the gate fails on either.
 
