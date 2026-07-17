@@ -224,6 +224,20 @@ private let pointQueryStepName = "Run point query benchmark gate"
 private let memoryShapeStepName = "Run memory shape diagnostic"
 private let docsOnlyGuard = "steps.change-scope.outputs.docs_only_pr != 'true'"
 
+// The step's exact shape IS the invariant, so the test pins the whole command rather than
+// probing it for tokens. A step-level token count cannot see inside one step's payload,
+// where both remaining ways to disarm the gate live: a `|` block scalar invoking the
+// benchmark twice (one step, two runs -- double-weighting the mode in every future harvest
+// of that run), and a trailing `|| true`, which is continue-on-error by another spelling
+// and sails past a check that only reads the flag key.
+//
+// This deliberately couples the test to swift-ci.yml's text: changing the scratch path or
+// the flag order is then a two-line edit with a test naming the mismatch, which is the
+// intended behavior here.
+private let pointGeometryCommand =
+    "swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks "
+        + "-- --point-geometry-query --gate"
+
 // Twin of `repositoryRoot()` in GateFloorTests.swift -- the same three-parent walk from
 // #filePath. Duplicated rather than shared because both are file-scope `private` helpers
 // in a target with no test-support file; if one moves, move the other.
@@ -370,13 +384,18 @@ final class WorkflowShapeTests: XCTestCase {
                 + "1 — \(matches.map(\.name))")
     }
 
-    // Invariant 2. Without --gate the step prints latency and asserts nothing about it.
-    func testThePointGeometryStepEnforcesItsBudget() throws {
+    // Invariant 2. Exact equality, not `runTokens.contains("--gate")`. Subsumes the --gate
+    // check and additionally forecloses a double invocation inside one `|` block scalar and
+    // a trailing `|| true`, both of which a token probe reports as green. It does NOT
+    // subsume invariant 1: this constrains the matched step, not the existence of a second
+    // one, so the two are complementary.
+    func testThePointGeometryStepRunsExactlyTheExpectedCommand() throws {
         for step in try pointGeometrySteps() {
-            XCTAssertTrue(
-                step.runTokens.contains("--gate"),
-                "\(step.name): runs \(pointGeometryFlag) without --gate — it observes "
-                    + "latency instead of gating on it")
+            XCTAssertEqual(
+                step.runTokens.joined(separator: " "), pointGeometryCommand,
+                "\(step.name): run payload is not the expected single gated command.\n"
+                    + "  want: \(pointGeometryCommand)\n"
+                    + "  got:  \(step.runTokens.joined(separator: " "))")
         }
     }
 
@@ -453,7 +472,7 @@ Expected: **4 of the 6 tests fail** (verified against the real file on 2026-07-1
 | test | pre-collapse | why |
 | --- | --- | --- |
 | `testExactlyOneStepRunsThePointGeometryQueryBenchmark` | **FAIL** | `2 steps run --point-geometry-query, want exactly 1 — ["Run point geometry query benchmark (correctness; blocking)", "Point-geometry query benchmark gate (budget observational until Slice 40)"]` |
-| `testThePointGeometryStepEnforcesItsBudget` | **FAIL** | the bare correctness step has no `--gate` |
+| `testThePointGeometryStepRunsExactlyTheExpectedCommand` | **FAIL** | the bare correctness step's `\|`-block payload is not the expected command (it redirects to `$out`, has no `--gate`, and carries an `if`/`cat`/`exit 1` tail). Note the *gated* step's payload already equals the expected command pre-collapse — this test is red on the correctness step alone, which is why invariant 1 is not redundant with it |
 | `testThePointGeometryStepIsNotContinueOnError` | **FAIL** | `carries continue-on-error: true` |
 | `testThePointGeometryStepCarriesTheDocsOnlyGuard` | PASS | both steps already carry it |
 | `testThePointGeometryStepIsNamedForItsSiblings` | **FAIL** | both names are the two-step-era names |
@@ -543,9 +562,11 @@ run; keeping continue-on-error alone would swallow correctness failures too.
 reason=operation_failures -- so correctness stays blocking.
 
 WorkflowShapeTests reads swift-ci.yml and pins the six invariants: exactly one
-step carries the flag, it passes --gate, it is not continue-on-error, it carries
-the docs-only guard, it is named for its siblings, and it sits between the
-point-query gate and the memory-shape diagnostic. Nothing else in the repo reads
+step carries the flag, its run payload equals the expected gated command exactly,
+it is not continue-on-error, it carries the docs-only guard, it is named for its
+siblings, and it sits between the point-query gate and the memory-shape
+diagnostic. Equality rather than a token probe, because a step-level count cannot
+see a double invocation or a trailing `|| true` inside one payload. Nothing else in the repo reads
 that file; verifying this shape once by hand is the failure mode GateFloorTests
 was created to end.
 
@@ -612,7 +633,9 @@ Expected: `46`, `46`, `ALL 46 BUDGETS REPRODUCE`, `46`. A diff here means the tr
 
 - [ ] **Step 2: Preview the harvest, and confirm it reaches run `29426572267`**
 
-AC5 requires the appended rows to include run `29426572267` — the Slice 39 post-merge push run, and this mode's only sample that is not from the Slice 39 PR head. `--limit 40` returns the 40 most recent `swift-ci.yml` runs, and the corpus already carries 42 distinct runs, so the window is **not guaranteed** to reach back that far. Check before appending:
+AC5 requires the appended rows to include run `29426572267` — the Slice 39 post-merge push run, and this mode's only sample that is not from the Slice 39 PR head. It is the first *benchmark-bearing* candidate in newest-first order, not the first unharvested run: two newer runs (`29430079405`, `29427177229`) are docs-only and harvest as no-ops, and **four older PR-head runs** (`29364862813`, `29313228902`, `29311831585`, `29311125509`) also carry rows. Those four are why this harvest is expected to take `point_geometry_query` from **6 runs to ~11**, crossing the "~10 runs" line the spec's Risks section carries its residual risk against — confirm the count in Step 4 rather than assuming it.
+
+`--limit 40` returns the 40 most recent `swift-ci.yml` runs, and the corpus already carries 42 distinct runs, so the window is **not guaranteed** to reach back that far. Check before appending:
 
 ```bash
 cd /Users/aabanschikov/swift-text-engine
@@ -882,13 +905,16 @@ In the `- \`Tests/ViewportBenchmarksTests\`` bullet, after the sentence ending `
 ```text
   `WorkflowShapeTests.swift` is the third guard: it reads
   `.github/workflows/swift-ci.yml` and pins the point-geometry-query gate step's
-  shape — exactly one step carries the flag, it passes `--gate`, it is not
-  `continue-on-error`, it carries the docs-only guard, it is named
-  `Run point geometry query benchmark gate`, and it sits between the point-query
-  gate and the memory-shape diagnostic. There is no YAML parser in reach (the
-  package is zero-dependency and Foundation ships none), so it hand-rolls a
-  narrow reader and compares whitespace-separated **tokens**, never substrings —
-  `--variable-height` is a prefix of `--variable-height-mutation`.
+  shape — exactly one step carries the flag, its `run:` payload **equals** the
+  expected gated command, it is not `continue-on-error`, it carries the docs-only
+  guard, it is named `Run point geometry query benchmark gate`, and it sits
+  between the point-query gate and the memory-shape diagnostic. Equality rather
+  than a token probe: a step-level count cannot see a second invocation or a
+  trailing `|| true` inside one step's payload, and both disarm the gate. There is
+  no YAML parser in reach (the package is zero-dependency and Foundation ships
+  none), so it hand-rolls a narrow reader and compares whitespace-separated
+  **tokens**, never substrings — `--variable-height` is a prefix of
+  `--variable-height-mutation`.
 ```
 
 - [ ] **Step 6: Assert the "after" state (AC9)**
