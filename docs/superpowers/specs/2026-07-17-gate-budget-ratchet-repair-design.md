@@ -82,6 +82,12 @@ in the mechanism, not the numbers.
 - `GateFloorTests.swift` — apply the **identical** window when computing the corpus
   extremes it holds budgets to; extract a testable window-selection helper with a fixture
   unit test.
+- A **standing cross-language pin test** (mandatory, not optional) that reads `WINDOW=` out
+  of `derive-gate-budgets.sh` and asserts it equals the Swift `windowSize` constant — the
+  same hand-rolled-reader pattern `WorkflowShapeTests` already uses against `swift-ci.yml`.
+  This closes the one drift direction the asymmetric self-guard cannot (Decision 3) and
+  makes Goal 2's "pinned by a test" literally true for the N value, not just the selection
+  shape.
 - Harvest Slice 40's post-merge push run into the corpus (fresh evidence), then
   **re-derive every budget** under the window and commit the re-derived literals.
 - `AGENTS.md` `## Gate budgets` — document the window and its rationale; update the
@@ -164,6 +170,11 @@ physical row order (harvest-batch order) is irrelevant; only the run-id ranking 
 the two languages that read the corpus (awk, Swift) reach the identical window without
 sharing code.
 
+The corpus file itself stays **append-only and full-history** — the window is applied only
+at *read* time, in the two consumers, never by pruning rows. So N is a re-tunable knob with
+no data loss: the whole record remains available to re-analyse under a different N later, and
+`harvest-gate-corpus.sh` is untouched.
+
 This is the lightest lever that makes the floor two-way: as new runs are appended, the
 oldest run leaves the window, and if it held the current max, the windowed max **drops** —
 which no all-history rule can ever do.
@@ -180,6 +191,28 @@ the floor exists to prevent. With strict required checks, a flaking gate blocks 
 The floor's headroom above the worst *observed* sample is load-bearing; the window bounds
 how far back "observed" reaches without ever pretending a real spike did not happen.
 
+There is a residual of this same failure mode that the window does **not** eliminate and
+must not be silent about: a spike whose recurrence period is *longer* than the window (the
+~1-in-40 tail against N=20) can age out before it recurs, and then the runtime `--gate`
+would flake on its recurrence exactly as it would under outlier rejection. What keeps that
+safe is **not** the window width, and — contrary to a first pass at this analysis — **not
+the `3×`-max term either** for the worst case. An aged-out freak no longer lifts the windowed
+max, so the `3×`-max term is the *weakest* backstop against its recurrence; what actually
+covers it is the **median-anchored floor** (`8×` recent median) plus, on p99, the
+cross-statistic floor `budget_p99 ≥ 2×budget_p95`. Concretely: the worst aged-out freak,
+`line_geometry|uniform_1k` p99 = 330, is **4.12×** its recent windowed max (80) — already
+past `3×80 = 240` — yet its recurrence clears the derived `budget_p99 = 500`, which is
+governed by the `2×budget_p95` floor (with `8×med99 = 496` nearly matching). So the **p99
+axis is doubly backstopped**; the **p95 axis is the thin one** — `budget_p95 =
+max(8×median, 3×max)`, no cross-statistic cushion — and is where a sufficiently large
+aged-out freak *would* flake with nothing to catch it. None is close today: the worst p95
+freak runs `1.21×` its recent windowed max (92 vs 76), covered by the `8×median` term with
+wide room. The property to preserve is therefore stated on the p95 axis — watch for a p95
+freak that exceeds *both* `3×` the recent windowed max and `8×` the recent windowed median —
+and is recorded as a monitoring item in Risks. The window is still strictly safer than
+outlier rejection (it keeps a spike while it is recent); it just does not lean on the `3×`
+factor to survive an aged-out one.
+
 Retirement (a `retired` column + policy) is rejected as the heaviest option for the
 lightest need, and because per-row human curation is a backdoor to hand-tuning budgets.
 
@@ -194,10 +227,13 @@ live in **both** consumers, computed identically.
 The asymmetry of a constant mismatch is worth stating: if the test's N were ever larger
 than the derive script's N, the test's max would be `≥` the derive script's, and the test
 would fail **loudly** — caught. If smaller, it passes silently with a budget looser than
-the test verifies. So the pairing is partially self-guarding but not fully; the mitigation
-is a single documented N in `AGENTS.md` that both sites cite, plus the verification record
-showing (a) `derive` reproduces every committed literal and (b) `GateFloorTests` is green —
-which can both hold only if the two windows agree.
+the test verifies. That silent-pass direction is exactly what the **mandatory
+`WINDOW`/`windowSize` pin test** (Scope, Testing §5, AC3) closes: it reads `WINDOW=` out of
+`derive-gate-budgets.sh` and asserts equality with the Swift `windowSize`, failing on drift
+in *either* direction. Behind it as belt-and-suspenders: the single documented N in
+`AGENTS.md` that both sites cite, plus the verification record showing (a) `derive`
+reproduces every committed literal and (b) `GateFloorTests` is green — which can both hold
+only if the two windows agree.
 
 ### Decision 4 — N = 20
 
@@ -205,8 +241,9 @@ Twenty most-recent runs. Rationale, all verified against the committed corpus:
 
 - **No mode is starved of evidence.** At N=20 every mode keeps ≥ 11 distinct runs
   (`point_geometry_query` has only 11 runs in all of history, all recent, so it is fully
-  retained; everything else keeps 20). At N=15 the minimum is still 11. There is no window
-  in play that drops a gated scenario to zero corpus rows.
+  retained; `realistic_provider` keeps 17 because it is PR-only and not measured on every
+  hosted run; every other mode keeps 20). At N=15 the minimum is still 11. There is no
+  window in play that drops a gated scenario to zero corpus rows.
 - **Statistically ample.** Twenty samples per scenario (eleven for the newest mode) is a
   stable base for a lower-median and a max.
 - **Recent enough to release.** Twenty runs is roughly the last ~15 slices of hosted
@@ -214,6 +251,17 @@ Twenty most-recent runs. Rationale, all verified against the committed corpus:
   `uniform_1k`/`uniform_1m`) and the old one (rank 38: `line_query|uniform_100k`),
   relieving three of the five at-floor scenarios; it retains the rank-18 and rank-6 freaks,
   which is correct (recent evidence).
+- **Wide enough that the budget floors still cover a spike that ages out.** The fourth
+  criterion, and the one that bounds N from *below*: a window that releases old freaks can
+  also release a spike whose recurrence period exceeds N (the ~1-in-40 tail), and if the
+  windowed budget no longer cleared it the runtime `--gate` would flake on recurrence. What
+  covers the recurrence is the **median-anchored floors**, not the `3×`-max term — an
+  aged-out freak no longer lifts the windowed max (Decision 2): on p99 the `8×median` and
+  `2×budget_p95` floors, on p95 the lone `8×median` floor. Every aged-out freak clears its
+  windowed budget today, the tightest being `line_geometry|uniform_1k` p99 at
+  `500/330 = 1.52×`. This is why N cannot be shrunk arbitrarily to force budgets down: a
+  smaller window lowers the recent median and max, dropping the floors toward a recurring
+  freak — and the p95 axis, with only the single median floor, gives way first.
 
 N is a documented, re-tunable constant, not a magic number. It is stated once in
 `AGENTS.md` and cited by both consumers.
@@ -264,6 +312,12 @@ or equivalent — so a new fixture-based unit test can exercise it directly (ran
 is a named constant with the same `AGENTS.md` pointer. Foundation stays a test-target-only
 import, as today.
 
+The **pin test** lives here too (or in a sibling test file): it reads the `WINDOW=` line out
+of `.github/scripts/derive-gate-budgets.sh` with a narrow hand-rolled reader — no shell
+executed, no parser added — parses the integer, and asserts it equals `windowSize`. It is
+the machine-checked link that `AGENTS.md`'s "one documented N" cannot itself enforce; the
+prose documents *why*, this test enforces *that*.
+
 ### Budgets (data, not logic)
 
 `Sources/ViewportBenchmarks/*Benchmark.swift` budget literals are replaced with the
@@ -313,6 +367,12 @@ Test-first, per the project's TDD norm:
 4. **`derive` reproduces every committed literal** — run with no mode argument over the
    post-harvest corpus; diff against every budget constant; zero mismatches (recorded, not
    asserted).
+5. **The `WINDOW`/`windowSize` pin test** (new). Reads `WINDOW=` out of
+   `derive-gate-budgets.sh` and asserts it equals the Swift `windowSize`; red if either side
+   is edited without the other, green when they agree. This is the standing guard that
+   closes the silent-pass direction the asymmetric self-guard (Decision 3) cannot — the
+   verification record's one-time reproduce-every-literal check proves the two agree *today*,
+   this test proves they cannot silently diverge *tomorrow*.
 
 ## Acceptance Criteria
 
@@ -321,8 +381,10 @@ Test-first, per the project's TDD norm:
 2. `git diff --name-only` shows **no path under `Sources/TextEngineCore` or
    `Sources/TextEngineReferenceProviders`**.
 3. `derive-gate-budgets.sh --self-test` passes; the derive script and `GateFloorTests` use
-   the same documented N, and every committed budget re-derives byte-for-byte from the
-   windowed corpus (shown in the verification record).
+   the same documented N — enforced by a **standing pin test** that reads `WINDOW=` from the
+   shell script and asserts it equals the Swift `windowSize`, so the two cannot silently
+   drift — and every committed budget re-derives byte-for-byte from the windowed corpus
+   (shown in the verification record).
 4. All eleven `--gate` modes report `gate=pass` locally, and all query/mutation checksums
    are byte-identical to the Slice 40 baseline.
 5. The corpus carries Slice 40's post-merge push run `29606487287`; the append is shown as
@@ -340,13 +402,16 @@ Test-first, per the project's TDD norm:
 
 ### The two N constants can drift across languages
 
-N lives once in awk and once in Swift; no single source pins them. Mitigated by Decision 3's
-asymmetric self-guard (a test-N larger than derive-N fails loudly), the single documented
-value in `AGENTS.md`, and the AC3 requirement that both the reproduce-every-literal check
-and `GateFloorTests` be green — which can only co-hold if the windows agree. A test that
-reads `WINDOW=` out of the shell script (à la `WorkflowShapeTests`) would close it fully;
-recorded as an option the plan may take if it proves cheap, not mandated, to keep the slice
-light.
+N lives once in awk and once in Swift; no single language pins them. Closed by the
+**mandatory pin test** (Scope, Testing §5, AC3): it reads `WINDOW=` out of
+`derive-gate-budgets.sh` and asserts equality with the Swift `windowSize`, failing on drift
+in *either* direction — including the silent-pass direction (test-N smaller than derive-N)
+that Decision 3's asymmetric self-guard cannot catch on its own. Belt and suspenders behind
+it: the single documented value in `AGENTS.md`, and the AC3 requirement that both the
+reproduce-every-literal check and `GateFloorTests` be green, which can only co-hold if the
+windows agree. This was recorded as "optional if cheap" in an earlier draft; the review
+promoted it to mandatory, because leaving the one invariant most likely to rot to a one-time
+manual check is exactly the failure mode `GateFloorTests` itself exists to end.
 
 ### A window still reddens `GateFloorTests` on a genuinely-worse harvest
 
@@ -355,13 +420,45 @@ re-derive, and when the spike ages out the budget tightens again, instead of rat
 forever. The slow-drift backstop — an absolute product budget that never recalibrates —
 remains unbuilt (Slice 38 Option C), and is the correct next lever *after* this one.
 
+### A long-period spike can age out and flake the *runtime* gate on recurrence
+
+Distinct from the `GateFloorTests` red above, and about the runtime `--gate` (live latency
+vs committed budget) rather than the corpus-vs-budget floor. If a spike's recurrence period
+exceeds N it can leave the window, the windowed budget can tighten, and its recurrence can
+then redden the runtime gate on a clean tree. What keeps this from biting is the
+**median-anchored budget floors**, not the `3×`-max term — an aged-out freak no longer lifts
+the windowed max (Decision 2). The two statistics get unequal protection:
+
+- **p99 is doubly backstopped:** `budget_p99 ≥ 2×budget_p95` *and* `≥ 8×median99`. The worst
+  aged-out freak already exercises this — `line_geometry|uniform_1k` p99 = 330 is `4.12×`
+  its windowed max (past `3×`) and is covered only because the `2×budget_p95` floor puts the
+  budget at 500. So a "`>3×` spike" is **not hypothetical on p99 — it is already here**, and
+  already caught.
+- **p95 is the thin axis and the real watch item:** `budget_p95 = max(8×median95, 3×max95)`,
+  no cross-statistic cushion. A p95 freak exceeding *both* `8×` the recent median and `3×`
+  the recent windowed max would flake on recurrence with nothing to catch it. None exists
+  today (worst p95 freak is `1.21×` its windowed max, 92 vs 76, covered by `8×median` with
+  wide room), but this is the first place to look if a runtime gate ever reddens on a clean
+  tree.
+
+If one appears, the response is the sanctioned one — re-derive from the harvest that captured
+it (which loosens the budget and re-covers the recurrence), never hand-widen and never
+restore `continue-on-error`. A larger N trades release-latency for a longer
+recurrence-coverage horizon, and is the knob to reach for if this recurs in practice.
+
 ### N could age out evidence for a mode that stops being exercised
 
 If a gated mode were dropped from CI, a recency window would eventually starve it of corpus
 rows and `testEveryGatedScenarioHasCorpusEvidence` would fire. Today every gated mode runs
 on every hosted run, so no scenario is within an order of magnitude of starvation at N=20
-(min 11 runs). Recorded as a property to preserve: adding a gate without running it every
-hosted run would surface here first — which is the test doing its job.
+(min 11 runs). The one structurally-different mode to watch is **`realistic_provider`**: it
+is PR-only `continue-on-error`, harvested through the `realistic_relative_observation` line,
+so its evidence grows only on PR runs, not push runs — it already sits at 17 windowed runs
+against everyone else's 20, and a long run of push-only merges would erode it fastest. Still
+far from starvation at N=20, but it, not `point_geometry_query`, is the mode whose windowed
+count tracks differently from the raw run count. Recorded as a property to preserve: adding a
+gate without running it every hosted run would surface here first — which is the test doing
+its job.
 
 ### Standing items unchanged
 
