@@ -16,6 +16,19 @@ private let floorFactor: Int64 = 3
 
 private let corpusPath = "docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv"
 
+// Trailing window: hold budgets to 3x the max over only the most-recent N distinct
+// runs, not all corpus history, so an aged-out freak releases the budget it inflated.
+// This N is the same value as WINDOW= in .github/scripts/derive-gate-budgets.sh and is
+// pinned to it by testWindowConstantMatchesDeriveScript(); AGENTS.md documents the one N.
+private let windowSize = 20
+
+// The N most-recent run ids by value. GitHub databaseId is monotonic with run creation,
+// so "largest N ids" is "most-recent N runs" -- the exact set `sort -rnu | head -N`
+// produces in the derive script. Dedups first (a run contributes many rows).
+func mostRecentRunIDs(_ ids: [Int64], limit: Int) -> Set<Int64> {
+    Set(Set(ids).sorted(by: >).prefix(limit))
+}
+
 private struct CorpusExtremes {
     var maxP95: Int64 = 0
     var maxP99: Int64 = 0
@@ -34,24 +47,43 @@ private func repositoryRoot() -> URL {
 private func loadCorpus() throws -> [String: CorpusExtremes] {
     let url = repositoryRoot().appendingPathComponent(corpusPath)
     let text = try String(contentsOf: url, encoding: .utf8)
+    return corpusExtremes(from: text, windowSize: windowSize)
+}
 
-    var extremes: [String: CorpusExtremes] = [:]
+// Pure so a fixture can exercise it. Two passes: collect distinct run ids, keep the
+// most-recent `windowSize`, then fold only rows in that window into the extremes --
+// the identical rule .github/scripts/derive-gate-budgets.sh applies in awk.
+//
+// private: CorpusExtremes is a private struct, so a function returning [String:
+// CorpusExtremes] cannot be more visible than private either. Its callers (loadCorpus
+// and the fixture test below) are both in this file, so file-scope private reaches them.
+private func corpusExtremes(from text: String, windowSize: Int) -> [String: CorpusExtremes] {
+    struct Row { let runID: Int64; let key: String; let p95: Int64; let p99: Int64 }
+
+    var rows: [Row] = []
+    var runIDs: [Int64] = []
     for (index, line) in text.split(separator: "\n").enumerated() {
         if index == 0 { continue }  // header
         let columns = line.split(separator: "\t", omittingEmptySubsequences: false)
         guard columns.count == 5,
+              let runID = Int64(columns[0]),
               let p95 = Int64(columns[3]),
               let p99 = Int64(columns[4]) else {
             XCTFail("malformed corpus row \(index + 1): \(line)")
             continue
         }
+        runIDs.append(runID)
+        rows.append(Row(runID: runID, key: "\(columns[1])|\(columns[2])", p95: p95, p99: p99))
+    }
 
-        let key = "\(columns[1])|\(columns[2])"
-        var entry = extremes[key] ?? CorpusExtremes()
-        entry.maxP95 = max(entry.maxP95, p95)
-        entry.maxP99 = max(entry.maxP99, p99)
+    let window = mostRecentRunIDs(runIDs, limit: windowSize)
+    var extremes: [String: CorpusExtremes] = [:]
+    for row in rows where window.contains(row.runID) {
+        var entry = extremes[row.key] ?? CorpusExtremes()
+        entry.maxP95 = max(entry.maxP95, row.p95)
+        entry.maxP99 = max(entry.maxP99, row.p99)
         entry.sampleCount += 1
-        extremes[key] = entry
+        extremes[row.key] = entry
     }
     return extremes
 }
@@ -188,5 +220,33 @@ final class GateFloorTests: XCTestCase {
                     + "hosted p99 (\(observed.maxP99), n=\(observed.sampleCount)) — it will go "
                     + "red on a clean tree; re-derive with .github/scripts/derive-gate-budgets.sh")
         }
+    }
+
+    func testMostRecentRunIDsKeepsTopNByValue() {
+        let ids: [Int64] = [100, 305, 210, 99, 305]   // 305 duplicated: distinct-by-value
+        XCTAssertEqual(mostRecentRunIDs(ids, limit: 2), Set<Int64>([305, 210]))
+        // limit >= distinct count is a no-op (keep all distinct ids)
+        XCTAssertEqual(mostRecentRunIDs(ids, limit: 10), Set<Int64>([100, 305, 210, 99]))
+        XCTAssertEqual(mostRecentRunIDs(ids, limit: 4), Set<Int64>([100, 305, 210, 99]))
+        XCTAssertTrue(mostRecentRunIDs([], limit: 5).isEmpty)
+    }
+
+    func testWindowedExtremesDropAnAgedOutFreak() {
+        // Header + rows: run 500 (newest) is clean; run 100 (oldest) carries a freak.
+        let corpus = """
+        run_id\tmode\tscenario\tp95_ns\tp99_ns
+        500\tline_query\tuniform_1k\t30\t60
+        400\tline_query\tuniform_1k\t32\t64
+        300\tline_query\tuniform_1k\t31\t62
+        100\tline_query\tuniform_1k\t999\t999
+        """
+        // Window of 3 keeps {500,400,300}: the 999 freak in run 100 is aged out.
+        let windowed = corpusExtremes(from: corpus, windowSize: 3)["line_query|uniform_1k"]
+        XCTAssertEqual(windowed?.maxP95, 32)
+        XCTAssertEqual(windowed?.maxP99, 64)
+        // Window wide enough to still include run 100: the freak is (correctly) retained.
+        let all = corpusExtremes(from: corpus, windowSize: 10)["line_query|uniform_1k"]
+        XCTAssertEqual(all?.maxP95, 999)
+        XCTAssertEqual(all?.maxP99, 999)
     }
 }
