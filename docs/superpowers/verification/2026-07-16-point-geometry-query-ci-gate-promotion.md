@@ -12,6 +12,11 @@ output, either re-run directly by this task or preserved verbatim from the
 prior tasks' `/tmp` artifacts (cited by path). Nothing here is prose standing
 in for a number.
 
+> **Hosted proof filled post-merge.** The `## Hosted Proof` section below was
+> completed by the docs-only follow-up PR after PR #87 merged (merge commit
+> `bff3268`), citing the PR-head run `29579314733` and the post-merge `push` run
+> `29606487287`. AC11 is discharged there.
+
 ---
 
 ## 1. The workflow-shape test's red-before state
@@ -557,21 +562,63 @@ one-printing-step rule is *why* the bare step's summary lines had to stay out of
 the log before this slice, and why a second step is no longer needed now that
 there is only one.
 
-## Hosted Proof — Pending
+## Hosted Proof
 
-No PR-head or post-merge push run ID is recorded in this file. The branch
-`slice-40-point-geometry-query-ci-gate-promotion` has not yet been pushed for a
-hosted CI run against this code — recording a run ID against a still-moving
-head would violate this project's clean-evidence convention (verification
-records cite runs against a fixed, known SHA, not a branch that may still gain
-commits). Task 6 fills this section in as a post-merge follow-up, once the
-head SHA is stable, following the same pattern as Slices 24-39's post-merge
-proof PRs.
+AC11 discharged. Both runs are read at **step level**, not job conclusion — the
+standing rule of this project, since a `continue-on-error` step can conclude its
+job green while the step itself failed (the Slice 16 dead-step trap). The whole
+point of this slice is that the point-geometry step is no longer
+`continue-on-error`; the step-level reads below confirm it ran, was not skipped,
+and gated on both correctness and budget.
+
+### PR-head run: `29579314733` (head `4dd7bf9`)
+
+The run that gated PR #87 before merge. All three required jobs concluded
+`success`: `Host tests and benchmark gate`, `iOS cross-target compile`, `WASM
+cross-target observation`. The single blocking `Run point geometry query
+benchmark gate` step ran (its per-scenario output is present in the log, so it
+was not skipped) and reported all four scenarios `gate=pass` at step level:
+
+| scenario | p95_ns | p99_ns | budget_p95 | budget_p99 | headroom_p95 | headroom_p99 |
+|---|---|---|---|---|---|---|
+| uniform_100k   | 117 | 146 | 910  | 1900 | 7.8x | 13.0x |
+| uniform_1m     | 128 | 156 | 880  | 1800 | 6.9x | 11.5x |
+| prefixsum_100k | 136 | 166 | 1100 | 2200 | 8.1x | 13.3x |
+| prefixsum_1m   | 200 | 235 | 1300 | 2600 | 6.5x | 11.1x |
+
+Tightest observed headroom on this run is `prefixsum_1m` at 6.5x p95 / 11.1x
+p99 — inside the 3x–50x/100x band. Whole-run tally: **45 `gate=pass`, 0
+`gate=fail`**.
+
+### Post-merge `push` run: `29606487287` (merge commit `bff3268`)
+
+Proof of merged code is anchored here, not only in the PR-head run above — a PR
+run tests the merge *preview*, not the commit that landed on `main`. The merge
+commit's second parent (`git rev-parse bff3268^2` → `4dd7bf9`) is the PR-head
+commit, and the `push`-triggered run on `bff3268` is `29606487287`. All three
+required jobs concluded `success`. The `Run point geometry query benchmark gate`
+step ran (present in the log, not skipped) and reported all four scenarios
+`gate=pass` at step level:
+
+| scenario | p95_ns | p99_ns | budget_p95 | budget_p99 | headroom_p95 | headroom_p99 |
+|---|---|---|---|---|---|---|
+| uniform_100k   | 63 | 89  | 910  | 1900 | 14.4x | 21.3x |
+| uniform_1m     | 67 | 92  | 880  | 1800 | 13.1x | 19.6x |
+| prefixsum_100k | 70 | 96  | 1100 | 2200 | 15.7x | 22.9x |
+| prefixsum_1m   | 75 | 104 | 1300 | 2600 | 17.3x | 25.0x |
+
+The four checksums (`4687694617200924928`, `6036755761047907072`,
+`1712152282485110528`, `5915921755926273280`) are **bit-identical** to the
+PR-head run and to the local runs in Sections 7-8, confirming the workload is
+unchanged across host, PR-head, and merged commit. Whole-run tally
+(`gh run view 29606487287 --log | grep -oE 'gate=pass|gate=fail' | sort | uniq -c`):
+**45 `gate=pass`, 0 `gate=fail`** — all eleven blocking latency gates green on
+the commit that is now `main`.
 
 **Watch scenario: `point_geometry_query|prefixsum_100k`** — the tightest of
-this mode's four scenarios by both floor margin and hosted headroom (Section 6:
-4.8x p95 tightest headroom, +58.7% above its 3x floor). Hosted Linux x86_64 runs
-2-3x slower than local macOS (measured 2.1-2.7x per `AGENTS.md`'s calibration
-note), so this is the scenario most likely to show the tightest real headroom on
-the hosted PR-head run, and the first place to look if `--point-geometry-query
---gate` ever reports `gate=fail` in CI.
+this mode's four scenarios by both floor margin and corpus-level hosted headroom
+(Section 6: 4.8x p95 tightest headroom, +58.7% above its 3x floor). Hosted Linux
+x86_64 runs 2-3x slower than local macOS (measured 2.1-2.7x per `AGENTS.md`'s
+calibration note), so it is the first place to look if `--point-geometry-query
+--gate` ever reports `gate=fail` in CI. On these two runs it stayed green with
+8.1x (PR-head) and 15.7x (post-merge) p95 headroom.
