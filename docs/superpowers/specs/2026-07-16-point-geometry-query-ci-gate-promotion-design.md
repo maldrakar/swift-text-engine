@@ -4,9 +4,21 @@ Date: 2026-07-16
 
 ## Status
 
-Approved design direction, written for user review. Revised after spec review
-(see `## Provenance` below): the ratchet repair this slice originally bundled has
-been split out into Slice 41.
+Approved design direction, written for user review. Revised twice:
+
+1. After the first spec review (see `## Provenance` below): the ratchet repair this
+   slice originally bundled was split out into Slice 41.
+2. After a second review (2026-07-17), which raised seven findings, all verified
+   against the repo and all taken. Six were text defects — a stale Source Context,
+   a "single PR" scope that contradicted the post-merge proof AC11 demands, a
+   `repositoryRoot()` choice one arm of which AC8 forbade, `29426572267`
+   miscalled the first unharvested run, and Slice 41 described as both settled and
+   un-prejudged. One changed a decision: **Decision 6's `run:` assertion is now
+   exact equality**, because a step-level token count left a double invocation and
+   a trailing `|| true` both green. The review's one security finding (the
+   harvester filters runs by id alone) was verified true but is recorded as a known
+   gap under Risks rather than actioned here — the durable fix is a harvester
+   change, which Non-Goals forbids.
 
 ## Source Context
 
@@ -16,10 +28,10 @@ This is Slice 40 of SwiftTextEngine, following the Slice 39 post-slice review:
 docs/superpowers/reviews/2026-07-15-slice-39-post-slice-review.md
 ```
 
-That review is **not in `main` or in this branch**: it lives on the unmerged branch
-`slice-39-post-slice-review` (commit `dc29e14`), per the standing convention that
-the user merges review PRs. Read it with
-`git show dc29e14:docs/superpowers/reviews/2026-07-15-slice-39-post-slice-review.md`.
+That review is in `main` (commit `dc29e14`, merged as `9522224` via PR #86) and in
+this branch, which is rebased on top of it. Read it in place. (The `Main` ruleset
+enables strict required status checks, so this branch must in any case carry the
+latest base-branch state before it can merge.)
 
 The project brief in `docs/initial-project-brief.md` requires regression
 benchmarks to block merge when performance regresses
@@ -162,7 +174,8 @@ Slice 40 could remove both halves at once.
 
 ## Scope
 
-Slice 40, in a single PR:
+Slice 40, in a single implementation PR (plus the standing post-merge evidence
+follow-up — see `### Verification record`):
 
 - harvests fresh hosted runs and **re-derives every gated mode** from the enlarged
   corpus, re-committing every budget the recipe now produces differently (all 46
@@ -205,8 +218,10 @@ review after implementation and merge.
   and only where the re-derivation moves them. Every `point_geometry_query`
   checksum must stay byte-identical to Slice 39's.
 - **No ratchet repair.** No trailing window, no outlier rejection, no floor-factor
-  change, no recipe change of any kind. That is Slice 41; this slice does not
-  pre-empt its mechanism choice.
+  change, no recipe change of any kind. That is Slice 41. This slice does not
+  **implement** the levers the user has already selected for it, and does not fix
+  Slice 41's window size, constants, or derivation details — those are its design's
+  to settle (see `## Recommended Next Step`).
 - No corpus rewrite, row deletion, or `sort -u`: the corpus stays strictly
   append-only.
 - No harvester change (`harvest-gate-corpus.sh` and its idempotent `--corpus`
@@ -349,7 +364,9 @@ Add `Tests/ViewportBenchmarksTests/WorkflowShapeTests.swift`, which reads
 Foundation) and asserts, **for `--point-geometry-query`**:
 
 - exactly one step's `run:` payload carries the `--point-geometry-query` token;
-- that step also passes `--gate`;
+- that step's whitespace-normalized `run:` payload **equals**, exactly, the single
+  expected command:
+  `swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --point-geometry-query --gate`;
 - that step carries no `continue-on-error`;
 - that step's `if:` is the **literal** `steps.change-scope.outputs.docs_only_pr != 'true'`
   — asserted as a literal, *not* by comparing against a sibling step's `if:`, so no
@@ -359,6 +376,23 @@ Foundation) and asserts, **for `--point-geometry-query`**:
 
 The last two pin AC1's name and ordering clauses, which would otherwise revert to
 a one-time hand check.
+
+**Why exact equality rather than "carries `--gate`".** Counting *steps* that carry
+a token leaves two ways to disarm the gate with all six assertions green, both of
+which live inside a single step's payload where a step-level count cannot see them:
+a `|` block scalar that invokes the benchmark **twice** (one step, two runs,
+double-weighting the mode in every future harvest of that run — the exact defect
+Decision 2's rule 1 exists to prevent), and a trailing **`|| true`**, which is
+`continue-on-error` by another spelling and would sail past an assertion that only
+checks the flag key. Equality against one expected command closes both and subsumes
+the `--gate` check. It does **not** subsume invariant 1: equality constrains the
+matched step, not the existence of a second one, so the "exactly one step" count
+stays and the two are complementary.
+
+This makes the string in `swift-ci.yml` and the string in the test a matched pair —
+a deliberate, cheap coupling. Changing the scratch path or the flag order is then a
+two-line edit with a test naming the mismatch, which is the intended behavior for a
+step whose exact shape *is* the invariant.
 
 **Parsing contract** (there is no YAML parser — the package is zero-dependency and
 Foundation ships none, so this is hand-rolled and must be specified, not left to
@@ -377,8 +411,12 @@ the implementer):
 - Read `continue-on-error` from the block's own keys and the guard from its `if:`.
 - Compare **whitespace-separated tokens**, never substrings.
 
-`repositoryRoot()` is `private` to `GateFloorTests.swift`; hoist it into a shared
-test helper or duplicate it with a comment naming its twin.
+`repositoryRoot()` is `private` to `GateFloorTests.swift`. **Duplicate it** into
+`WorkflowShapeTests.swift` with a comment naming its twin; do not hoist it into a
+shared helper. Hoisting would edit `GateFloorTests.swift` and add a file, both
+outside AC8's allowlist — this spec offering the choice at all was a defect. Three
+duplicated lines are the smaller cost, and Slice 42 (which needs a shared reader
+anyway) is where a helper belongs.
 
 **Why one mode, and not `BenchmarkMode.allCases where mode.isGateable`.** That
 quantifier is false today for **3 of the 12** gateable modes, so a test written
@@ -424,9 +462,29 @@ green after — with no other mode implicated in either state.
   docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv
 ```
 
-The Slice 39 post-merge push run (`29426572267`) is the first unharvested run and
-is the most valuable sample in this harvest: it is the only `point_geometry_query`
-evidence that is not from the Slice 39 PR head.
+The Slice 39 post-merge push run (`29426572267`) is the most valuable sample in
+this harvest: it is this mode's only evidence that is **not** from the Slice 39 PR
+head. It is *not* the first unharvested run, and the design must not say so —
+verified 2026-07-17 against `gh run list` and the committed corpus:
+
+| run | event / branch | carries benchmark rows? |
+|---|---|---|
+| `29430079405` | PR `slice-39-post-slice-review` | no — docs-only shortcut |
+| `29427177229` | PR `slice-39-post-merge-hosted-proof` | no — docs-only shortcut |
+| **`29426572267`** | **push `main`** | **yes** |
+| `29364862813`, `29313228902`, `29311831585`, `29311125509` | PR `slice-39-point-geometry-query` | yes |
+
+So it is the **first benchmark-bearing candidate in newest-first harvest order**,
+while four *older* unharvested PR-head runs also carry rows. Both facts matter:
+
+- The two newer docs-only runs are why AC5 names a run id rather than "the newest
+  run" — a docs-only run is harvested as a no-op, not an error.
+- The four older runs are why Decision 3's sweep is not optional. The harvest takes
+  `point_geometry_query` from **6 runs to ~11**, which is what moves the mode across
+  the "~10 runs" line the Risks section carries its residual risk against. Confirm
+  the post-harvest count rather than assuming it: the four PR-head runs are the
+  reason it clears, and the Risks section's judgement changes if any of them turns
+  out to be docs-only.
 
 **`--limit` is a most-recent-N window, not a reach-back guarantee.** With no
 `--runs`, the harvester asks `gh run list --workflow swift-ci.yml --limit N` for the
@@ -491,6 +549,13 @@ with exact commands, exit statuses, and representative output. At minimum:
   **post-merge push** run id on the merge commit as the merged-code anchor (this
   PR changes YAML, so the merge is not docs-only).
 
+  **This half ships as `## Hosted Proof — Pending`** in the implementation PR and is
+  filled by a docs-only follow-up PR after merge (AC11). Neither run id is stable
+  while the head is still moving, and the push run does not exist until the merge
+  does — writing either one early is precisely the stale-evidence defect the
+  project has already hit (Slice 25 P2). Name the watch scenario in the placeholder:
+  `point_geometry_query|prefixsum_100k`, the tightest of this mode's four.
+
 ## Acceptance Criteria
 
 1. `.github/workflows/swift-ci.yml` has exactly **one** `--point-geometry-query`
@@ -505,7 +570,9 @@ with exact commands, exit statuses, and representative output. At minimum:
 3. `WorkflowShapeTests` asserts all six Decision 6 invariants for
    `--point-geometry-query` (including the step's name and its position between the
    point-query gate and the memory-shape diagnostic, which is what pins AC1's name
-   and ordering clauses); it is red against the pre-collapse workflow — with its
+   and ordering clauses, and the exact-equality of its `run:` payload, which is what
+   forecloses a double invocation or a `|| true` inside one step); it is red
+   against the pre-collapse workflow — with its
    red assertion message recorded in the verification record — green after, and it
    runs in `swift test`. No other mode's CI shape can turn it red or green.
    (Invariant 6 necessarily looks up the point-query gate and memory-shape steps
@@ -535,9 +602,20 @@ with exact commands, exit statuses, and representative output. At minimum:
    two-step / not-yet-blocking wiring anywhere.
 10. Local: all eleven latency gates pass, `--point-geometry-query --gate` is
     `gate=pass` ×4, `swift test` green, both Foundation scans empty.
-11. Hosted PR-head CI runs the single blocking point-geometry-query gate step and
-    succeeds, with recorded Linux per-scenario p95/p99 and headroom; post-merge
-    push CI on `main` anchors the merged behavior — both verified at step level.
+11. **(Lifecycle criterion, not an implementation-PR one.)** Hosted PR-head CI runs
+    the single blocking point-geometry-query gate step and succeeds, with recorded
+    Linux per-scenario p95/p99 and headroom; post-merge push CI on `main` anchors
+    the merged behavior — both verified at step level.
+
+    AC1-AC10 are what the implementation PR must satisfy to merge. AC11 cannot be:
+    the push run does not exist until the merge commit does, and the PR-head run id
+    is not stable until the head stops moving. The implementation PR therefore ships
+    its verification record with an explicit `## Hosted Proof — Pending` section, and
+    a docs-only follow-up PR fills in both run ids afterward — the same shape Slice
+    39 used (PR #84 → PR #85) and the convention Slice 36's design already spelled
+    out ("*record the PR-head proof only in the post-merge follow-up where the final
+    head SHA is stable*"). The slice is not done until AC11 is discharged; the
+    implementation PR is.
 
 ## Risks And Gaps
 
@@ -594,6 +672,33 @@ does not re-litigate them:
   (`budget_stale` → re-derive). It costs a re-derive on every harvest that touches
   those keys, which is real but bounded.
 
+### The harvester does not filter runs by provenance (known gap, not this slice)
+
+`harvest-gate-corpus.sh:141-142` selects runs by `gh run list --workflow
+swift-ci.yml --limit N --json databaseId` alone — no `conclusion`, `event`,
+`actor`, or `headRepository` check. Two consequences, both verified 2026-07-17:
+
+- **Cancelled runs contribute partial rows.** Runs `29184350098` (9 rows) and
+  `29185490595` (12 rows), both `conclusion=cancelled` on
+  `slice-38-gate-budget-recalibration`, are already in the corpus against a typical
+  22-46. This is **benign**: they are genuine measurements from this repo that were
+  interrupted mid-table, not bad data. It is evidence of the missing filter, not of
+  contamination.
+- **The repo is public**, so a fork PR's run appears in this run list, and for
+  `pull_request` events the workflow file comes from the PR merge commit — a fork
+  could in principle print fabricated `p95_ns=` lines that a blind harvest would
+  append, loosening budgets.
+
+That second path is **not** mitigated here, knowingly. It requires a maintainer to
+both approve the fork run and harvest it without looking, to achieve nothing but
+weakened perf gates. More to the point, the durable fix is a **harvester filter**,
+which Non-Goals forbids this slice from touching — and a one-time manual audit of
+the harvest window would leave nothing behind for the next harvest, which is the
+`GateFloorTests` lesson in reverse. Recorded here as a roadmap item; the natural
+home is Slice 41, which already opens the derivation path
+(`--json conclusion,event,headRepository` + a rejection rule, with the corpus
+carrying provenance so the filter is auditable rather than implicit).
+
 ### The regression budgets are still anchored to a moving median
 
 No *absolute* product budget exists: legitimate slow drift can still be re-derived
@@ -613,12 +718,17 @@ None change here.
 
 ## Recommended Next Step
 
-After this spec is approved, write the Slice 40 implementation plan (TDD). The
-failing-first anchor is `WorkflowShapeTests` — red against today's two-step,
+The Slice 40 implementation plan (TDD) is written and committed:
+`docs/superpowers/plans/2026-07-16-point-geometry-query-ci-gate-promotion.md`. It
+was drafted against the pre-review text of this spec, so it is a **draft until
+reconciled** with the revisions above — the exact-equality invariant (Decision 6)
+and the `29426572267` characterization are the two that reach its task steps.
+
+The failing-first anchor is `WorkflowShapeTests` — red against today's two-step,
 `continue-on-error` wiring, green only after the collapse. Sequence: write the
 workflow-shape test (red) → relocate the one-printing-step invariant → collapse
 the CI wiring (green) → harvest → re-derive-all + re-commit → `AGENTS.md` →
-hosted PR run → post-merge proof.
+hosted PR run → post-merge proof (the follow-up PR that discharges AC11).
 
 After Slice 40 the eleven-gate blocking suite is complete: **every mode CI runs
 with `--gate` blocks merge on latency regression**, discharging the brief's
@@ -631,7 +741,10 @@ gate sweep counts 45 `gate=pass`, i.e. 46 gated budgets minus that one.
 
 The user selected a **two-lever** mechanism, because the spec review established
 that the bundle's single lever addressed two orthogonal problems and solved only
-one of them. Slice 41 should be specced against this measured evidence:
+one of them. Slice 41 should be specced against this measured evidence. The
+constants below are **evidence-backed starting points, not settled values** — the
+measurements say `N = 20` is inert and `N ≤ 16` is not, which bounds the choice
+without making it; Slice 41's design owns the final numbers:
 
 | Lever | Fixes | Evidence |
 |---|---|---|
