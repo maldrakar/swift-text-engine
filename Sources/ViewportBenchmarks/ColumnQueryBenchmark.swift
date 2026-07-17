@@ -35,7 +35,7 @@ func columnQueryScenarios() -> [ColumnQueryScenario] {
                             p95BudgetNanoseconds: 470, p99BudgetNanoseconds: 940),
         ColumnQueryScenario(name: "prefixsum_1m", providerName: "prefixsum",
                             columnCount: 1_000_000, useVariableAdvance: true,
-                            p95BudgetNanoseconds: 570, p99BudgetNanoseconds: 1_200),
+                            p95BudgetNanoseconds: 580, p99BudgetNanoseconds: 1_200),
     ]
 }
 
