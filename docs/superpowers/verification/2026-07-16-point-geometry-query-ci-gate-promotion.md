@@ -1,9 +1,11 @@
 # Slice 40 verification — `--point-geometry-query` promoted to the eleventh blocking CI gate
 
-Branch `slice-40-point-geometry-query-ci-gate-promotion`. Base commit `2fc6ac8`
-(spec/plan reconciliation). Task commits on top: `8124983` (workflow-shape test +
-step collapse), `51ed096` (harvest + re-derive), `adbdd5b` (AGENTS.md graduation).
-This record's own commit is Task 5.
+Branch `slice-40-point-geometry-query-ci-gate-promotion`. Base commit `59bc8bd`
+(spec/plan reconciliation). Task commits on top: `2fc6ac8` (Decision 2
+relocation: one-printing-step + continue-on-error-is-not-a-gate rules),
+`8124983` (workflow-shape test + step collapse), `51ed096` (harvest +
+re-derive), `adbdd5b` (AGENTS.md graduation). This record's own commit is
+Task 5.
 
 **Verification is evidence, not assertion.** Everything below is raw command
 output, either re-run directly by this task or preserved verbatim from the
@@ -208,7 +210,33 @@ Re-run directly by this task, `derive-gate-budgets.sh` with **no mode
 argument** (every gated scenario, from the current committed corpus):
 
 ```
-$ ./.github/scripts/derive-gate-budgets.sh docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv | tail -20
+$ ./.github/scripts/derive-gate-budgets.sh docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv
+bulk_structural_mutation|100k_lines_batch_4096 n=45  p95[med=169660 max=246428] p99[med=181983 max=306895] budget_p95=1400000 budget_p99=2800000 margin_p95=5.7x margin_p99=9.1x
+bulk_structural_mutation|100k_lines_batch_64   n=45  p95[med=15802  max=23479 ] p99[med=16870  max=25701 ] budget_p95=130000  budget_p99=260000  margin_p95=5.5x margin_p99=10.1x
+bulk_structural_mutation|1k_lines_batch_64     n=45  p95[med=6314   max=7431  ] p99[med=6592   max=9850  ] budget_p95=51000   budget_p99=110000  margin_p95=6.9x margin_p99=11.2x
+bulk_structural_mutation|1m_lines_batch_4096   n=45  p95[med=361549 max=550231] p99[med=399530 max=570623] budget_p95=2900000 budget_p99=5800000 margin_p95=5.3x margin_p99=10.2x
+bulk_structural_mutation|1m_lines_batch_64     n=45  p95[med=55802  max=80812 ] p99[med=57955  max=85411 ] budget_p95=450000  budget_p99=900000  margin_p95=5.6x margin_p99=10.5x
+column_geometry_query|prefixsum_100k           n=31  p95[med=74     max=142   ] p99[med=112    max=169   ] budget_p95=600     budget_p99=1200    margin_p95=4.2x margin_p99=7.1x
+column_geometry_query|prefixsum_1m             n=31  p95[med=94     max=162   ] p99[med=133    max=182   ] budget_p95=760     budget_p99=1600    margin_p95=4.7x margin_p99=8.8x
+column_geometry_query|uniform_100k             n=31  p95[med=43     max=81    ] p99[med=75     max=98    ] budget_p95=350     budget_p99=700     margin_p95=4.3x margin_p99=7.1x
+column_geometry_query|uniform_1k               n=31  p95[med=32     max=59    ] p99[med=63     max=75    ] budget_p95=260     budget_p99=520     margin_p95=4.4x margin_p99=6.9x
+column_geometry_query|uniform_1m               n=31  p95[med=48     max=86    ] p99[med=80     max=107   ] budget_p95=390     budget_p99=780     margin_p95=4.5x margin_p99=7.3x
+column_query|prefixsum_100k                    n=35  p95[med=58     max=134   ] p99[med=94     max=280   ] budget_p95=470     budget_p99=940     margin_p95=3.5x margin_p99=3.4x
+column_query|prefixsum_1m                      n=35  p95[med=72     max=153   ] p99[med=114    max=163   ] budget_p95=580     budget_p99=1200    margin_p95=3.8x margin_p99=7.4x
+column_query|uniform_100k                      n=35  p95[med=35     max=72    ] p99[med=67     max=204   ] budget_p95=280     budget_p99=620     margin_p95=3.9x margin_p99=3.0x
+column_query|uniform_1k                        n=35  p95[med=24     max=50    ] p99[med=43     max=64    ] budget_p95=200     budget_p99=400     margin_p95=4.0x margin_p99=6.2x
+column_query|uniform_1m                        n=35  p95[med=40     max=85    ] p99[med=72     max=111   ] budget_p95=320     budget_p99=640     margin_p95=3.8x margin_p99=5.8x
+line_geometry_query|balanced_tree_100k         n=39  p95[med=365    max=387   ] p99[med=383    max=532   ] budget_p95=3000    budget_p99=6000    margin_p95=7.8x margin_p99=11.3x
+line_geometry_query|balanced_tree_1m           n=39  p95[med=419    max=457   ] p99[med=438    max=665   ] budget_p95=3400    budget_p99=6800    margin_p95=7.4x margin_p99=10.2x
+line_geometry_query|uniform_100k               n=39  p95[med=42     max=83    ] p99[med=74     max=110   ] budget_p95=340     budget_p99=680     margin_p95=4.1x margin_p99=6.2x
+line_geometry_query|uniform_1k                 n=39  p95[med=31     max=60    ] p99[med=62     max=330   ] budget_p95=250     budget_p99=990     margin_p95=4.2x margin_p99=3.0x
+line_geometry_query|uniform_1m                 n=39  p95[med=47     max=89    ] p99[med=79     max=265   ] budget_p95=380     budget_p99=800     margin_p95=4.3x margin_p99=3.0x
+line_query|balanced_tree_100k                  n=45  p95[med=207    max=240   ] p99[med=216    max=421   ] budget_p95=1700    budget_p99=3400    margin_p95=7.1x margin_p99=8.1x
+line_query|balanced_tree_1m                    n=45  p95[med=251    max=264   ] p99[med=262    max=307   ] budget_p95=2100    budget_p99=4200    margin_p95=8.0x margin_p99=13.7x
+line_query|uniform_100k                        n=45  p95[med=34     max=92    ] p99[med=66     max=110   ] budget_p95=280     budget_p99=560     margin_p95=3.0x margin_p99=5.1x
+line_query|uniform_1k                          n=45  p95[med=24     max=73    ] p99[med=53     max=84    ] budget_p95=220     budget_p99=440     margin_p95=3.0x margin_p99=5.2x
+line_query|uniform_1m                          n=45  p95[med=40     max=89    ] p99[med=71     max=109   ] budget_p95=320     budget_p99=640     margin_p95=3.6x margin_p99=5.9x
+pipeline|100k_lines_80_visible_overscan_5      n=47  p95[med=10483  max=12062 ] p99[med=10817  max=12481 ] budget_p95=84000   budget_p99=170000  margin_p95=7.0x margin_p99=13.6x
 pipeline|1k_lines_20_visible_overscan_0        n=47  p95[med=2542   max=2911  ] p99[med=2713   max=4291  ] budget_p95=21000   budget_p99=42000   margin_p95=7.2x margin_p99=9.8x
 pipeline|1m_lines_200_visible_overscan_50      n=47  p95[med=34148  max=39381 ] p99[med=35175  max=41429 ] budget_p95=280000  budget_p99=560000  margin_p95=7.1x margin_p99=13.5x
 point_geometry_query|prefixsum_100k            n=11  p95[med=130    max=231   ] p99[med=146    max=252   ] budget_p95=1100    budget_p99=2200    margin_p95=4.8x margin_p99=8.7x
@@ -230,11 +258,6 @@ variable_height|100k_lines_80_visible_overscan_5 n=47  p95[med=1732   max=2043  
 variable_height|1k_lines_20_visible_overscan_0 n=47  p95[med=501    max=654   ] p99[med=546    max=879   ] budget_p95=4100    budget_p99=8200    margin_p95=6.3x margin_p99=9.3x
 variable_height|1m_lines_200_visible_overscan_50 n=47  p95[med=5521   max=6942  ] p99[med=5681   max=7204  ] budget_p95=45000   budget_p99=90000   margin_p95=6.5x margin_p99=12.5x
 ```
-
-(46 total lines emitted; the top 26 lines — `bulk_structural_mutation` through
-`line_query`, `pipeline`'s first two rows, and `column_*` — are omitted here
-only for length, not selectively; every gated scenario is present in the full
-output this task re-ran.)
 
 Committed-budgets-vs-freshly-derived diff at the current tree (`adbdd5b`,
 carried unmodified through this task — no Sources file touched):
@@ -534,7 +557,7 @@ one-printing-step rule is *why* the bare step's summary lines had to stay out of
 the log before this slice, and why a second step is no longer needed now that
 there is only one.
 
-## 13. Hosted Proof — Pending
+## Hosted Proof — Pending
 
 No PR-head or post-merge push run ID is recorded in this file. The branch
 `slice-40-point-geometry-query-ci-gate-promotion` has not yet been pushed for a
