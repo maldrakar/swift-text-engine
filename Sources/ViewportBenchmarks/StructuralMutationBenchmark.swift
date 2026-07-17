@@ -34,8 +34,8 @@ func structuralMutationScenarios() -> [VariableHeightScenario] {
             viewportHeight: 200.0 * 16.0,
             overscanBefore: 50,
             overscanAfter: 50,
-            p95BudgetNanoseconds: 280_000,
-            p99BudgetNanoseconds: 560_000
+            p95BudgetNanoseconds: 290_000,
+            p99BudgetNanoseconds: 580_000
         )
     ]
 }

@@ -44,16 +44,16 @@ func pointGeometryQueryScenarios() -> [PointGeometryQueryScenario] {
     [
         PointGeometryQueryScenario(name: "uniform_100k", providerName: "uniform",
                                    lineCount: 100_000, useVariableHeights: false,
-                                   p95BudgetNanoseconds: 910, p99BudgetNanoseconds: 1_900),
+                                   p95BudgetNanoseconds: 880, p99BudgetNanoseconds: 1_800),
         PointGeometryQueryScenario(name: "uniform_1m", providerName: "uniform",
                                    lineCount: 1_000_000, useVariableHeights: false,
-                                   p95BudgetNanoseconds: 880, p99BudgetNanoseconds: 1_800),
+                                   p95BudgetNanoseconds: 860, p99BudgetNanoseconds: 1_800),
         PointGeometryQueryScenario(name: "prefixsum_100k", providerName: "prefixsum",
                                    lineCount: 100_000, useVariableHeights: true,
-                                   p95BudgetNanoseconds: 1_100, p99BudgetNanoseconds: 2_200),
+                                   p95BudgetNanoseconds: 960, p99BudgetNanoseconds: 2_000),
         PointGeometryQueryScenario(name: "prefixsum_1m", providerName: "prefixsum",
                                    lineCount: 1_000_000, useVariableHeights: true,
-                                   p95BudgetNanoseconds: 1_300, p99BudgetNanoseconds: 2_600),
+                                   p95BudgetNanoseconds: 1_200, p99BudgetNanoseconds: 2_400),
     ]
 }
 

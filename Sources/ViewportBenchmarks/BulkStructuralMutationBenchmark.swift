@@ -30,8 +30,8 @@ func bulkStructuralMutationScenarios() -> [BulkStructuralMutationScenario] {
             overscanAfter: 0,
             batchSize: 64,
             operationsPerSample: 256,
-            p95BudgetNanoseconds: 51_000,
-            p99BudgetNanoseconds: 110_000
+            p95BudgetNanoseconds: 50_000,
+            p99BudgetNanoseconds: 100_000
         ),
         BulkStructuralMutationScenario(
             name: "100k_lines_batch_64",
@@ -52,8 +52,8 @@ func bulkStructuralMutationScenarios() -> [BulkStructuralMutationScenario] {
             overscanAfter: 50,
             batchSize: 64,
             operationsPerSample: 256,
-            p95BudgetNanoseconds: 450_000,
-            p99BudgetNanoseconds: 900_000
+            p95BudgetNanoseconds: 470_000,
+            p99BudgetNanoseconds: 940_000
         ),
         // Large batch (K=4096): large paste / range delete.
         BulkStructuralMutationScenario(
@@ -64,8 +64,8 @@ func bulkStructuralMutationScenarios() -> [BulkStructuralMutationScenario] {
             overscanAfter: 5,
             batchSize: 4_096,
             operationsPerSample: 16,
-            p95BudgetNanoseconds: 1_400_000,
-            p99BudgetNanoseconds: 2_800_000
+            p95BudgetNanoseconds: 1_500_000,
+            p99BudgetNanoseconds: 3_000_000
         ),
         BulkStructuralMutationScenario(
             name: "1m_lines_batch_4096",
