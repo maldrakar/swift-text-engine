@@ -224,6 +224,12 @@ Three jobs:
   **observational**: the helper compiles them when a matching Swift SDK is
   installed/provisioned, otherwise records a non-blocking skip.
 
+A `continue-on-error` step cannot be a gate. It swallows every non-zero exit —
+budget misses, correctness failures, and crashes alike (the Slice 16 dead-step
+trap). An observational benchmark step and a blocking correctness step must
+therefore be separate steps until the budget itself goes blocking, at which
+point one step is both.
+
 Required-check policy: the public repository `maldrakar/swift-text-engine` has
 an active default-branch ruleset named `Main` (id `17656807`) that requires the
 three Swift CI job contexts for PRs targeting `main`: `Host tests and benchmark
@@ -331,6 +337,14 @@ legitimately contributes many rows (a `realistic_provider` run contributes 8), a
 two of them can be byte-identical. So `sort -u` over the corpus is **not** a
 substitute for `--corpus`: it would collapse two genuine repetitions that happened
 to measure the same nanoseconds, and it reorders every row.
+
+**Exactly one CI step may print a given mode's benchmark summary lines.** The
+harvester reads every `p95_ns=` line in a run's log, so a second printing step
+puts two rows per scenario into every future harvest of that run and
+double-weights it in `median()` — the term that governs most budgets. This is a
+different rule from the idempotent `--corpus` dedup above (which is about
+harvesting the *same run* twice): here one run genuinely carries two rows per
+scenario, and no dedup key can tell them apart.
 
 The one time to harvest **without** `--corpus` is when the harvester learns to read
 a *new line shape* (as it did for `realistic_provider`): previously-harvested runs
