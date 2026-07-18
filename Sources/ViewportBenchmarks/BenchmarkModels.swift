@@ -55,6 +55,26 @@ enum GateLimits {
     // over every recipe-derived table; GateFloorTests pins the floor over every gated
     // scenario.
     static let maxHeadroomP99: Double = 2 * maxHeadroomP95
+
+    // The absolute PRODUCT ceiling -- a distinct axis from the regression band above.
+    // The brief's success criterion is 60 FPS, "p95/p99 latency для пересчёта viewport".
+    // A core frame operation must fit well within a frame, so the ceiling is 10% of a
+    // 60 FPS frame, leaving the remainder for shaping/rasterization/UI outside the
+    // headless core.
+    //
+    // FIXED: never recalibrated, never corpus-derived. A regression budget is anchored to
+    // a moving median and can be legitimately re-derived looser slice by slice; this
+    // ceiling is the fixed product target that catches the slow drift a regression budget
+    // re-derives around. On breach the response is to fix the code/architecture, NEVER to
+    // loosen the ceiling (contrast budget_stale, which says re-derive the budget). See
+    // AGENTS.md "## Gate budgets".
+    //
+    // Applies to frame-hot-path modes only (BenchmarkMode.isFrameHotPath): bulk multi-line
+    // edits are discrete, possibly multi-frame user actions and are exempt. GateLogicTests
+    // pins this frame math; GateFloorTests pins that every frame-hot-path regression p99
+    // budget stays under this ceiling.
+    static let frameNanoseconds: Int64 = 1_000_000_000 / 60          // 16_666_666 (60 FPS)
+    static let absoluteP99Nanoseconds: Int64 = frameNanoseconds / 10 // 1_666_666 (10% of a frame)
 }
 
 enum GateFailureReason: String {

@@ -217,4 +217,13 @@ final class GateLogicTests: XCTestCase {
                 .map(\.outputName))
         XCTAssertEqual(excluded, ["bulk_structural_mutation"])
     }
+
+    // The absolute ceiling is data, not logic: pin it to the frame math so it cannot be
+    // silently changed or accidentally corpus-derived. FIXED, never recalibrated.
+    func testAbsoluteCeilingIsTenPercentOfFrame() {
+        XCTAssertEqual(GateLimits.frameNanoseconds, 1_000_000_000 / 60)
+        XCTAssertEqual(GateLimits.frameNanoseconds, 16_666_666)
+        XCTAssertEqual(GateLimits.absoluteP99Nanoseconds, GateLimits.frameNanoseconds / 10)
+        XCTAssertEqual(GateLimits.absoluteP99Nanoseconds, 1_666_666)
+    }
 }
