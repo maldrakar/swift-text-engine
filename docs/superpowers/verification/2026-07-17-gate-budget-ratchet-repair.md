@@ -428,7 +428,7 @@ surface a docs/governance-only slice never touches).
 
 ---
 
-## Hosted Proof — Pending
+## Hosted Proof
 
 Local evidence above (Sections 1-8) establishes: the window is live in both
 consumers, pinned to a single documented `N=20` so they cannot drift apart;
@@ -454,28 +454,52 @@ the step itself failed — the standing Slice 16 dead-step-trap rule), per
 above, p95 is the thin axis; if any gated scenario reports `gate=fail
 reason=budget_stale` on the hosted runs, check its p95 margin first.
 
-### PR-head run: *(pending — to be filled after the PR is opened and CI runs)*
+Both hosted runs are green, read **at step level** (not job conclusion). PR #90
+was opened against `main`, merged as commit `fe02899`.
 
-- Run id: `TBD`
-- Head commit: `TBD`
-- All three required jobs (`Host tests and benchmark gate`, `iOS
-  cross-target compile`, `WASM cross-target observation`) concluded
-  `success`: `TBD`
-- All eleven blocking gates read at step level, tally of `gate=pass` /
-  `gate=fail`: `TBD`
-- Tightest observed p95/p99 headroom and which scenario: `TBD`
+### PR-head run: `29634227651` (PR #90)
 
-### Post-merge `push` run: *(pending — to be filled after the user merges)*
+- Head commit: `be7dd2b`.
+- All three required jobs concluded `success`: `Host tests and benchmark gate`,
+  `iOS cross-target compile`, `WASM cross-target observation`.
+- All eleven blocking gate **steps** concluded `success` at step level
+  (synthetic, variable-height, variable-height-mutation, structural-mutation,
+  bulk-structural-mutation, line-query, line-geometry-query, column-query,
+  column-geometry-query, point-query, point-geometry-query). Log tally:
+  **45 `gate=pass`, 0 `gate=fail`** (45 = the 46 local gated scenarios minus the
+  one `realistic_provider` scenario CI never runs with `--gate`).
+- `Run host tests` step `success`: `Executed 299 tests, with 0 failures`.
+- `Complete docs-only PR` correctly **skipped** (this PR changes shell/Swift, not
+  docs-only). The lone `continue-on-error` step (`Observe realistic provider
+  relative performance`, PR-only) is non-gating.
+- Tightest observed hosted headroom across all 45 scenarios:
+  **`headroom_p95 = 5.4x`** (a `prefixsum_1m` scenario), **`headroom_p99 = 7.5x`**
+  (a `uniform_1k` scenario) — both comfortably inside the `3x`–`50x` p95 / `100x`
+  p99 band. Failable, not flaky.
 
-- Run id: `TBD`
-- Merge commit: `TBD`
-- All three required jobs concluded `success`: `TBD`
-- All eleven blocking gates read at step level, tally of `gate=pass` /
-  `gate=fail`: `TBD`
-- Checksum byte-identity to the PR-head run and to the local runs in
-  Section 6: `TBD`
+### Post-merge `push` run: `29634768501` (the merged-code anchor)
 
-This section will be completed and committed (`docs: record slice 41 hosted
-proof`) once both runs exist, anchoring the proof in the post-merge `push`
-run per `AGENTS.md`'s discipline of anchoring proof in merged code, not only
-the PR preview.
+- Merge commit: `fe02899` (on `main`).
+- All three required jobs concluded `success`.
+- All eleven blocking gate **steps** concluded `success` at step level. Log
+  tally: **45 `gate=pass`, 0 `gate=fail`**.
+- `Run host tests` step `success`: `Executed 299 tests, with 0 failures`.
+- `Observe realistic provider relative performance` correctly **skipped** here
+  (`if: github.event_name == 'pull_request'` — a `push` event skips it), so this
+  run carries no `realistic_provider` rows, as expected.
+- Tightest observed hosted headroom across all 45 scenarios:
+  **`headroom_p95 = 5.5x`** (`prefixsum_1m`), **`headroom_p99 = 7.3x`**
+  (`uniform_1k`) — in-band.
+- **Checksum byte-identity (AC4):** the four `point_geometry_query` checksums are
+  identical to the PR-head run, to the local Section 6 runs, and to the Slice 40
+  baseline — `uniform_100k 4687694617200924928`, `uniform_1m 6036755761047907072`,
+  `prefixsum_100k 1712152282485110528`, `prefixsum_1m 5915921755926273280`. The
+  re-derivation moved budget literals only; no measured workload changed.
+
+**Two-way floor, visible on the hosted numbers.** The re-derivation tightened
+budgets where old freaks aged out of the window — e.g. `point_geometry_query|
+prefixsum_100k` went `1100/2200` (Slice 40) → `960/2000`, so its hosted headroom
+moved `8.1x → 5.9x` p95. That is the ratchet releasing in the tightening
+direction, and the result is still well inside the band. This closes **AC1** and
+**AC8**: the calibration change is proven on the hosted runner where the budgets
+are actually enforced, anchored in the post-merge merged-code `push` run.
