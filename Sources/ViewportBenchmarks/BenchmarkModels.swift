@@ -80,6 +80,7 @@ enum GateLimits {
 enum GateFailureReason: String {
     case operationFailures = "operation_failures"
     case budgetExceeded = "budget_exceeded"
+    case budgetAbsoluteExceeded = "budget_absolute_exceeded"
     case budgetStale = "budget_stale"
     case missingBudget = "missing_budget"
 }
@@ -128,6 +129,19 @@ struct BenchmarkSummary {
         }
         if p95Nanoseconds > p95BudgetNanoseconds || p99Nanoseconds > p99BudgetNanoseconds {
             return .budgetExceeded
+        }
+
+        // The absolute PRODUCT ceiling, checked for frame-hot-path modes only (bulk edits
+        // are discrete, possibly multi-frame actions -- exempt). It sits between
+        // budgetExceeded and budgetStale on purpose: across the frame-hot-path set every
+        // regression p99 budget is <= 580us < the 1.67ms ceiling (GateFloorTests pins
+        // this), so exceeding the ceiling always also exceeds the regression budget and a
+        // plain regression already reported budget_exceeded above. This therefore fires
+        // ONLY when the regression budget passes but the frame is blown -- the slow drift a
+        // re-derived regression budget cannot catch. It never masks budget_stale, which
+        // needs a tiny observed (huge headroom) where this check is silent.
+        if mode.isFrameHotPath, p99Nanoseconds > GateLimits.absoluteP99Nanoseconds {
+            return .budgetAbsoluteExceeded
         }
 
         let p95 = BenchmarkSummary.headroom(budget: p95BudgetNanoseconds, observed: p95Nanoseconds)

@@ -2,6 +2,7 @@ import XCTest
 @testable import ViewportBenchmarks
 
 private func summary(
+    mode: BenchmarkMode = .lineQuery,
     p95: Int64,
     p99: Int64,
     budgetP95: Int64?,
@@ -9,7 +10,7 @@ private func summary(
     failures: Int = 0
 ) -> BenchmarkSummary {
     BenchmarkSummary(
-        mode: .lineQuery,
+        mode: mode,
         providerName: "uniform",
         scenarioName: "test",
         iterations: 1,
@@ -225,5 +226,49 @@ final class GateLogicTests: XCTestCase {
         XCTAssertEqual(GateLimits.frameNanoseconds, 16_666_666)
         XCTAssertEqual(GateLimits.absoluteP99Nanoseconds, GateLimits.frameNanoseconds / 10)
         XCTAssertEqual(GateLimits.absoluteP99Nanoseconds, 1_666_666)
+    }
+
+    // The reason this slice exists: a frame-hot-path op blows the 60 FPS frame while its
+    // (legitimately re-derived, looser) regression budget still PASSES. The product gate
+    // must catch it -- this is the slow drift the regression gate re-derives around.
+    func testAbsoluteCeilingFiresForFrameHotPathMode() {
+        let obsP99 = GateLimits.absoluteP99Nanoseconds + 1  // one ns over the frame ceiling
+        let s = summary(
+            mode: .structuralMutation,
+            p95: 100_000, p99: obsP99,
+            budgetP95: 300_000, budgetP99: obsP99 + 100_000)  // regression budget passes
+        XCTAssertEqual(s.gateFailureReason, .budgetAbsoluteExceeded)
+    }
+
+    // The same latency/budget shape on a non-hot-path (bulk) mode must NOT fire it: bulk
+    // is exempt from the frame ceiling and gated on its regression budget alone.
+    func testAbsoluteCeilingDoesNotFireForBulkMode() {
+        let obsP99 = GateLimits.absoluteP99Nanoseconds + 1
+        let s = summary(
+            mode: .bulkStructuralMutation,
+            p95: 100_000, p99: obsP99,
+            budgetP95: 300_000, budgetP99: obsP99 + 100_000)
+        XCTAssertNil(s.gateFailureReason)
+    }
+
+    // budget_exceeded outranks the product reason: code that broke even the regression
+    // budget reports the familiar regression failure, not the product one.
+    func testBudgetExceededOutranksAbsoluteCeiling() {
+        let obsP99 = GateLimits.absoluteP99Nanoseconds + 1
+        let s = summary(
+            mode: .structuralMutation,
+            p95: 100_000, p99: obsP99,
+            budgetP95: 300_000, budgetP99: obsP99 - 1)  // regression budget BROKEN
+        XCTAssertEqual(s.gateFailureReason, .budgetExceeded)
+    }
+
+    // The absolute check must not mask a genuinely stale budget: when observed is tiny
+    // (far under the ceiling) the reason stays budget_stale even for a hot-path mode.
+    func testAbsoluteCeilingDoesNotMaskStaleBudget() {
+        let s = summary(
+            mode: .structuralMutation,
+            p95: 20, p99: 40,
+            budgetP95: 60_000, budgetP99: 120_000)  // ~3000x headroom -> stale
+        XCTAssertEqual(s.gateFailureReason, .budgetStale)
     }
 }
