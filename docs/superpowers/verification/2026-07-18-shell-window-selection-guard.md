@@ -6,8 +6,10 @@ path), `91e67d5` (feat: add `--window-run-ids` seam to
 `derive-gate-budgets.sh`), `b3b0885` (test: pin shell window-selection to
 Swift `mostRecentRunIDs`), `384a2da` (docs: record the seam + pin in
 `AGENTS.md`). This record is Task 4, Steps 1-2 (local evidence) + Step 3
-(commit). Hosted proof (AC8) is an explicit placeholder below, to be filled
-in after CI runs on the PR and after the post-merge `push` run.
+(commit). Hosted proof (AC8) is recorded in the "Hosted Proof — AC8
+discharged" section below: PR-head run `29648059739` (head `137a1ef`) and
+post-merge `push` run `29652529080` (merge commit `173e644`), both green at
+step level.
 
 This slice changed **only** three files across the whole branch:
 `.github/scripts/derive-gate-budgets.sh` (the `--window-run-ids` seam + a
@@ -170,9 +172,12 @@ Ran via `swift run -c release ViewportBenchmarks -- <mode> --gate` against
 release build (`swift build -c release`, clean build, "Build complete!") on
 this branch's HEAD (`384a2da`), filtered through `rg "gate=|checksum"`.
 
-**Result: every one of the 46 gated scenario rows across all eleven modes
-printed `gate=pass failures=0`.** Local macOS headroom ranged roughly
-9.6x-46.1x, comfortably inside the 3x floor / 50x-100x ceiling band.
+**Result: every one of the 45 gated scenario rows across all eleven modes
+printed `gate=pass failures=0`.** (The eleven `--gate` modes carry 45 scenario
+rows total — `realistic_provider` is registered in `everyGatedBudget()` but is
+never run with `--gate` in CI, so it contributes no gated row here.) Local
+macOS headroom ranged roughly 9.6x-46.1x, comfortably inside the 3x floor /
+50x-100x ceiling band.
 
 Full captured output (one block per mode, in the brief's order):
 
@@ -273,7 +278,7 @@ Section 6) recorded these checksums as its own byte-identity baseline
 | point_query | 64166237440, 640022280960, 64166280960, 640022228480 | 64166237440, 640022280960, 64166280960, 640022228480 | yes |
 | point_geometry_query | 4687694617200924928, 6036755761047907072, 1712152282485110528, 5915921755926273280 | 4687694617200924928, 6036755761047907072, 1712152282485110528, 5915921755926273280 | yes |
 
-**All 46 checksums across all eleven modes are byte-identical to the Slice 41
+**All 45 checksums across all eleven modes are byte-identical to the Slice 41
 baseline. Zero drift.**
 
 **AC4/AC5 anchor confirmed**: the `point_geometry_query` anchor —
@@ -296,38 +301,70 @@ slice's own plan/spec/verification docs — zero engine or provider paths.
 
 ---
 
-## Hosted Proof — Pending
+## Hosted Proof — AC8 discharged
 
-Local evidence above (Sections 1-7) establishes: the new
-`testWindowSelectionMatchesDeriveScript` guard is live and green; the shell
-`--window-run-ids` seam matches Swift's `mostRecentRunIDs` set-for-set on a
-discriminating fixture; the self-test still passes with the trap-cleanup
-fold; the Foundation-free scan is clean; the whole-branch diff touches zero
-`TextEngineCore`/`TextEngineReferenceProviders` paths; and all eleven local
-`--gate` runs report `gate=pass` with every checksum byte-identical to the
-Slice 41 baseline — proof no measured path moved.
+Both hosted runs were read **at step level** via `gh` (a `continue-on-error`
+step can conclude its job green while the step itself failed — the standing
+Slice 16 dead-step-trap rule). Both are green across all three required jobs
+and all eleven blocking gate steps. PR #93 merged into `main` as merge commit
+`173e644` (`git log origin/main`: `173e644 Merge pull request #93 from
+maldrakar/slice-42-shell-window-selection-guard`).
 
-**This is necessary but not sufficient.** Per `AGENTS.md`'s verification
-discipline and the Slices 24-41 anchor-proof-in-the-push-run pattern, the
-real proof is the hosted PR-head run and the hosted post-merge `push` run,
-both to be read **at step level** (a `continue-on-error` step can conclude
-its job green while the step itself failed — the standing Slice 16
-dead-step-trap rule).
+### PR-head run `29648059739` (head `137a1ef`, event `pull_request`)
 
-**To be filled in once CI runs:**
+- **Three required jobs all `success`**: `Host tests and benchmark gate`, `iOS
+  cross-target compile`, `WASM cross-target observation`.
+- **All eleven blocking gate steps `success` at step level** (host-job steps
+  8–18); whole-run tally **45 `gate=pass`, 0 `gate=fail`** — the eleven `--gate`
+  modes' 45 scenario rows (`realistic_provider` is registered in
+  `everyGatedBudget()` but never `--gate`d in CI, so it emits no gated row).
+- **`Run host tests` step: `Executed 300 tests, with 0 failures`** on hosted
+  Linux — the full suite including `testWindowSelectionMatchesDeriveScript`
+  (present in the log). This discharges the spec's single flagged risk: the
+  test target's **first `Foundation.Process`/bash subprocess launch** runs
+  green on Linux CI, not only local macOS.
+- **`Complete docs-only PR` step `skipped`** — correct: the branch touches
+  `.github/scripts/**` and a Swift test, so the detector classes it
+  non-docs-only and the full Swift/gate path runs. `memory-shape` and RSS
+  diagnostics ran `success`; the PR-only realistic-provider observation ran.
+- **Tightest hosted headroom: 2.6x p95 / 4.1x p99** — `line_query|uniform_100k`
+  (p95_ns=107 vs budget 280). This sub-µs nanosecond-quantized cluster is
+  exactly the "p95 is the thin axis" cluster the Slice 41 review flagged
+  (P2 #3); the 2.6x is single-run hosted jitter, **not** a regression — budgets
+  and checksums are byte-identical to Slice 41 (below), so no measured path
+  moved. Still `gate=pass`, comfortably inside the 50x/100x ceiling.
+- **`point_geometry_query` checksums** byte-identical to the Slice 40/41
+  baseline: `uniform_100k=4687694617200924928`,
+  `uniform_1m=6036755761047907072`, `prefixsum_100k=1712152282485110528`,
+  `prefixsum_1m=5915921755926273280`.
 
-- **PR-head run**: `<pending — PR number and run ID>`
-  - All three required jobs (`Host tests and benchmark gate`, `iOS
-    cross-target compile`, `WASM cross-target observation`) `success`.
-  - All eleven blocking gate steps `success` at step level; log tally
-    `46 gate=pass, 0 gate=fail` (all 46 gated scenarios — this slice touches
-    no `realistic_provider`-affecting path, but that mode is PR-only and not
-    gated regardless).
-  - `Run host tests` step: `Executed 300 tests, with 0 failures`.
-  - Tightest observed hosted headroom, both statistics, in-band.
-- **Post-merge `push` run**: `<pending — merge commit and run ID>`
-  - Same step-level checks as above, against the merged-code anchor.
-  - Checksum byte-identity reconfirmed on hosted Linux x86_64 for at least
-    the `point_geometry_query` anchor scenarios.
+### Post-merge `push` run `29652529080` (merge commit `173e644`, event `push`)
 
-This closes **AC8** once both hosted runs are read and recorded here.
+- **Run conclusion `success`; three required jobs all `success`**.
+- **All eleven blocking gate steps `success` at step level** (host-job steps
+  8–18); tally **45 `gate=pass`, 0 `gate=fail`**.
+- **`Run host tests`: `Executed 300 tests, with 0 failures`** on hosted Linux,
+  including the new pin test (`testWindowSelectionMatchesDeriveScript` present
+  in the log) — the subprocess-launch guard runs green against the merged-code
+  anchor.
+- **`Observe realistic provider relative performance` step `skipped`** — correct
+  on a `push` event (its `if: pull_request` is false), matching the Slices 24–41
+  pattern; `Complete docs-only PR` also `skipped` (heavy path ran);
+  `memory-shape` and RSS diagnostics ran `success`.
+- **Tightest hosted headroom: 5.2x p95 / 7.3x p99** — in line with the Slice 41
+  hosted numbers (5.4x/7.5x PR-head, 5.5x/7.3x push): same budgets, same
+  workload. The PR-head run's tighter 2.6x was that run's jitter on the sub-µs
+  cluster; the merged-code run lands back at the Slice 41 level.
+- **`point_geometry_query` checksums byte-identical** to the PR-head run, the
+  local runs, and the Slice 40/41 baseline:
+  `uniform_100k=4687694617200924928`, `uniform_1m=6036755761047907072`,
+  `prefixsum_100k=1712152282485110528`, `prefixsum_1m=5915921755926273280` —
+  the workload is unchanged across host, PR-head, and merged commit.
+
+**AC8 discharged.** Both hosted runs are green at step level across all three
+required jobs and all eleven blocking gates; host tests are 300/0 on hosted
+Linux (proving the first-ever subprocess-launch guard runs there, not only on
+local macOS); the realistic-provider observation correctly skipped on the
+`push` event; and the merged-code `point_geometry_query` checksums match the
+Slice 41 baseline byte-for-byte — this slice hardened the calibration tooling
+and moved no measured path.
