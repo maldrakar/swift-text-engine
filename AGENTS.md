@@ -127,7 +127,11 @@ a located cell, fewer on a blank line or a failure path), so its cost class equa
   other: a gateable mode with no scenarios registered fails, and so does the
   reverse. It also carries `testWindowConstantMatchesDeriveScript`, pinning its
   `windowSize` constant to `derive-gate-budgets.sh`'s `WINDOW=` so the two windows
-  cannot drift apart.
+  cannot drift apart, and `testWindowSelectionMatchesDeriveScript`, pinning the
+  shell `window_run_ids` *selection logic* to Swift's `mostRecentRunIDs` by driving
+  the script's `--window-run-ids` seam over a fixture and comparing the chosen
+  run-id set — so not just the N constant but the selection itself cannot silently
+  diverge.
   `WorkflowShapeTests.swift` is the third guard: it reads
   `.github/workflows/swift-ci.yml` and pins the point-geometry-query gate step's
   shape — exactly one step carries the flag, its `run:` payload **equals** the
@@ -176,6 +180,7 @@ swift run -c release ViewportBenchmarks -- --help            # all flags
 ./.github/scripts/harvest-gate-corpus.sh --limit 40 --corpus <corpus.tsv>   # hosted CI logs -> NEW corpus rows (append half)
 ./.github/scripts/harvest-gate-corpus.sh --self-test         # harvest selection-logic self-test (no network)
 ./.github/scripts/derive-gate-budgets.sh <corpus.tsv> <mode> # corpus -> budgets (re-derive half)
+./.github/scripts/derive-gate-budgets.sh --window-run-ids <n> < <corpus.tsv> # windowed run ids (Swift-pin test seam)
 ./.github/scripts/cross-target-compile.sh --self-test        # shell logic self-test (no toolchain)
 ./.github/scripts/cross-target-compile.sh                    # local iOS/WASM cross-compile
 ./.github/scripts/cross-target-compile.sh --targets ios      # iOS-only compile path
@@ -331,7 +336,12 @@ older rows still sit in the corpus but are not counted. The corpus stays
 append-only/full-history; the window is applied only at read time. **Both**
 consumers apply the identical window: `derive-gate-budgets.sh` and
 `GateFloorTests` each hold `N=20`, pinned to one documented value by
-`testWindowConstantMatchesDeriveScript` so they cannot silently drift apart.
+`testWindowConstantMatchesDeriveScript` so they cannot silently drift apart. The
+*selection logic* behind that constant is separately pinned by
+`testWindowSelectionMatchesDeriveScript`, which drives the script's
+`--window-run-ids` seam over a fixture and asserts its chosen run-id set equals
+`mostRecentRunIDs` — closing the shell half of the invariant the constant pin
+leaves open.
 Rationale: a `3x max` floor computed over an ever-growing append-only corpus
 is a one-way ratchet — `max` can only rise, so a budget it governs could only
 loosen, never tighten. The window makes it two-way: an old freak run ages out
