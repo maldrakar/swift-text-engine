@@ -16,6 +16,63 @@
 # source of a budget, and silence here is what sends someone back to hand-typing one.
 set -euo pipefail
 
+# Trailing window: derive median/max over the most-recent N distinct runs only,
+# not all corpus history, so an aged-out freak sample can release the budget it
+# inflated. N is the single documented value in AGENTS.md "## Gate budgets" and is
+# pinned to GateFloorTests.swift's `windowSize` by a test. Keep this a bare
+# top-of-file `WINDOW=<int>` assignment: that test reads it by line prefix.
+WINDOW=20
+
+# Corpus on stdin (WITH header) -> its N most-recent distinct run ids, newest first.
+# `sort -rnu` = reverse numeric unique: GitHub databaseId is monotonic with run
+# creation, so numeric-descending IS recency-descending. This is the exact window
+# GateFloorTests.mostRecentRunIDs computes in Swift; the two must not drift.
+window_run_ids() {
+  local n="${1:-$WINDOW}"
+  tail -n +2 | cut -f1 | sort -rnu | head -n "$n"
+}
+
+assert_equal() {
+  local expected="$1" actual="$2" label="$3"
+  if [[ "$expected" != "$actual" ]]; then
+    echo "self_test=fail label=$label"
+    echo "  expected: [$expected]"
+    echo "  actual:   [$actual]"
+    exit 1
+  fi
+}
+
+run_self_test() {
+  local fixture
+  fixture="$(mktemp)"
+  # Run ids out of chronological order on purpose: physical row order must not
+  # matter, only the numeric ranking. Run 305 has two rows (a realistic_provider
+  # run genuinely does) -- the run id, not the row, is the unit of recency.
+  printf 'run_id\tmode\tscenario\tp95_ns\tp99_ns\n' > "$fixture"
+  printf '100\tline_query\tuniform_1k\t24\t54\n'   >> "$fixture"
+  printf '305\tline_query\tuniform_1k\t30\t60\n'   >> "$fixture"
+  printf '305\tline_query\tuniform_1m\t31\t61\n'   >> "$fixture"
+  printf '210\tline_query\tuniform_1k\t28\t58\n'   >> "$fixture"
+  printf '99\tline_query\tuniform_1k\t22\t52\n'    >> "$fixture"
+
+  assert_equal "305
+210" "$(window_run_ids 2 < "$fixture")" "keeps the 2 most-recent distinct run ids"
+
+  # N >= distinct-run-count is a no-op: keep them all, still newest-first.
+  assert_equal "305
+210
+100
+99" "$(window_run_ids 10 < "$fixture")" "keeps all runs when N exceeds the run count"
+
+  rm -f "$fixture"
+  echo "self_test=pass"
+}
+
+if [[ "${1:-}" == "--self-test" ]]; then
+  run_self_test
+  exit 0
+fi
+
 corpus="${1:?usage: derive-gate-budgets.sh <corpus.tsv> [mode ...]}"
 shift || true
 
@@ -36,7 +93,8 @@ function med(arr, n,   i, j, t) {  # lower median of a 1..n array, sorts in plac
       if (arr[i] + 0 > arr[j] + 0) { t = arr[i]; arr[i] = arr[j]; arr[j] = t }
   return arr[int((n + 1) / 2)] + 0
 }
-NR == 1 { next }                   # header
+FNR == NR { KEEP[$1] = 1; next }   # first file: the windowed run ids
+!($1 in KEEP) { next }             # skip the corpus header (id "run_id" is not in KEEP) and out-of-window rows
 {
   seen[$2] = 1
   if (modes != "" && index(" " modes " ", " " $2 " ") == 0) next
@@ -78,4 +136,4 @@ END {
            k, cnt, m95, x95, m99, x99, b95, b99, b95 / x95, b99 / x99
   }
 }
-' "$corpus" | sort
+' <(window_run_ids < "$corpus") "$corpus" | sort

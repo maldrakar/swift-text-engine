@@ -91,10 +91,19 @@ private func value(of key: String, in line: String) -> String? {
 // uses: 6-space `- name:` step headers, 8-space step keys, and a `run:` that is either
 // inline or a `|` block scalar whose body is indented past the key.
 //
-// Comment lines are excluded everywhere. That is load-bearing, not tidiness: the rationale
-// comment this slice deletes sits INSIDE the point-query gate's block (it precedes the next
-// `- name:`) and says the words "continue-on-error" twice, so a reader that scanned raw
-// text would call a blocking step observational.
+// Comment lines are excluded everywhere, though the two `isComment` checks below earn
+// their keep differently. `value(of:)` only matches an exact 8-space-anchored key prefix
+// like `        continue-on-error:`, so a comment line -- 8 spaces then `#` -- can never
+// satisfy that regardless of what text follows the `#`; the top-level guard at the head of
+// this function's per-line loop is redundant for key detection. swift-ci.yml:145-148 is a
+// still-present, concrete example of exactly that kind of text: a comment on the PR-only
+// realistic-provider observation step whose last line reads "...the step is
+// continue-on-error." in prose -- and it is the key-anchored prefix match, not comment
+// exclusion, that keeps it from being misread as the key there.
+// What comment exclusion DOES protect is the run-payload collection loop a few lines down:
+// a `#` line indented past 8 inside a `run: |` block body would otherwise be appended as a
+// spurious run TOKEN, and this file compares a step's run payload for token EQUALITY, so
+// one stray token would break that check.
 private func parseStep(_ block: [String], index: Int) -> WorkflowStep {
     let header = "      - name:"
     let name = String(block[0].dropFirst(header.count)).trimmingCharacters(in: .whitespaces)

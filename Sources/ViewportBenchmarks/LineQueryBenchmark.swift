@@ -27,10 +27,10 @@ func lineQueryScenarios() -> [LineQueryScenario] {
                           p95BudgetNanoseconds: 320, p99BudgetNanoseconds: 640),
         LineQueryScenario(name: "balanced_tree_100k", providerName: "balanced_tree",
                           lineCount: 100_000, useBalancedTree: true,
-                          p95BudgetNanoseconds: 1_700, p99BudgetNanoseconds: 3_400),
+                          p95BudgetNanoseconds: 1_500, p99BudgetNanoseconds: 3_000),
         LineQueryScenario(name: "balanced_tree_1m", providerName: "balanced_tree",
                           lineCount: 1_000_000, useBalancedTree: true,
-                          p95BudgetNanoseconds: 2_100, p99BudgetNanoseconds: 4_200),
+                          p95BudgetNanoseconds: 1_700, p99BudgetNanoseconds: 3_400),
     ]
 }
 
