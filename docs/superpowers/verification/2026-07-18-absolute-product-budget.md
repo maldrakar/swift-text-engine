@@ -362,22 +362,44 @@ committed. The only file this task adds is this document itself.
 
 ---
 
-## Hosted CI — Pending
+## Hosted CI — AC8 discharged
 
-**AC8 is not yet discharged.** This section is a placeholder to be filled in
-after this doc's commit is pushed and a PR is opened against `main`, per the
-slice convention (see e.g. the Slice 42 record's "Hosted Proof — AC8
-discharged" section for the expected shape):
+**AC8 is discharged on both hosted runs.** PR #96 (`slice-43-absolute-product-budget`)
+merged into `main` as merge commit `4a3b83d`. Both runs below were read **at step
+level** via `gh run view --log --job=<id>`, never trusting a job-level
+`continue-on-error` conclusion (the Slice 16 dead-step-trap rule in `AGENTS.md`).
 
-- PR-head run: **pending** (run ID, head commit, all three required jobs
-  `success`, all eleven blocking gate steps `success` at step level, tally of
-  `gate=pass`/`gate=fail` across the 45 gated rows, `Run host tests` full-suite
-  count, `point_geometry_query` checksum anchor cross-check).
-- Post-merge `push` run: **pending** (run ID, merge commit, same checks as
-  above, anchored against `main` HEAD after merge).
+| | PR-head `29660672085` (`da4c52a`) | Post-merge push `29661132399` (`4a3b83d`) |
+|---|---|---|
+| Three required jobs | all `success` | all `success` |
+| Eleven blocking gate steps | all `success` at step level | all `success` at step level |
+| Gate tally | 45 `gate=pass` / 0 `gate=fail` | 45 `gate=pass` / 0 `gate=fail` |
+| Host tests | `Executed 310 tests, with 0 failures` | `Executed 310 tests, with 0 failures` |
+| `budget_absolute_p99_ns` tokens | 40 × `1666666` + 5 × `exempt` | 40 × `1666666` + 5 × `exempt` |
+| `reason=budget_absolute_exceeded` | none (ceiling not breached) | none (ceiling not breached) |
+| `point_geometry_query` checksums | baseline-identical | baseline-identical |
+| Tightest regression headroom | 6.3× p95 / 7.3× p99 | 6.5× p95 / 10.0× p99 |
+| Tightest **absolute** headroom | 44.4× | 44.1× (`structural_mutation|1m`, p99 ≈ 37,821 ns) |
+| Realistic-provider observation | ran (PR event, `continue-on-error`) | **skipped** (`push` event skips `if: pull_request`) |
+| docs-only completion | skipped (heavy path ran — Swift/test branch) | skipped (heavy path ran) |
 
-No hosted run IDs are recorded here yet — they do not exist at authoring time
-and must not be fabricated. This section is to be updated once both hosted
-runs are available and read at step level (never trusting job-level
-`continue-on-error` conclusions, per the Slice 16 dead-step-trap rule in
-`AGENTS.md`).
+- **The new absolute-ceiling axis is live on hosted Linux**: every one of the 40
+  frame-hot-path gated rows carries `budget_absolute_p99_ns=1666666` and each of the
+  5 `bulk_structural_mutation` rows carries `budget_absolute_p99_ns=exempt`, on both
+  runs — the 45-row split confirming the ceiling was applied to exactly the
+  frame-hot-path set and deliberately marked exempt for bulk. No row on a clean tree
+  reports `reason=budget_absolute_exceeded`.
+- **Non-flaky by a wide margin**: the tightest absolute headroom is ~44× on the
+  slowest frame-hot-path scenario (`structural_mutation|1m`, hosted p99 ≈ 37,821 ns
+  against the 1,666,666 ns ceiling) — an order of magnitude above the ~2.7× hosted
+  run-to-run spread, and even looser than the spec's ~28× estimate, so the absolute
+  gate cannot redden a clean tree.
+- **No measured path moved**: the four `point_geometry_query` checksums
+  (`uniform_100k=4687694617200924928`, `uniform_1m=6036755761047907072`,
+  `prefixsum_100k=1712152282485110528`, `prefixsum_1m=5915921755926273280`) are
+  byte-identical across the local run, both hosted runs, and the Slice 40/41/42
+  baseline — consistent with the Section 8 finding that this slice's gate-token
+  addition is purely additive.
+- The PR-head run ran the realistic-provider observation step (PR event); the
+  post-merge `push` run correctly skipped it (`if: pull_request`), matching the
+  Slices 24–42 pattern of anchoring proof in the merged-code `push` run.
