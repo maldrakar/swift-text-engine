@@ -307,6 +307,28 @@ when it doesn't.
   budget that holds there holds locally with room to spare, and the reverse is
   false.
 
+**The absolute product ceiling** is a *second, distinct* gate axis, added in Slice 43.
+The regression band above asks "slower than recent code?"; the absolute ceiling asks
+"still fast enough for the 60 FPS frame?" — the brief's «превратить "60 FPS" в
+измеримый headless budget». It is `GateLimits.absoluteP99Nanoseconds = 1_000_000_000 /
+60 / 10 = 1_666_666` ns (10% of a 60 FPS frame), **FIXED**: never recalibrated, never
+corpus-derived. On breach the gate reports `reason=budget_absolute_exceeded`, and the
+response is to **fix the code/architecture — never loosen the ceiling** (contrast
+`budget_stale`, which says re-derive the budget). It is checked against **p99 only**
+(a passing p99 implies a passing p95 under a uniform ceiling).
+
+It applies to **frame-hot-path** modes only — viewport compute, incremental recompute
+after a single edit, and every position/geometry query — classified by the exhaustive
+`BenchmarkMode.isFrameHotPath` switch. `bulk_structural_mutation` is **exempt**: a bulk
+multi-line paste / range delete is a discrete user action that may span more than one
+frame, not a scroll-frame op, so its gate line prints `budget_absolute_p99_ns=exempt`
+and it stays gated on its regression budget alone. Two standing tests keep the axes
+coherent: `GateLogicTests` pins the excluded set to exactly
+`{bulk_structural_mutation}`, and `GateFloorTests` pins that **every frame-hot-path
+regression p99 budget stays under the absolute ceiling** (binding scenario
+`structural_mutation|1m`, 580 µs, 2.87× under) — so the runtime absolute gate can never
+redden a clean tree.
+
 **The recipe** is two committed scripts, not a table to copy — harvest fresh
 hosted evidence, then re-derive from it:
 

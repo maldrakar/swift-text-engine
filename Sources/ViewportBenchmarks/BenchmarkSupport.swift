@@ -121,6 +121,14 @@ func formatSummary(_ summary: BenchmarkSummary, includeGate: Bool) -> String {
         output += " budget_p99_ns=\(p99BudgetNanoseconds)"
         output += " headroom_p95=\(formatHeadroom(headroomP95))"
         output += " headroom_p99=\(formatHeadroom(headroomP99))"
+        if summary.mode.isFrameHotPath {
+            output += " budget_absolute_p99_ns=\(GateLimits.absoluteP99Nanoseconds)"
+            output += " headroom_absolute_p99=\(formatHeadroom(summary.headroomAbsoluteP99))"
+        } else {
+            // Visible marker, not a silent omission: a reader sees the ceiling was
+            // deliberately not applied to this discrete multi-frame edit mode.
+            output += " budget_absolute_p99_ns=exempt"
+        }
         output += " gate=\(reason == nil ? "pass" : "fail")"
         if let reason {
             output += " reason=\(reason.rawValue)"

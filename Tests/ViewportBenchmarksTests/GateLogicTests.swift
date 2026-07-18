@@ -2,6 +2,7 @@ import XCTest
 @testable import ViewportBenchmarks
 
 private func summary(
+    mode: BenchmarkMode = .lineQuery,
     p95: Int64,
     p99: Int64,
     budgetP95: Int64?,
@@ -9,7 +10,7 @@ private func summary(
     failures: Int = 0
 ) -> BenchmarkSummary {
     BenchmarkSummary(
-        mode: .lineQuery,
+        mode: mode,
         providerName: "uniform",
         scenarioName: "test",
         iterations: 1,
@@ -203,5 +204,114 @@ final class GateLogicTests: XCTestCase {
                 budget.p99, 2 * budget.p95,
                 "\(budget.key): p99 budget \(budget.p99) is below 2x the p95 budget \(budget.p95)")
         }
+    }
+
+    // The absolute ceiling applies to frame-hot-path modes only. Bulk multi-line edits
+    // are a discrete, possibly multi-frame user action, not a scroll-frame op, so they
+    // are exempt. Pin the excluded set so the exemption cannot silently widen: an
+    // exhaustive switch forces a new mode to classify itself, and this asserts the only
+    // gated mode that opts out is bulk_structural_mutation.
+    func testFrameHotPathExclusionsAreExactlyDocumented() {
+        let excluded = Set(
+            BenchmarkMode.allCases
+                .filter { $0.isGateable && !$0.isFrameHotPath }
+                .map(\.outputName))
+        XCTAssertEqual(excluded, ["bulk_structural_mutation"])
+    }
+
+    // The absolute ceiling is data, not logic: pin it to the frame math so it cannot be
+    // silently changed or accidentally corpus-derived. FIXED, never recalibrated.
+    func testAbsoluteCeilingIsTenPercentOfFrame() {
+        XCTAssertEqual(GateLimits.frameNanoseconds, 1_000_000_000 / 60)
+        XCTAssertEqual(GateLimits.frameNanoseconds, 16_666_666)
+        XCTAssertEqual(GateLimits.absoluteP99Nanoseconds, GateLimits.frameNanoseconds / 10)
+        XCTAssertEqual(GateLimits.absoluteP99Nanoseconds, 1_666_666)
+    }
+
+    // The reason this slice exists: a frame-hot-path op blows the 60 FPS frame while its
+    // (legitimately re-derived, looser) regression budget still PASSES. The product gate
+    // must catch it -- this is the slow drift the regression gate re-derives around.
+    func testAbsoluteCeilingFiresForFrameHotPathMode() {
+        let obsP99 = GateLimits.absoluteP99Nanoseconds + 1  // one ns over the frame ceiling
+        let s = summary(
+            mode: .structuralMutation,
+            p95: 100_000, p99: obsP99,
+            budgetP95: 300_000, budgetP99: obsP99 + 100_000)  // regression budget passes
+        XCTAssertEqual(s.gateFailureReason, .budgetAbsoluteExceeded)
+    }
+
+    // The same latency/budget shape on a non-hot-path (bulk) mode must NOT fire it: bulk
+    // is exempt from the frame ceiling and gated on its regression budget alone.
+    func testAbsoluteCeilingDoesNotFireForBulkMode() {
+        let obsP99 = GateLimits.absoluteP99Nanoseconds + 1
+        let s = summary(
+            mode: .bulkStructuralMutation,
+            p95: 100_000, p99: obsP99,
+            budgetP95: 300_000, budgetP99: obsP99 + 100_000)
+        XCTAssertNil(s.gateFailureReason)
+    }
+
+    // budget_exceeded outranks the product reason: code that broke even the regression
+    // budget reports the familiar regression failure, not the product one.
+    func testBudgetExceededOutranksAbsoluteCeiling() {
+        let obsP99 = GateLimits.absoluteP99Nanoseconds + 1
+        let s = summary(
+            mode: .structuralMutation,
+            p95: 100_000, p99: obsP99,
+            budgetP95: 300_000, budgetP99: obsP99 - 1)  // regression budget BROKEN
+        XCTAssertEqual(s.gateFailureReason, .budgetExceeded)
+    }
+
+    // The absolute check must not mask a genuinely stale budget: when observed is tiny
+    // (far under the ceiling) the reason stays budget_stale even for a hot-path mode.
+    func testAbsoluteCeilingDoesNotMaskStaleBudget() {
+        let s = summary(
+            mode: .structuralMutation,
+            p95: 20, p99: 40,
+            budgetP95: 60_000, budgetP99: 120_000)  // ~3000x headroom -> stale
+        XCTAssertEqual(s.gateFailureReason, .budgetStale)
+    }
+
+    // Frame-hot-path gate output carries the fixed ceiling and its headroom, positioned
+    // after headroom_p99 and before gate=. 1666666 / 200000 = 8.33 -> "8.3x".
+    func testGateOutputCarriesAbsoluteCeilingForFrameHotPath() {
+        let line = formatSummary(
+            summary(mode: .structuralMutation, p95: 100_000, p99: 200_000,
+                    budgetP95: 300_000, budgetP99: 600_000),
+            includeGate: true)
+        XCTAssertTrue(line.contains(" budget_absolute_p99_ns=1666666"), line)
+        XCTAssertTrue(line.contains(" headroom_absolute_p99=8.3x"), line)
+
+        let tokens = line.split(separator: " ")
+        guard let p99Index = tokens.firstIndex(where: { $0.hasPrefix("headroom_p99=") }),
+              let absIndex = tokens.firstIndex(where: { $0.hasPrefix("budget_absolute_p99_ns=") }),
+              let gateIndex = tokens.firstIndex(where: { $0.hasPrefix("gate=") }) else {
+            XCTFail("expected headroom_p99, budget_absolute_p99_ns, and gate fields: \(line)")
+            return
+        }
+        XCTAssertTrue(p99Index < absIndex, line)
+        XCTAssertTrue(absIndex < gateIndex, line)
+    }
+
+    // Bulk is exempt: its gate line says so explicitly (a visible marker, not a silent
+    // omission -- the repo's "no silent caps" discipline) and carries no absolute headroom.
+    func testGateOutputMarksBulkExempt() {
+        let line = formatSummary(
+            summary(mode: .bulkStructuralMutation, p95: 400_000, p99: 900_000,
+                    budgetP95: 2_900_000, budgetP99: 5_800_000),
+            includeGate: true)
+        XCTAssertTrue(line.contains(" budget_absolute_p99_ns=exempt"), line)
+        XCTAssertFalse(line.contains("headroom_absolute_p99"), line)
+        XCTAssertTrue(line.contains(" gate=pass"), line)
+    }
+
+    // Non-gate output is a separate contract and must not grow the absolute token.
+    func testNonGateOutputHasNoAbsoluteToken() {
+        let line = formatSummary(
+            summary(mode: .structuralMutation, p95: 100_000, p99: 200_000,
+                    budgetP95: 300_000, budgetP99: 600_000),
+            includeGate: false)
+        XCTAssertFalse(line.contains("budget_absolute_p99_ns"), line)
+        XCTAssertFalse(line.contains("headroom_absolute_p99"), line)
     }
 }
