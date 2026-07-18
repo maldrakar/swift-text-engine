@@ -62,12 +62,12 @@ Test Suite 'GateFloorTests' failed at 2026-07-18 16:37:31.903.
 	 Executed 1 test, with 2 failures (0 unexpected) in 0.315 (0.315) seconds
 ```
 
-At N=2, the shell (without `-u`) still emits only one instance of the
-duplicated run `305` from `sort -rn`'s output (305 physically appears as two
-adjacent equal lines that `head -n 2` collapses to effectively one distinct
-value at the top before `210` is ever reached), so the shell's returned set
-is `{305}` while Swift's `mostRecentRunIDs` correctly dedups by value first
-and returns `{305, 210}`. N=3 diverges similarly (`{210,305}` vs
+At N=2, the shell without `-u` emits the duplicated run `305` *twice*:
+`sort -rn | head -n 2` returns the two physically-adjacent `305` lines (the
+two highest values) and never reaches `210`. `head` does not dedup — it is the
+test parsing that stdout into a `Set` that collapses the two `305` lines to
+`{305}`, whereas Swift's `mostRecentRunIDs` dedups by value *first* and returns
+`{305, 210}`. So the two sets diverge. N=3 diverges similarly (`{210,305}` vs
 `{210,305,100}`); N=10 was not reported as a failure — a window wide enough
 to be a no-op agreed for both, as expected. This is the discriminating
 fixture (`fixtureIDs = [100, 305, 305, 210, 99, 210, 42]`, distinct ids
