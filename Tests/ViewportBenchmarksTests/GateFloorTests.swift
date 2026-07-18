@@ -120,6 +120,7 @@ private func corpusExtremes(from text: String, windowSize: Int) -> [String: Corp
 
 struct GatedBudget {
     let key: String
+    let mode: BenchmarkMode
     let p95: Int64
     let p99: Int64
 }
@@ -135,7 +136,7 @@ struct GatedBudget {
 func everyGatedBudget() -> [GatedBudget] {
     var budgets: [GatedBudget] = []
     func add(_ mode: BenchmarkMode, _ name: String, _ p95: Int64, _ p99: Int64) {
-        budgets.append(GatedBudget(key: "\(mode.outputName)|\(name)", p95: p95, p99: p99))
+        budgets.append(GatedBudget(key: "\(mode.outputName)|\(name)", mode: mode, p95: p95, p99: p99))
     }
 
     for s in benchmarkScenarios() {
@@ -349,6 +350,30 @@ final class GateFloorTests: XCTestCase {
                 "shell window_run_ids and Swift mostRecentRunIDs disagree at N=\(limit) — the "
                     + "two corpus consumers would window differently; re-run "
                     + "`.github/scripts/derive-gate-budgets.sh --self-test`")
+        }
+    }
+
+    // The runtime companion to Decision 4's ordering: the absolute product ceiling is
+    // enforced at runtime for frame-hot-path modes, and this pins the static half -- every
+    // frame-hot-path gated scenario's committed regression p99 budget must sit UNDER the
+    // ceiling. If a budget crossed it, the absolute gate would fire on a clean tree (a
+    // regression budget is >= its own observed latency, so budget < ceiling => observed <
+    // ceiling with room). Bulk is filtered out here exactly as isFrameHotPath filters it
+    // at runtime, so the two agree. Binding scenario: structural_mutation|1m (580us,
+    // 2.87x under). This is the check that would have caught the original
+    // bulk_structural_mutation batch_4096 collision (budgets 3ms / 5.8ms > the ceiling).
+    func testEveryFrameHotPathBudgetIsUnderTheAbsoluteCeiling() {
+        let frameHotPath = everyGatedBudget().filter { $0.mode.isFrameHotPath }
+        XCTAssertFalse(frameHotPath.isEmpty)
+
+        for budget in frameHotPath {
+            XCTAssertLessThan(
+                budget.p99, GateLimits.absoluteP99Nanoseconds,
+                "\(budget.key): regression p99 budget \(budget.p99) is at or above the "
+                    + "absolute frame ceiling \(GateLimits.absoluteP99Nanoseconds) — the "
+                    + "absolute gate would fire on a clean tree. Reclassify the mode as not "
+                    + "frame-hot-path, raise the ceiling fraction (a conscious product "
+                    + "decision), or accept the op is too slow for a frame.")
         }
     }
 }
