@@ -45,6 +45,10 @@ assert_equal() {
 run_self_test() {
   local fixture
   fixture="$(mktemp)"
+  # P3 #1: clean up on the red path too. assert_equal exits 1 before any trailing
+  # rm, so without this a failing self-test orphans the fixture. Double-quoted so
+  # $fixture is baked in now (the local is out of scope by the time EXIT fires).
+  trap "rm -f '$fixture'" EXIT
   # Run ids out of chronological order on purpose: physical row order must not
   # matter, only the numeric ranking. Run 305 has two rows (a realistic_provider
   # run genuinely does) -- the run id, not the row, is the unit of recency.
@@ -64,7 +68,6 @@ run_self_test() {
 100
 99" "$(window_run_ids 10 < "$fixture")" "keeps all runs when N exceeds the run count"
 
-  rm -f "$fixture"
   echo "self_test=pass"
 }
 
