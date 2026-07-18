@@ -9,6 +9,8 @@
 #   budget_p99 = round_up_2sf(max(2 * budget_p95, 8 * median(p99), 3 * max(p99)))
 #
 # Usage: ./.github/scripts/derive-gate-budgets.sh <corpus.tsv> [mode ...]
+# Usage: ./.github/scripts/derive-gate-budgets.sh --self-test
+# Usage: ./.github/scripts/derive-gate-budgets.sh --window-run-ids [N]   (reads corpus on stdin)
 #
 # A mode may be spelled either way -- `line-query` (as the CLI flag and every CI
 # step name spell it) or `line_query` (as the corpus does). A mode that matches no
@@ -45,6 +47,10 @@ assert_equal() {
 run_self_test() {
   local fixture
   fixture="$(mktemp)"
+  # P3 #1: clean up on the red path too. assert_equal exits 1 before any trailing
+  # rm, so without this a failing self-test orphans the fixture. Double-quoted so
+  # $fixture is baked in now (the local is out of scope by the time EXIT fires).
+  trap "rm -f '$fixture'" EXIT
   # Run ids out of chronological order on purpose: physical row order must not
   # matter, only the numeric ranking. Run 305 has two rows (a realistic_provider
   # run genuinely does) -- the run id, not the row, is the unit of recency.
@@ -64,12 +70,20 @@ run_self_test() {
 100
 99" "$(window_run_ids 10 < "$fixture")" "keeps all runs when N exceeds the run count"
 
-  rm -f "$fixture"
   echo "self_test=pass"
 }
 
 if [[ "${1:-}" == "--self-test" ]]; then
   run_self_test
+  exit 0
+fi
+
+# Test seam: expose the exact window_run_ids selection the derivation uses via
+# <(window_run_ids < "$corpus"), so GateFloorTests.testWindowSelectionMatchesDeriveScript
+# can pin it to Swift's mostRecentRunIDs. Reads the corpus (WITH header) on stdin;
+# N defaults to WINDOW. Delegates -- it duplicates none of the selection logic.
+if [[ "${1:-}" == "--window-run-ids" ]]; then
+  window_run_ids "${2:-$WINDOW}"
   exit 0
 fi
 

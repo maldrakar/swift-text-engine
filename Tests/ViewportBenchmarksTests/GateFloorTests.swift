@@ -43,6 +43,36 @@ private func repositoryRoot() -> URL {
         .deletingLastPathComponent()
 }
 
+// The test target's first subprocess launch. Safe here: ViewportBenchmarksTests runs
+// only on the host (Linux CI + local macOS), never on iOS/WASM, which merely compile
+// TextEngineCore/ReferenceProviders. Foundation.Process is already available (this file
+// imports Foundation to read the corpus); nothing here reaches the Foundation-free core.
+// Feeds `stdin` to the process, reads stdout to EOF, then reaps. Output here is a handful
+// of run ids, so read-then-wait cannot deadlock on a full pipe buffer.
+private func runProcess(_ executableURL: URL, _ arguments: [String], stdin: String) throws
+    -> (stdout: String, stderr: String, exitCode: Int32) {
+    let process = Process()
+    process.executableURL = executableURL
+    process.arguments = arguments
+
+    let stdinPipe = Pipe(), stdoutPipe = Pipe(), stderrPipe = Pipe()
+    process.standardInput = stdinPipe
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
+
+    try process.run()
+    try stdinPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
+    try stdinPipe.fileHandleForWriting.close()
+
+    let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+    let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+
+    return (String(decoding: outData, as: UTF8.self),
+            String(decoding: errData, as: UTF8.self),
+            process.terminationStatus)
+}
+
 // key -> "<mode>|<scenario>", matching the derivation script's grouping exactly.
 private func loadCorpus() throws -> [String: CorpusExtremes] {
     let url = repositoryRoot().appendingPathComponent(corpusPath)
@@ -276,5 +306,49 @@ final class GateFloorTests: XCTestCase {
             "WINDOW=\(scriptWindow) in derive-gate-budgets.sh disagrees with windowSize="
                 + "\(windowSize) in GateFloorTests.swift — the two consumers would window "
                 + "the corpus differently. Update AGENTS.md's one documented N and both sites.")
+    }
+
+    // The selection-logic analog of testWindowConstantMatchesDeriveScript: that test pins
+    // the window's N CONSTANT across languages; this pins the window's SELECTION LOGIC.
+    // It runs the script's real window_run_ids (via the --window-run-ids seam) over a
+    // fixture and asserts its chosen run-id SET equals mostRecentRunIDs -- the function the
+    // floor test derives its extremes through. Set, not ordered list: the awk KEEP filter
+    // and the Swift window.contains fold both use membership, so emission order never
+    // reaches the derivation (the shell --self-test covers newest-first ordering separately).
+    // Closes the shell half of the "both consumers agree" invariant that the constant pin,
+    // GateFloorTests, and the runtime --gate all leave open (Slice 41 review P2 #1).
+    func testWindowSelectionMatchesDeriveScript() throws {
+        let scriptURL = repositoryRoot()
+            .appendingPathComponent(".github/scripts/derive-gate-budgets.sh")
+
+        // Discriminating fixture: 305 and 210 each contribute two rows (a run contributes
+        // many rows -> must dedup); rows are physically out of chronological order (ranking
+        // is by run-id value, not row position). Distinct ids: {100, 305, 210, 99, 42}.
+        // window_run_ids reads only column 1; the other columns are inert here.
+        let fixtureIDs: [Int64] = [100, 305, 305, 210, 99, 210, 42]
+        var corpus = "run_id\tmode\tscenario\tp95_ns\tp99_ns\n"
+        for id in fixtureIDs {
+            corpus += "\(id)\tm\ts\t1\t2\n"
+        }
+
+        let env = URL(fileURLWithPath: "/usr/bin/env")
+
+        // Both regimes: N < distinct count (2, 3 drop runs) and N >= distinct count (10, no-op).
+        for limit in [2, 3, 10] {
+            let result = try runProcess(
+                env, ["bash", scriptURL.path, "--window-run-ids", "\(limit)"], stdin: corpus)
+
+            XCTAssertEqual(
+                result.exitCode, 0,
+                "derive-gate-budgets.sh --window-run-ids \(limit) exited \(result.exitCode); "
+                    + "stderr: \(result.stderr)")
+
+            let shellSet = Set(result.stdout.split(separator: "\n").compactMap { Int64($0) })
+            XCTAssertEqual(
+                shellSet, mostRecentRunIDs(fixtureIDs, limit: limit),
+                "shell window_run_ids and Swift mostRecentRunIDs disagree at N=\(limit) — the "
+                    + "two corpus consumers would window differently; re-run "
+                    + "`.github/scripts/derive-gate-budgets.sh --self-test`")
+        }
     }
 }
