@@ -204,4 +204,17 @@ final class GateLogicTests: XCTestCase {
                 "\(budget.key): p99 budget \(budget.p99) is below 2x the p95 budget \(budget.p95)")
         }
     }
+
+    // The absolute ceiling applies to frame-hot-path modes only. Bulk multi-line edits
+    // are a discrete, possibly multi-frame user action, not a scroll-frame op, so they
+    // are exempt. Pin the excluded set so the exemption cannot silently widen: an
+    // exhaustive switch forces a new mode to classify itself, and this asserts the only
+    // gated mode that opts out is bulk_structural_mutation.
+    func testFrameHotPathExclusionsAreExactlyDocumented() {
+        let excluded = Set(
+            BenchmarkMode.allCases
+                .filter { $0.isGateable && !$0.isFrameHotPath }
+                .map(\.outputName))
+        XCTAssertEqual(excluded, ["bulk_structural_mutation"])
+    }
 }
