@@ -52,29 +52,38 @@ longer matches the Swift one — someone drops the `-u` from `sort -rnu` (so dup
 ids stop collapsing and `head -n N` now keeps a *different* set of distinct runs), or
 changes the `head` semantics. Such a drift shifts which runs the derivation reads, and
 therefore the `median`/`max` it derives budgets from. Of the two directions the drift can
-take, one is caught and one is not:
+take, one is caught outright and the other only once it grows gross enough to trip the
+runtime ceiling:
 
 - If the shell now derives a budget **tighter** than the correct Swift window would,
   `GateFloorTests` catches it: the committed budget can fall below `3× (Swift-windowed
   max)`, and the floor test — computing its extremes through the *correct*
   `mostRecentRunIDs` — reddens.
-- If the shell now derives a budget **looser** than the correct Swift window would,
-  **nothing catches it**:
+- If the shell now derives a budget **looser** than the correct Swift window would, only a
+  *gross* overshoot is caught — **within-band loosening is not**:
   - **`GateFloorTests` still passes** — a looser (larger) budget clears `3×
     windowedMax` with room.
   - **`testWindowConstantMatchesDeriveScript` still passes** — the N *constant* is
     unchanged; only the *selection logic* around it drifted.
-  - **The runtime `--gate` still passes** — it compares the looser budget against this
-    run's live latency, and looser is easier to clear.
+  - **The runtime `--gate` catches only *gross* loosening.** Its ceiling
+    (`headroom_p95 ≤ 50×`, `headroom_p99 ≤ 100×`, checked against this run's live latency,
+    failing `budget_stale`) reddens only if the mis-derived budget is loose *enough* to push
+    headroom past the ceiling. It is otherwise corpus-blind: it cannot tell a budget merely
+    looser than the correct Swift window from a correctly-sized one, as long as both stay
+    inside the band. With current hosted headroom near 5×, that leaves a ~10× span of
+    loosening — wider than the correct window, still under the 50× ceiling — it does not see.
 
-So a shell selector that silently derives looser than the Swift selector slips past every
-existing guard. That is the precise blind spot: the constant is pinned but the logic is
-not; the Swift logic runs in CI but the shell logic does not; and the runtime gate, being
-blind to the corpus, cannot see a mis-derivation at all. The cross-check closes it by
-failing on **any** shell/Swift selection divergence — set inequality is direction-blind,
-so it covers the uncaught looser case and the already-caught tighter case alike. This is
-the same class of hole `GateFloorTests` itself was built to close: an invariant left to a
-one-time or manual check instead of a standing one.
+So a shell selector that silently derives *within-band* looser than the Swift selector slips
+past every existing guard: `GateFloorTests` (computing its extremes through the *correct*
+Swift window) clears the larger budget, the constant pin is unmoved, and the runtime ceiling
+only bites once the loosening exceeds 50×/100×. That is the precise blind spot — not that the
+runtime gate is blind to *all* mis-derivation (its ceiling does backstop a wildly loose
+budget), but that it is blind to the *corpus*, so within-band loosening wider than the correct
+window is invisible to it, to the constant pin, and to the floor test alike. The cross-check
+closes it by failing on **any** shell/Swift selection divergence — set inequality is
+direction-blind, so it covers the uncaught within-band looser case and the already-caught
+tighter case together. This is the same class of hole `GateFloorTests` itself was built to
+close: an invariant left to a one-time or manual check instead of a standing one.
 
 ### Why the manual self-test is not enough
 
@@ -130,8 +139,9 @@ of the spec, not against the Swift consumer the budgets are actually verified th
    third and last axis of the "both consumers agree" invariant, joining the pinned
    constant and the CI-exercised Swift logic.
 2. The guard is a *cross-check against the Swift consumer*, not a re-assertion of the
-   shell against its own expectations — so it closes the specific looser-shell-window
-   direction that slips past `GateFloorTests`, the constant pin, and the runtime gate.
+   shell against its own expectations — so it closes the specific within-band looser-shell-
+   window direction that slips past `GateFloorTests`, the constant pin, and — below its
+   50×/100× ceiling — the runtime gate.
 3. No engine, provider, workload, budget, or corpus change; every gate checksum stays
    byte-identical.
 
@@ -241,7 +251,9 @@ fi
 It delegates to the unchanged `window_run_ids` function — the identical code path the
 derivation uses via `<(window_run_ids < "$corpus")`. The `set -euo pipefail`
 pipeline-under-`head` behavior is already proven safe by the committed `--self-test`,
-which exercises the same function.
+which exercises the same function. Update the script's `# Usage:` header comment to list
+`--window-run-ids [N]` beside `<corpus.tsv>` / `--self-test`, so the subcommand is
+discoverable from the file itself, not only from `AGENTS.md`.
 
 P3 #1 fold: in `run_self_test`, immediately after `fixture="$(mktemp)"`, add
 `trap 'rm -f "$fixture"' EXIT` so the fixture is cleaned on the `exit 1` red path as well
@@ -255,8 +267,12 @@ A subprocess helper and the pin test:
 - `runDeriveScript(windowRunIDsFor:limit:) -> Set<Int64>` (or an inline equivalent):
   resolves the script path via the existing `repositoryRoot()` helper, launches
   `/usr/bin/env bash <script> --window-run-ids <N>` with `Foundation.Process`, writes the
-  fixture corpus to the process's stdin `Pipe`, captures stdout, waits, asserts exit
-  status 0 (else `XCTFail` with stderr), and parses stdout lines into `Set<Int64>`.
+  fixture corpus to the process's stdin `Pipe` **and closes it**, then drains stdout with
+  `readDataToEndOfFile` before `waitUntilExit`, asserts exit status 0 (else `XCTFail` with
+  stderr), and parses stdout lines into `Set<Int64>`. The write-fully-then-drain order
+  matters: the output is tiny (≤N id lines, well under one pipe buffer) so it cannot
+  deadlock, but this is the target's first subprocess launch, so it sets the safe pattern
+  rather than relying on a lucky buffer size.
 - `testWindowSelectionMatchesDeriveScript`: builds a fixture run-id list exercising the
   discriminating cases —
   - duplicate run ids across rows (a run contributes many rows),
@@ -266,16 +282,24 @@ A subprocess helper and the pin test:
   synthesizes a fixture corpus TSV string (header + rows), and for each N asserts
   `runDeriveScript(...) == mostRecentRunIDs(fixtureIDs, limit: N)`.
 
+  The fixture is not arbitrary: a duplicate run id must sit **at the dropping-N boundary**,
+  so that removing `-u` from `sort -rnu` keeps the duplicate under `head -N` and pushes a
+  distinct id out of the window — changing the emitted *set*, not merely the line count.
+  Without that placement the guard-is-live break (drop `-u`) would leave the set unchanged
+  and the test green, i.e. a guard that cannot fail. The demonstration (Testing Strategy
+  step 2) confirms the break actually reddens *this* fixture; it is not assumed.
+
 The test lives beside `testWindowConstantMatchesDeriveScript` and reuses `repositoryRoot()`
 and `mostRecentRunIDs`; it introduces the target's first subprocess launch.
 
 ### Documentation
 
-`AGENTS.md` — in the `## Gate budgets` window paragraph and/or the `GateFloorTests`
-package-layout description, note that the shell selector is now pinned to the Swift
-selector by `testWindowSelectionMatchesDeriveScript` (the selection-logic analog of the
-constant pin), and record the `--window-run-ids` subcommand alongside the existing
-`--self-test` in the Commands list.
+`AGENTS.md` — in the `GateFloorTests` package-layout description (the bullet that
+enumerates its guards), note that the shell selector is now pinned to the Swift selector by
+`testWindowSelectionMatchesDeriveScript` (the selection-logic analog of the constant pin);
+add a matching sentence to the `## Gate budgets` window paragraph; and record the
+`--window-run-ids` subcommand alongside the existing `--self-test` in the `## Commands`
+list.
 
 ### Verification record
 
@@ -300,7 +324,10 @@ with a temporary `WINDOW=21`).
    subcommand, add the test, watch it go green.
 2. **Guard-is-live demonstration** — temporarily break the shell selector (drop `-u` from
    `sort -rnu`, and/or a `head` change) and confirm the new test goes **red**; revert and
-   confirm green. Recorded in the verification doc, not committed.
+   confirm green. This doubles as proof the fixture's dropping-N boundary genuinely
+   distinguishes `-u` from no-`-u` (a duplicate at the window edge) — if the break does not
+   redden it, the fixture, not the guard, is wrong. Recorded in the verification doc, not
+   committed.
 3. **`derive-gate-budgets.sh --self-test`** — still `self_test=pass` after the subcommand
    and trap-fold edits.
 4. **Full `swift test`** — all prior tests plus the new one pass, green on hosted Linux,
@@ -316,7 +343,9 @@ with a temporary `WINDOW=21`).
 2. `testWindowSelectionMatchesDeriveScript` asserts, over a fixture exercising duplicate
    ids, out-of-order rows, and both a dropping-N and a no-op-N, that the shell selector's
    output set equals `mostRecentRunIDs` on the same ids — and is demonstrably **live** (a
-   temporary break in the shell selector reddens it, shown in the verification record).
+   temporary break in the shell selector reddens it, shown in the verification record). A
+   subcommand launch failure or non-zero exit is a loud `XCTFail` carrying captured stderr,
+   never a skip, so the guard cannot silently no-op.
 3. `swift test` passes in full (existing suite + the new test), green on hosted Linux.
 4. `git diff --name-only` shows **no path under `Sources/TextEngineCore` or
    `Sources/TextEngineReferenceProviders`**, and no budget-literal or corpus change.
@@ -348,6 +377,22 @@ context. Ordering divergence between the shell output and its own expectations w
 still only be caught by a human running `--self-test`. Judged acceptable: ordering does
 not affect the derivation (Decision 2), and the membership property — the one the budgets
 actually depend on — is now standing-guarded. Recorded, not closed.
+
+### The derivation *arithmetic* keeps a symmetric residual
+
+This slice standing-guards the *selection* logic, not the derivation *arithmetic* (`8×median`,
+`3×max`, `round_up_2sf`). By the same argument that motivates the slice, that arithmetic is
+itself only partially standing-guarded: `GateFloorTests` catches an arithmetic drift that makes
+a budget *too tight* (below `3×` windowed max), and the runtime ceiling catches one *gross
+enough* to exceed 50×/100× — but a *within-band looser* arithmetic drift is caught only by the
+manual per-slice "reproduce every literal" check. That is the same direction and the same
+manual-only weakness this slice closes for the selector. Decision 1 rejects driving the whole
+derivation partly on the grounds that the arithmetic is "already covered by the floor test plus
+the reproduce check"; that coverage is the *tight* side plus a *manual* check, so the symmetric
+loose-side gap is a deliberate, documented residual here — not a closed one. Closing it (a
+standing "reproduce every committed literal" test) pins selection **and** arithmetic together
+and couples to the budget-literal representation, which is why it is a separate slice, not
+folded in. Recorded, not closed.
 
 ### P3 #3 carry-forward
 
