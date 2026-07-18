@@ -53,9 +53,11 @@ failure condition on every **frame-hot-path** gated run (Decision 2 scopes which
 
 - `Sources/ViewportBenchmarks/BenchmarkModels.swift` — two `GateLimits` constants
   (`frameNanoseconds`, `absoluteP99Nanoseconds`), a new `GateFailureReason` case
-  (`budgetAbsoluteExceeded`), a `BenchmarkMode.isFrameHotPath` classifier (exhaustive
-  switch; `false` only for `.bulkStructuralMutation`), and the mode-gated check inside
-  `BenchmarkSummary.gateFailureReason`.
+  (`budgetAbsoluteExceeded`), the `BenchmarkSummary.headroomAbsoluteP99` property, and
+  the mode-gated check inside `BenchmarkSummary.gateFailureReason`.
+- `Sources/ViewportBenchmarks/BenchmarkOptions.swift` — the `BenchmarkMode.isFrameHotPath`
+  classifier (exhaustive switch beside `isGateable`; `false` only for
+  `.bulkStructuralMutation`).
 - `Sources/ViewportBenchmarks/BenchmarkSupport.swift` — two additive tokens on the
   `includeGate` output line (`budget_absolute_p99_ns=`, `headroom_absolute_p99=`) for
   frame-hot-path modes; a visible `budget_absolute_p99_ns=exempt` marker for bulk.
@@ -259,12 +261,17 @@ must agree.) This does three things at once:
   expression-form constants (Decision 3), with a comment stating they are FIXED and
   never recalibrated.
 - `GateFailureReason.budgetAbsoluteExceeded = "budget_absolute_exceeded"`.
-- `BenchmarkMode.isFrameHotPath` — an exhaustive `switch` returning `false` only for
-  `.bulkStructuralMutation` (Decision 2), with a comment explaining bulk is a discrete
-  multi-frame user action, not a scroll-frame operation.
+- `BenchmarkSummary.headroomAbsoluteP99` — `absoluteP99Nanoseconds / observed p99`,
+  reusing the zero-observed guard (mirrors `headroomP95`/`headroomP99`).
 - One mode-gated line in `gateFailureReason` (Decision 4 ordering): after the
   `budgetExceeded` return, `if mode.isFrameHotPath, p99Nanoseconds >
   GateLimits.absoluteP99Nanoseconds { return .budgetAbsoluteExceeded }`.
+
+### `BenchmarkOptions.swift`
+
+`BenchmarkMode.isFrameHotPath` — an exhaustive `switch` beside `isGateable`, returning
+`false` only for `.bulkStructuralMutation` (Decision 2), with a comment explaining bulk
+is a discrete multi-frame user action, not a scroll-frame operation.
 
 ### `BenchmarkSupport.swift`
 
