@@ -271,4 +271,47 @@ final class GateLogicTests: XCTestCase {
             budgetP95: 60_000, budgetP99: 120_000)  // ~3000x headroom -> stale
         XCTAssertEqual(s.gateFailureReason, .budgetStale)
     }
+
+    // Frame-hot-path gate output carries the fixed ceiling and its headroom, positioned
+    // after headroom_p99 and before gate=. 1666666 / 200000 = 8.33 -> "8.3x".
+    func testGateOutputCarriesAbsoluteCeilingForFrameHotPath() {
+        let line = formatSummary(
+            summary(mode: .structuralMutation, p95: 100_000, p99: 200_000,
+                    budgetP95: 300_000, budgetP99: 600_000),
+            includeGate: true)
+        XCTAssertTrue(line.contains(" budget_absolute_p99_ns=1666666"), line)
+        XCTAssertTrue(line.contains(" headroom_absolute_p99=8.3x"), line)
+
+        let tokens = line.split(separator: " ")
+        guard let p99Index = tokens.firstIndex(where: { $0.hasPrefix("headroom_p99=") }),
+              let absIndex = tokens.firstIndex(where: { $0.hasPrefix("budget_absolute_p99_ns=") }),
+              let gateIndex = tokens.firstIndex(where: { $0.hasPrefix("gate=") }) else {
+            XCTFail("expected headroom_p99, budget_absolute_p99_ns, and gate fields: \(line)")
+            return
+        }
+        XCTAssertTrue(p99Index < absIndex, line)
+        XCTAssertTrue(absIndex < gateIndex, line)
+    }
+
+    // Bulk is exempt: its gate line says so explicitly (a visible marker, not a silent
+    // omission -- the repo's "no silent caps" discipline) and carries no absolute headroom.
+    func testGateOutputMarksBulkExempt() {
+        let line = formatSummary(
+            summary(mode: .bulkStructuralMutation, p95: 400_000, p99: 900_000,
+                    budgetP95: 2_900_000, budgetP99: 5_800_000),
+            includeGate: true)
+        XCTAssertTrue(line.contains(" budget_absolute_p99_ns=exempt"), line)
+        XCTAssertFalse(line.contains("headroom_absolute_p99"), line)
+        XCTAssertTrue(line.contains(" gate=pass"), line)
+    }
+
+    // Non-gate output is a separate contract and must not grow the absolute token.
+    func testNonGateOutputHasNoAbsoluteToken() {
+        let line = formatSummary(
+            summary(mode: .structuralMutation, p95: 100_000, p99: 200_000,
+                    budgetP95: 300_000, budgetP99: 600_000),
+            includeGate: false)
+        XCTAssertFalse(line.contains("budget_absolute_p99_ns"), line)
+        XCTAssertFalse(line.contains("headroom_absolute_p99"), line)
+    }
 }

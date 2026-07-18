@@ -116,6 +116,14 @@ struct BenchmarkSummary {
         p99BudgetNanoseconds.map { BenchmarkSummary.headroom(budget: $0, observed: p99Nanoseconds) }
     }
 
+    // The absolute product ceiling's headroom: fixed ceiling / observed p99. Non-optional
+    // (the ceiling always exists) and reuses the zero-observed guard, so p99 == 0 yields
+    // .infinity rather than trapping. Only meaningful for frame-hot-path modes; the output
+    // layer emits it for those and marks the rest exempt.
+    var headroomAbsoluteP99: Double {
+        BenchmarkSummary.headroom(budget: GateLimits.absoluteP99Nanoseconds, observed: p99Nanoseconds)
+    }
+
     // A gate that cannot fail is not a gate. `budgetStale` is what makes an
     // inflated budget a build error rather than a silent no-op: the two causes
     // demand opposite responses (fix the code vs. re-derive the budget), so the
