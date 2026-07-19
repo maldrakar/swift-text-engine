@@ -440,9 +440,11 @@ final class GateFloorTests: XCTestCase {
     // ceiling. If a budget crossed it, the absolute gate would fire on a clean tree (a
     // regression budget is >= its own observed latency, so budget < ceiling => observed <
     // ceiling with room). Bulk is filtered out here exactly as isFrameHotPath filters it
-    // at runtime, so the two agree. Binding scenario: structural_mutation|1m (580us,
-    // 2.87x under). This is the check that would have caught the original
-    // bulk_structural_mutation batch_4096 collision (budgets 3ms / 5.8ms > the ceiling).
+    // at runtime, so the two agree. The binding scenario is the slowest frame-hot-path p99
+    // budget (currently structural_mutation|1m); its live margin under the ceiling is what
+    // this test enforces, so read the assertion rather than a number that rots here. This is
+    // the check that would have caught the original bulk_structural_mutation batch_4096
+    // collision (its budgets exceeded the ceiling).
     func testEveryFrameHotPathBudgetIsUnderTheAbsoluteCeiling() {
         let frameHotPath = everyGatedBudget().filter { $0.mode.isFrameHotPath }
         XCTAssertFalse(frameHotPath.isEmpty)

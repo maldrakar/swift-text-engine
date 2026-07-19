@@ -132,6 +132,11 @@ a located cell, fewer on a blank line or a failure path), so its cost class equa
   the script's `--window-run-ids` seam over a fixture and comparing the chosen
   run-id set — so not just the N constant but the selection itself cannot silently
   diverge.
+  It also carries `testEveryCommittedBudgetReproducesFromCorpus`, the arithmetic analog of
+  those two selection pins: it runs `derive-gate-budgets.sh` over the committed corpus and
+  asserts every committed budget literal byte-equals the re-derived `budget_p95`/`budget_p99`
+  (with a bijective `derived.count == everyGatedBudget().count` cardinality check), so a
+  committed budget that no longer reproduces from the corpus fails the build.
   `WorkflowShapeTests.swift` is the third guard: it reads
   `.github/workflows/swift-ci.yml` and pins the point-geometry-query gate step's
   shape — exactly one step carries the flag, its `run:` payload **equals** the
@@ -422,16 +427,27 @@ suite had been re-derived. Every gated scenario now carries corpus rows, and
 "starter budgets" that ran 815x-3000x loose, and no gate could fail for five
 slices as a result. Re-derive from fresh hosted evidence instead.
 
+**Every committed budget is now build-enforced to reproduce.**
+`GateFloorTests.testEveryCommittedBudgetReproducesFromCorpus` shells out to
+`derive-gate-budgets.sh` over the committed corpus and fails `swift test` if any
+committed `p95BudgetNanoseconds` / `p99BudgetNanoseconds` literal no longer byte-equals
+the re-derived budget — so "derived, never hand-typed" is a standing invariant, not a
+per-slice discipline. This is the arithmetic analog of the two window pins (which
+cross-check the *selection*). A red here after a harvest is `budget_stale` — re-derive
+that mode and re-commit; it is not an engine regression. `round_up_2sf` gives natural
+hysteresis, so most small median/max moves round to the same budget and do not trip it.
+
 **When an optimization trips the ceiling, raise the budget — never the
 ceiling.** A genuine speed-up (Slices 29/30 cut `lineAt` from O(log^2 N) to
 O(log N)) or faster hardware will push headroom past the ceiling and turn a
 gate red on a clean tree. That is the ceiling working as designed. Re-derive
 that budget from fresh hosted evidence in the same PR that caused the shift.
 
-**The two failure reasons are opposite instructions**, and the gate says
+**The three failure reasons are distinct instructions**, and the gate says
 which one applies: `reason=budget_exceeded` means the code got slower — fix
 the code. `reason=budget_stale` means the budget no longer reflects reality —
-re-derive it.
+re-derive it. `reason=budget_absolute_exceeded` means a frame-hot-path op blew
+the fixed 60 FPS ceiling — fix the code/architecture, never loosen the ceiling.
 
 ## Development workflow ("slices")
 
