@@ -118,6 +118,34 @@ private func corpusExtremes(from text: String, windowSize: Int) -> [String: Corp
     return extremes
 }
 
+// Parse derive-gate-budgets.sh stdout into key -> (p95, p99). Each scenario line is
+// `<key>  n=... p95[...] p99[...] budget_p95=<int> budget_p99=<int> margin...` (the key is
+// %-46s-padded, so field 0 is the key with no embedded spaces, and the two budgets are
+// whitespace-delimited `budget_p9x=<int>` tokens). A line missing either token is skipped:
+// combined with the "every gated key must be present" assertion in the test, that turns any
+// rename/removal of those output tokens into a loud missing-key failure, not a silent pass --
+// so the test transitively pins the derive script's output shape as well as its arithmetic.
+private func derivedBudgets(fromScriptOutput output: String) -> [String: (p95: Int64, p99: Int64)] {
+    var result: [String: (p95: Int64, p99: Int64)] = [:]
+    for line in output.split(separator: "\n") {
+        let fields = line.split(separator: " ", omittingEmptySubsequences: true)
+        guard let key = fields.first else { continue }
+        var p95: Int64?
+        var p99: Int64?
+        for field in fields {
+            if field.hasPrefix("budget_p95=") {
+                p95 = Int64(field.dropFirst("budget_p95=".count))
+            } else if field.hasPrefix("budget_p99=") {
+                p99 = Int64(field.dropFirst("budget_p99=".count))
+            }
+        }
+        if let p95, let p99 {
+            result[String(key)] = (p95: p95, p99: p99)
+        }
+    }
+    return result
+}
+
 struct GatedBudget {
     let key: String
     let mode: BenchmarkMode
@@ -350,6 +378,59 @@ final class GateFloorTests: XCTestCase {
                 "shell window_run_ids and Swift mostRecentRunIDs disagree at N=\(limit) — the "
                     + "two corpus consumers would window differently; re-run "
                     + "`.github/scripts/derive-gate-budgets.sh --self-test`")
+        }
+    }
+
+    // The arithmetic analog of the two window pins. Those cross-check the window SELECTION
+    // (which run ids) against Swift; this cross-checks the DERIVATION ARITHMETIC (8xmedian /
+    // 3xmax / round_up_2sf, plus the p99 2xbudget_p95 floor) by asserting every committed budget
+    // literal byte-equals what derive-gate-budgets.sh -- "the only sanctioned source of a budget"
+    // -- actually emits from the committed corpus. It closes the last within-band-looser residual
+    // in the regression recipe: a budget that has drifted looser than the recipe now produces is
+    // invisible to the floor test whenever the 8xmedian term governs (the floor sees only 3xmax),
+    // but reddens here. Shells out rather than re-implementing the recipe, so it also transitively
+    // guards the script's awk and its output format on both BSD-awk(local) and Linux-awk(CI).
+    func testEveryCommittedBudgetReproducesFromCorpus() throws {
+        let scriptURL = repositoryRoot()
+            .appendingPathComponent(".github/scripts/derive-gate-budgets.sh")
+        let corpusURL = repositoryRoot().appendingPathComponent(corpusPath)
+        let env = URL(fileURLWithPath: "/usr/bin/env")
+
+        // The script reads the corpus from its file argument, not stdin; empty stdin is inert.
+        let result = try runProcess(env, ["bash", scriptURL.path, corpusURL.path], stdin: "")
+        XCTAssertEqual(
+            result.exitCode, 0,
+            "derive-gate-budgets.sh exited \(result.exitCode); stderr: \(result.stderr)")
+
+        let derived = derivedBudgets(fromScriptOutput: result.stdout)
+        let budgets = everyGatedBudget()
+
+        // Non-vacuity + bijective cardinality (Decision 3). Equality (not >=) also catches the
+        // REVERSE drift: a scenario that entered the corpus/derivation but is not a registered
+        // gated budget. Relax to `derived.count >= budgets.count` only if a non-gated
+        // (e.g. observation-only) row is ever CONSCIOUSLY added to the corpus.
+        XCTAssertFalse(derived.isEmpty)
+        XCTAssertEqual(
+            derived.count, budgets.count,
+            "derive-gate-budgets.sh emitted \(derived.count) scenarios but everyGatedBudget() "
+                + "registers \(budgets.count) — a corpus scenario is unregistered (or vice versa). "
+                + "If a non-gated observation row was added on purpose, relax this to >=.")
+
+        for budget in budgets {
+            guard let d = derived[budget.key] else {
+                XCTFail("\(budget.key): gated, but derive-gate-budgets.sh emitted no budget for it")
+                continue
+            }
+            XCTAssertEqual(
+                d.p95, budget.p95,
+                "\(budget.key): committed p95 budget \(budget.p95) != \(d.p95) re-derived from the "
+                    + "corpus — the literal no longer reproduces (budget_stale, not an engine "
+                    + "regression). Re-derive with .github/scripts/derive-gate-budgets.sh and re-commit.")
+            XCTAssertEqual(
+                d.p99, budget.p99,
+                "\(budget.key): committed p99 budget \(budget.p99) != \(d.p99) re-derived from the "
+                    + "corpus — the literal no longer reproduces (budget_stale, not an engine "
+                    + "regression). Re-derive with .github/scripts/derive-gate-budgets.sh and re-commit.")
         }
     }
 
