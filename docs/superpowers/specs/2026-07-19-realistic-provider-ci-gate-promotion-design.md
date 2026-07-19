@@ -9,12 +9,18 @@ regression gate** — the **12th** blocking gate — by wiring
 standard blocking step, and **removing** today's PR-only, `continue-on-error`,
 base-vs-head *relative observation* of the same workload.
 
-This is a **zero-Swift-engine-change** slice: `runRealisticProviderBenchmarks(enforceGate:)`
+This is a **zero-engine-behavior-change** slice: `runRealisticProviderBenchmarks(enforceGate:)`
 (`Sources/ViewportBenchmarks/RealisticProviderBenchmark.swift`) already honours
 `--gate` and exits non-zero on a budget miss. The engine surface, budgets, corpus,
 and derivation scripts are untouched. The work is CI wiring, one standing-guard
-extension, docs, and deleting the now-orphaned observation script — the same
-"observation → Nth blocking gate" shape as Slices 24/26/28/32/34/36/38/40.
+extension, docs, deleting the now-orphaned observation script, and one comment-only
+fix in `RealisticProviderBenchmark.swift` (a narrative that goes false the moment
+the gate runs — see §5) — the same "observation → Nth blocking gate" shape as
+Slices 24/26/28/32/34/36/38/40.
+
+It is also a deliberate **trade, not pure gap-closing**: promotion buys
+merge-blocking enforcement against gross realistic regressions but retires the
+observational base-vs-head detector's sensitivity to *small* ones (Decision 1).
 
 ## Motivation — brief alignment
 
@@ -34,6 +40,27 @@ never runs with `--gate`." This slice closes that gap, making the realistic scro
 budget the truest realization of «превратить 60 FPS в измеримый budget» — enforced
 on the realistic workload rather than a synthetic proxy, and (being frame-hot-path)
 also held under the fixed 1.67 ms 60-FPS absolute ceiling.
+
+## Relation to the Slice 44 recommendation
+
+The Slice 44 post-slice review recommended, in order, **Option A — harvester
+provenance hardening** ("the root-of-trust gap under the entire pinned chain …
+needs no external decision") and **Option B — a bulk-edit absolute budget**. This
+slice is **neither**: it is a deliberate pivot to the realistic-gate promotion,
+chosen because it is the single most brief-aligned gate available (criterion #1 ×
+the last criterion — see Motivation), a known standing gap, and — like Option A —
+decision-free.
+
+The pivot has one honest cost worth stating: promotion makes the realistic budget
+**merge-blocking**, and its calibration provenance is the **thinnest** of the twelve
+(its corpus rows have only ever arrived via shape 2 — see Risks). Critically, this
+does **not** introduce a new *class* of risk: the other eleven budgets already block
+merge on the *same* unguarded provenance, so promotion extends an already-accepted
+systemic exposure to one more mode rather than creating a new one. It does, however,
+**raise the stakes** on that exposure — a bad corpus row can now redden the headline
+workload. Provenance hardening (Slice 44 Option A) therefore remains the recommended
+**immediate follow-on**, now covering **12** blocking budgets instead of 11; it is
+the natural next slice, not superseded by this one.
 
 ## Background — current state
 
@@ -80,6 +107,16 @@ step (shape 2) both run on a PR, a single run contributes 1 + 8 rows for the sam
 lines" hazard AGENTS.md warns about. Keeping both would also require teaching the
 harvester to de-duplicate the two shapes — extra scope and moving parts.
 
+Rejected alternative — keep the gate **and** a redirected-off-log observation: the
+double-count above exists only because the observation prints its
+`mode=realistic_relative_observation` line to the *log*; redirecting that line to a
+temp file (as the raw benchmark output already is) would let both coexist without
+double-weighting. Rejected anyway — the observation is `continue-on-error`, so it
+blocks nothing: a toothless detector on the headline workload is low value and costs
+a second (base) tree build every PR. If small-realistic-regression sensitivity is
+ever wanted, the right answer is a *blocking* relative gate or a tighter
+mode-specific regression budget, not a resurrected observation (see Risks).
+
 **Accepted trade-off:** we lose the sensitive `1.22×` base-vs-head detector, which
 could catch sub-8× realistic regressions the coarser absolute budget cannot. That
 detector was deliberately *observational and noisy* (hence `continue-on-error`),
@@ -116,6 +153,14 @@ byte-reproduction), passes with ~8× regression headroom hosted, and sits 8× un
 the absolute ceiling. Nothing to re-derive to go green. The first post-merge harvest
 that ingests this slice's push run will pick up realistic via the standard shape-1
 line like every other mode — expected steady-state, not this slice's work.
+
+**Transitional window wrinkle (benign):** each realistic run used to contribute
+**8** corpus rows (shape 2: base+head arrays) and will now contribute **1** (shape
+1: head only), so for the ~20 runs it takes the N=20 window to roll over, the window
+mixes both shapes and over-weights the older shape-2 rows in `median()`. Same
+benchmark, comparable magnitudes, so no budget move is expected; and if a
+`budget_stale` ever does surface during the transition it is a re-derive, **not** an
+engine regression (the reason string names itself).
 
 ## Change set
 
@@ -160,6 +205,17 @@ line like every other mode — expected steady-state, not this slice's work.
   branch is now vestigial (follow-up cleanup, out of scope here).
 - `## Package layout`: `WorkflowShapeTests` now pins point-geometry **and** realistic.
 
+### 5. `Sources/ViewportBenchmarks/RealisticProviderBenchmark.swift`
+- **Comment-only fix.** The 8-line note above `realisticProviderScenarios()`
+  (lines ~88–95) narrates the *old* corpus route: "the one gated mode CI never runs
+  with `--gate` … no `p95_ns=` line for this mode ever reaches the hosted log … values
+  ride inside the `mode=realistic_relative_observation` line instead." All of that
+  goes **false** the moment this slice merges — the gate now runs with `--gate`, a
+  `p95_ns=` line reaches the log, and shape 2 is gone. Rewrite it to describe the
+  standard shape-1 route every other gate uses. This is the same comment-rot hazard
+  the repo has burned on before; no code, budget, or behavior changes — only the
+  comment. (This is why the slice is "zero-engine-behavior-change," not "zero-Swift-file-change.")
+
 ## Acceptance criteria
 
 - **AC1** — CI runs `--realistic-provider --gate` as a blocking, non-`continue-on-error`
@@ -173,9 +229,10 @@ line like every other mode — expected steady-state, not this slice's work.
 - **AC5** — `swift test` green (extended `WorkflowShapeTests`); `swift build -c
   release` clean; `rg -n Foundation Sources/TextEngineCore` empty.
 - **AC6** — Local `--realistic-provider --gate` prints `gate=pass` with the absolute
-  ceiling line present (`budget_absolute_p99_ns=1666666`); no budget/corpus/script
-  byte changed (diff confined to `swift-ci.yml`, `WorkflowShapeTests.swift`,
-  `AGENTS.md`, the deleted script, and the three slice docs).
+  ceiling line present (`budget_absolute_p99_ns=1666666`); no budget/corpus/derive-script
+  byte changed and no engine behavior changed (diff confined to `swift-ci.yml`,
+  `WorkflowShapeTests.swift`, `AGENTS.md`, the comment-only `RealisticProviderBenchmark.swift`
+  edit, the deleted observation script, and the three slice docs).
 - **AC7** — Hosted proof, read at **step level** (per the dead-step-trap rule):
   three required jobs green; **12** blocking gate steps present and passing on both
   the PR-head run and the post-merge **push** run; the realistic gate prints
@@ -184,8 +241,11 @@ line like every other mode — expected steady-state, not this slice's work.
 ## Non-goals / out of scope
 
 - **Harvester shape-2 cleanup.** The `mode=realistic_relative_observation` branch in
-  `harvest-gate-corpus.sh` becomes vestigial once no step emits that line; removing
-  it is separate, riskier scope — a follow-up P3.
+  `harvest-gate-corpus.sh` is not vestigial *immediately*: while pre-slice-45 run logs
+  remain in GitHub's retention window it is still needed to harvest them correctly
+  (their logs carry only the shape-2 line). It becomes truly dead only after those
+  logs age out. Removing it — and softening its now-partially-stale comment — is
+  separate, riskier scope: a follow-up P3.
 - **Full `WorkflowShapeTests` generalization (Option D).** A `BenchmarkMode → flag`
   map + exhaustive exemption registry is a design of its own.
 - **Budget re-derivation / re-harvest.** Not needed (Decision 4).
@@ -218,8 +278,12 @@ line like every other mode — expected steady-state, not this slice's work.
   windowed corpus + 3× floor absorb runner noise.
 - **Thin realistic calibration history** — this mode's corpus rows historically came
   only via shape 2; `GateFloorTests` already enforces the floor and reproduction, so
-  the budget is honest today. Monitor for a hosted `budget_stale` and re-derive if it
-  ever surfaces (it would name itself precisely).
+  the budget is honest today. This thinness is a *historical* artifact that
+  **self-heals going forward**: after this slice every new realistic row arrives via
+  the standard shape-1 line — identical provenance to the other eleven gates — so the
+  exposure is not a permanent asymmetry, it dilutes as shape-1 rows accumulate.
+  Monitor for a hosted `budget_stale` and re-derive if one ever surfaces (it would
+  name itself precisely).
 
 ## Next step
 
