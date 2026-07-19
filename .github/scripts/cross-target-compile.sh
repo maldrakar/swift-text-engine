@@ -134,6 +134,17 @@ resolve_wasm_sdk_id_from_list() {
   return 1
 }
 
+# Pure: the `swift sdk install` argument string, with --checksum appended iff a
+# checksum is supplied. Covered by --self-test. (url/checksum contain no spaces.)
+sdk_install_display() {
+  local url="$1" checksum="$2"
+  if [[ -n "$checksum" ]]; then
+    printf 'sdk install %s --checksum %s' "$url" "$checksum"
+  else
+    printf 'sdk install %s' "$url"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Self-test
 # ---------------------------------------------------------------------------
@@ -262,6 +273,12 @@ some descriptive header with spaces"
   assert_resolver_missing "$clean_list" 9.9.9 wasm "resolve_missing_version"
   assert_resolver_missing "$clean_list" 6.1.2 wasm_embedded_typo "resolve_missing_kind"
   assert_resolver_missing "$clean_list" "" wasm "resolve_empty_version"
+
+  # Task 1 — install arg builder: --checksum appended iff a checksum is supplied
+  assert_equal "sdk install http://b --checksum abc123" \
+    "$(sdk_install_display http://b abc123)" "install_display_with_checksum"
+  assert_equal "sdk install http://b" \
+    "$(sdk_install_display http://b "")" "install_display_without_checksum"
   echo "self_test=pass"
 }
 
@@ -361,25 +378,50 @@ resolve_wasm_sdk_id() {
   printf '%s\n' "$list" | resolve_wasm_sdk_id_from_list "$version" "$kind"
 }
 
+# Install a Swift SDK with a bounded retry. download.swift.org is now in the
+# merge path, so a transient network error gets a few attempts before failing
+# red. Echoes the measured install seconds (feeds the caching decision) on
+# success. Not pure -- exercised by the hosted spike, not --self-test.
+swift_sdk_install_retry() {
+  local url="$1" checksum="$2" logfile="$3"
+  local attempts="${CROSS_TARGET_SDK_INSTALL_ATTEMPTS:-3}"
+  local backoff="${CROSS_TARGET_SDK_INSTALL_BACKOFF:-3}"
+  local i=1 start end
+  local -a args=(sdk install "$url")
+  [[ -n "$checksum" ]] && args+=(--checksum "$checksum")
+  start=$(date +%s)
+  while (( i <= attempts )); do
+    if swift "${args[@]}" >"$logfile" 2>&1; then
+      end=$(date +%s)
+      echo "cross_target_sdk_install_seconds=$((end - start)) attempts=${i}"
+      return 0
+    fi
+    echo "warn=sdk_install_attempt_failed attempt=${i}/${attempts}" >&2
+    (( i < attempts )) && sleep "$backoff"
+    i=$((i + 1))
+  done
+  return 1
+}
+
 # Resolve (and if a URL is provided, install) the SDK for a kind once. Stores
 # the resolved id and a skip reason ("" on success) in per-kind globals so both
 # packages reuse the same SDK without re-installing.
 prepare_wasm_sdk() {
-  local kind="$1" logfile="$2" sdk_id="" url_var url skip=""
+  local kind="$1" logfile="$2" sdk_id="" url checksum skip=""
   if [[ -z "$SWIFT_VERSION" ]]; then
     skip="swift_version_unresolved"
   elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
-    if [[ "$kind" == "wasm_embedded" ]]; then
-      url_var="CROSS_TARGET_WASM_EMBEDDED_SDK_URL"
-    else
-      url_var="CROSS_TARGET_WASM_SDK_URL"
-    fi
-    url="${!url_var:-}"
+    # Both kinds come from ONE swift.org bundle: installing it produces both the
+    # _wasm and _wasm-embedded ids, so both read the shared URL + checksum. The
+    # first kind installs; the second resolves the already-installed id and does
+    # not re-install.
+    url="${CROSS_TARGET_WASM_SDK_URL:-}"
+    checksum="${CROSS_TARGET_WASM_SDK_CHECKSUM:-}"
     if [[ -z "$url" ]]; then
       skip="sdk_unavailable"
     else
-      echo "cross_target_command target=${kind} cmd=\"swift sdk install ${url}\""
-      if ! swift sdk install "$url" >"${logfile}.install" 2>&1; then
+      echo "cross_target_command target=${kind} cmd=\"swift $(sdk_install_display "$url" "$checksum")\""
+      if ! swift_sdk_install_retry "$url" "$checksum" "${logfile}.install"; then
         skip="sdk_install_failed"
         print_log_tail "${kind}-sdk-install" "${logfile}.install"
       elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
