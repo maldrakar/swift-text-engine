@@ -297,9 +297,10 @@ in-container.
 
 ### 2. `.github/workflows/swift-ci.yml`
 - **Keep** the job id/name `wasm-cross-target-observation` / `WASM cross-target
-  observation` (Decision 5 — no ruleset churn this slice). The step likewise keeps its
-  name; it stays **not** `continue-on-error` (it never was) and keeps the docs-only
-  guard.
+  observation` (Decision 5 — the *job name is the required context*, so no ruleset
+  churn). The *step* may be renamed for honesty (`Observe …` → `Compile …`) — a step
+  name is **not** a required context, so this is free; it stays **not**
+  `continue-on-error` (it never was) and keeps the docs-only guard.
 - Provide `CROSS_TARGET_WASM_SDK_URL` + `CROSS_TARGET_WASM_SDK_CHECKSUM` (the pinned
   6.2.1 bundle) to the compile step's env.
 - **Spike-decided (Decision 7):** if the measured download warrants it, add
