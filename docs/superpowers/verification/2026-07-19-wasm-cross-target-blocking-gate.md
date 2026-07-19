@@ -116,18 +116,102 @@ workflow-shape test, the three slice docs (spec, plan, this verification
 record), and `AGENTS.md`. No `Sources/TextEngineCore` or
 `Sources/TextEngineReferenceProviders` change anywhere in the branch.
 
-### Task 4's pin-liveness cycle (cited, not re-run)
+### Workflow-shape pin liveness cycle (break -> red -> revert -> green)
 
-The `WorkflowShapeTests.testWasmCompileStepIsBlockingShaped` break -> red ->
-revert -> green cycle (injecting `continue-on-error: true` under the WASM
-compile step, confirming the new test fails by name with the exact
-`continueOnError` assertion message, reverting, and confirming a byte-clean
-`git diff` on the workflow file) was already performed and recorded during
-Task 4. See
-`/Users/aabanschikov/swift-text-engine/.superpowers/sdd/task-4-report.md`,
-"Step 5: liveness proof (local break -> red -> revert -> green)", for the full
-transcript. Not reproduced here to avoid re-editing a committed workflow file
-as part of a docs-only task.
+This same break -> red -> revert -> green cycle was first performed and
+recorded during Task 4. Because that record lived under the gitignored
+`.superpowers/sdd/` scratch path, it would never exist in a clone of this
+repo — so this task re-ran the cycle from scratch, against the current tree,
+and captures the real output inline below instead of citing that path.
+
+**Step 1 — confirm green on the unmodified workflow:**
+
+```
+$ swift test --filter WorkflowShapeTests/testWasmCompileStepIsBlockingShaped
+Building for debugging...
+[0/4] Write swift-version-58A378E29CF047B.txt
+Build complete! (0.10s)
+Test Suite 'Selected tests' started at 2026-07-19 23:20:14.003.
+Test Suite 'SwiftTextEnginePackageTests.xctest' started at 2026-07-19 23:20:14.004.
+Test Suite 'WorkflowShapeTests' started at 2026-07-19 23:20:14.004.
+Test Case '-[ViewportBenchmarksTests.WorkflowShapeTests testWasmCompileStepIsBlockingShaped]' started.
+Test Case '-[ViewportBenchmarksTests.WorkflowShapeTests testWasmCompileStepIsBlockingShaped]' passed (0.001 seconds).
+Test Suite 'WorkflowShapeTests' passed at 2026-07-19 23:20:14.005.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+```
+
+**Step 2 — inject `continue-on-error: true` under the WASM compile step's
+`if:` line** (`.github/workflows/swift-ci.yml`):
+
+```diff
+       - name: Compile cross-target packages for WASM
+         if: steps.change-scope.outputs.docs_only_pr != 'true'
++        continue-on-error: true
+         env:
+           CROSS_TARGET_WASM_SDK_URL: https://download.swift.org/swift-6.2.1-release/wasm-sdk/swift-6.2.1-RELEASE/swift-6.2.1-RELEASE_wasm.artifactbundle.tar.gz
+           CROSS_TARGET_WASM_SDK_CHECKSUM: 482b9f95462b87bedfafca94a092cf9ec4496671ca13b43745097122d20f18af
+```
+
+**Step 3 — re-run the same filtered test; it must fail by name, with the
+exact `continueOnError` assertion message:**
+
+```
+$ swift test --filter WorkflowShapeTests/testWasmCompileStepIsBlockingShaped
+Building for debugging...
+[0/4] Write swift-version-58A378E29CF047B.txt
+Build complete! (0.07s)
+Test Suite 'Selected tests' started at 2026-07-19 23:20:30.970.
+Test Suite 'SwiftTextEnginePackageTests.xctest' started at 2026-07-19 23:20:30.971.
+Test Suite 'WorkflowShapeTests' started at 2026-07-19 23:20:30.971.
+Test Case '-[ViewportBenchmarksTests.WorkflowShapeTests testWasmCompileStepIsBlockingShaped]' started.
+/Users/aabanschikov/swift-text-engine/Tests/ViewportBenchmarksTests/WorkflowShapeTests.swift:326: error: -[ViewportBenchmarksTests.WorkflowShapeTests testWasmCompileStepIsBlockingShaped] : XCTAssertNil failed: "true" - .github/workflows/swift-ci.yml: the WASM compile step must not be continue-on-error — it would swallow the fail-closed WASM gate (the Slice 16 trap)
+Test Case '-[ViewportBenchmarksTests.WorkflowShapeTests testWasmCompileStepIsBlockingShaped]' failed (0.007 seconds).
+Test Suite 'WorkflowShapeTests' failed at 2026-07-19 23:20:30.978.
+	 Executed 1 test, with 1 failure (0 unexpected) in 0.007 (0.007) seconds
+```
+
+The failure fires on exactly the injected line (`WorkflowShapeTests.swift:326`,
+the `XCTAssertNil(step.continueOnError, ...)` assertion) and names the test
+(`testWasmCompileStepIsBlockingShaped`) and the reason (`must not be
+continue-on-error — it would swallow the fail-closed WASM gate`) — proof the
+pin is live, not vacuously passing.
+
+**Step 4 — revert:**
+
+```
+$ git checkout .github/workflows/swift-ci.yml
+Updated 1 path from the index
+$ git diff .github/workflows/swift-ci.yml
+$ echo "DIFF_EMPTY=$?"
+DIFF_EMPTY=0
+```
+
+**Step 5 — re-run the filtered test again; confirm green:**
+
+```
+$ swift test --filter WorkflowShapeTests/testWasmCompileStepIsBlockingShaped
+Building for debugging...
+[0/4] Write swift-version-58A378E29CF047B.txt
+Build complete! (0.07s)
+Test Suite 'Selected tests' started at 2026-07-19 23:20:43.660.
+Test Suite 'SwiftTextEnginePackageTests.xctest' started at 2026-07-19 23:20:43.660.
+Test Suite 'WorkflowShapeTests' started at 2026-07-19 23:20:43.660.
+Test Case '-[ViewportBenchmarksTests.WorkflowShapeTests testWasmCompileStepIsBlockingShaped]' started.
+Test Case '-[ViewportBenchmarksTests.WorkflowShapeTests testWasmCompileStepIsBlockingShaped]' passed (0.001 seconds).
+Test Suite 'WorkflowShapeTests' passed at 2026-07-19 23:20:43.661.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+```
+
+**Step 6 — confirm the probe left no residue:**
+
+```
+$ git status --short
+$ echo "EXIT=$?"
+EXIT=0
+```
+
+Empty output — the working tree is byte-clean after the cycle; the temporary
+`continue-on-error: true` edit never reached a commit.
 
 ---
 
