@@ -5,48 +5,63 @@
 import Foundation
 import XCTest
 
-// The shape this pins is the one the Slice 16 dead-step trap destroyed once already: a
-// `continue-on-error` step swallows EVERY non-zero exit, so a gated step under it is
-// budget-blind AND failure-blind. Slice 39 worked around that with two steps -- a bare
-// correctness run plus an observational gated run -- and Slice 40 collapsed them into one
-// blocking step. Nothing else in the repo reads swift-ci.yml, so without this test the
-// collapse is verified exactly once, by hand, into a verification record: the failure mode
-// GateFloorTests.swift was created to end.
+// The shape these tests pin is the one the Slice 16 dead-step trap destroyed once
+// already: a `continue-on-error` step swallows EVERY non-zero exit, so a gated step under
+// it is budget-blind AND failure-blind. Nothing else in the repo reads swift-ci.yml, so
+// without these tests each gate's blocking shape is verified exactly once, by hand, into a
+// verification record: the failure mode GateFloorTests.swift was created to end.
 //
-// Scoped to --point-geometry-query on purpose, and NOT to `BenchmarkMode.allCases where
-// isGateable`. That quantifier is false today for 3 of the 12 gateable modes, so a test
-// written against it would be red for reasons unrelated to this slice -- and `swift test`
-// is a blocking CI step, so it would fail the required job:
-//   * .pipeline has no flag at all; it is the default mode, run as a bare `--gate`.
-//   * .realisticProvider is deliberately never run with `--gate` in CI (AGENTS.md,
-//     "## Gate budgets"): its step is PR-only and continue-on-error.
-//   * there is no BenchmarkMode -> flag mapping to match against; BenchmarkMode exposes
-//     only snake_case `outputName`, while the flags live as hand-written `case` labels
-//     inside BenchmarkOptions.parse.
-// Generalizing to every CI-gated mode needs a `flagName` property, a named-and-justified
-// exemption set, and a test pinning the two together -- a design of its own.
+// `pinnedGateSteps` is a small EXPLICIT table of the gate steps whose shape is pinned
+// (currently --point-geometry-query and --realistic-provider; a gate joins by hand when it
+// is promoted). It is deliberately NOT `BenchmarkMode.allCases where isGateable`: that
+// quantifier is false for the `.pipeline` default mode, which has no flag at all (it runs
+// as a bare `--gate`), and there is no BenchmarkMode -> flag mapping to match against --
+// BenchmarkMode exposes only snake_case `outputName`, while the flags live as hand-written
+// `case` labels inside BenchmarkOptions.parse. Generalizing to every CI-gated mode needs a
+// `flagName` property, a named-and-justified exemption set, and a test pinning the two
+// together -- a design of its own.
 
 private let workflowPath = ".github/workflows/swift-ci.yml"
 private let hostJobKey = "host-tests-and-benchmark-gate"
-private let pointGeometryFlag = "--point-geometry-query"
-private let pointGeometryStepName = "Run point geometry query benchmark gate"
-private let pointQueryStepName = "Run point query benchmark gate"
-private let memoryShapeStepName = "Run memory shape diagnostic"
 private let docsOnlyGuard = "steps.change-scope.outputs.docs_only_pr != 'true'"
+private let memoryShapeStepName = "Run memory shape diagnostic"
+private let pointGeometryFlag = "--point-geometry-query"
+private let realisticFlag = "--realistic-provider"
 
-// The step's exact shape IS the invariant, so the test pins the whole command rather than
-// probing it for tokens. A step-level token count cannot see inside one step's payload,
-// where both remaining ways to disarm the gate live: a `|` block scalar invoking the
-// benchmark twice (one step, two runs -- double-weighting the mode in every future harvest
-// of that run), and a trailing `|| true`, which is continue-on-error by another spelling
-// and sails past a check that only reads the flag key.
-//
-// This deliberately couples the test to swift-ci.yml's text: changing the scratch path or
-// the flag order is then a two-line edit with a test naming the mismatch, which is the
-// intended behavior here.
-private let pointGeometryCommand =
+// The exact whitespace-joined `run:` payload every gate step must carry. Pinned as a
+// whole command rather than probed for tokens: a step-level token count cannot see a
+// second invocation inside one `|` block scalar or a trailing `|| true`, and both
+// disarm the gate.
+private func gateCommand(_ flag: String) -> String {
     "swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks "
-        + "-- --point-geometry-query --gate"
+        + "-- \(flag) --gate"
+}
+
+// One row per gate step whose blocking shape is pinned, with the ordering anchors it
+// must sit between. A gate joins this table by hand when it is promoted (see the header
+// note above).
+private struct GateStepSpec {
+    let flag: String            // the mode flag whose presence identifies the step
+    let stepName: String        // the exact `- name:` the step must carry
+    let command: String         // the exact whitespace-joined `run:` payload
+    let afterStepName: String   // the step it must sit after
+    let beforeStepName: String  // the step it must sit before
+}
+
+private let pinnedGateSteps: [GateStepSpec] = [
+    GateStepSpec(
+        flag: pointGeometryFlag,
+        stepName: "Run point geometry query benchmark gate",
+        command: gateCommand(pointGeometryFlag),
+        afterStepName: "Run point query benchmark gate",
+        beforeStepName: memoryShapeStepName),
+    GateStepSpec(
+        flag: realisticFlag,
+        stepName: "Run realistic provider benchmark gate",
+        command: gateCommand(realisticFlag),
+        afterStepName: "Run point geometry query benchmark gate",
+        beforeStepName: memoryShapeStepName),
+]
 
 // Twin of `repositoryRoot()` in GateFloorTests.swift -- the same three-parent walk from
 // #filePath. Duplicated rather than shared because both are file-scope `private` helpers
@@ -95,11 +110,9 @@ private func value(of key: String, in line: String) -> String? {
 // their keep differently. `value(of:)` only matches an exact 8-space-anchored key prefix
 // like `        continue-on-error:`, so a comment line -- 8 spaces then `#` -- can never
 // satisfy that regardless of what text follows the `#`; the top-level guard at the head of
-// this function's per-line loop is redundant for key detection. swift-ci.yml:145-148 is a
-// still-present, concrete example of exactly that kind of text: a comment on the PR-only
-// realistic-provider observation step whose last line reads "...the step is
-// continue-on-error." in prose -- and it is the key-anchored prefix match, not comment
-// exclusion, that keeps it from being misread as the key there.
+// this function's per-line loop is redundant for key detection. (If a step ever carries a
+// prose comment that happens to contain "continue-on-error", it is that key-anchored
+// prefix match, not comment exclusion, that keeps the prose from being misread as the key.)
 // What comment exclusion DOES protect is the run-payload collection loop a few lines down:
 // a `#` line indented past 8 inside a `run: |` block body would otherwise be appended as a
 // spurious run TOKEN, and this file compares a step's run payload for token EQUALITY, so
@@ -178,100 +191,113 @@ private func stepNamed(_ name: String, in steps: [WorkflowStep]) -> WorkflowStep
 
 final class WorkflowShapeTests: XCTestCase {
 
-    // Every test resolves the point-geometry steps by FLAG, not by name, and asserts the
-    // set is non-empty first. A test that quantified over an empty set would be vacuously
-    // green the day someone deleted the gate outright.
-    private func pointGeometrySteps() throws -> [WorkflowStep] {
-        let matches = try hostJobSteps().filter { $0.runTokens.contains(pointGeometryFlag) }
+    // Resolve a spec's step(s) by FLAG, asserting the set is non-empty first: a test that
+    // quantified over an empty set would be vacuously green the day the gate was deleted.
+    private func steps(for spec: GateStepSpec, in all: [WorkflowStep]) -> [WorkflowStep] {
+        let matches = all.filter { $0.runTokens.contains(spec.flag) }
         XCTAssertFalse(
             matches.isEmpty,
-            "\(workflowPath): no step in \(hostJobKey) runs \(pointGeometryFlag) — the "
-                + "eleventh blocking gate is gone")
+            "\(workflowPath): no step in \(hostJobKey) runs \(spec.flag) — the "
+                + "\"\(spec.stepName)\" gate is gone")
         return matches
     }
 
-    // Invariant 1. Two steps ran this mode while its budget was observational: a bare
-    // correctness run and a continue-on-error gated run. One step cannot be both, so the
-    // split was correct scaffolding -- and it had to end as one step, not one and a half.
-    // A second printing step also puts two rows per scenario into every future harvest of
-    // that run and double-weights it in median().
-    func testExactlyOneStepRunsThePointGeometryQueryBenchmark() throws {
-        let matches = try pointGeometrySteps()
-        XCTAssertEqual(
-            matches.count, 1,
-            "\(workflowPath): \(matches.count) steps run \(pointGeometryFlag), want exactly "
-                + "1 — \(matches.map(\.name))")
-    }
-
-    // Invariant 2. Exact equality, not `runTokens.contains("--gate")`. Subsumes the --gate
-    // check and additionally forecloses a double invocation inside one `|` block scalar and
-    // a trailing `|| true`, both of which a token probe reports as green. It does NOT
-    // subsume invariant 1: this constrains the matched step, not the existence of a second
-    // one, so the two are complementary.
-    func testThePointGeometryStepRunsExactlyTheExpectedCommand() throws {
-        for step in try pointGeometrySteps() {
+    // Invariant 1. Exactly one step runs each pinned flag. Two steps ran a mode while its
+    // budget was observational (a bare correctness run + a continue-on-error gated run);
+    // one step cannot be both, and a second printing step double-weights the mode in every
+    // future harvest of that run.
+    func testExactlyOneStepRunsEachPinnedGate() throws {
+        let all = try hostJobSteps()
+        for spec in pinnedGateSteps {
+            let matches = steps(for: spec, in: all)
             XCTAssertEqual(
-                step.runTokens.joined(separator: " "), pointGeometryCommand,
-                "\(step.name): run payload is not the expected single gated command.\n"
-                    + "  want: \(pointGeometryCommand)\n"
-                    + "  got:  \(step.runTokens.joined(separator: " "))")
+                matches.count, 1,
+                "\(workflowPath): \(matches.count) steps run \(spec.flag), want exactly 1 — "
+                    + "\(matches.map(\.name))")
         }
     }
 
-    // Invariant 3. THE one that matters: continue-on-error swallows every non-zero exit,
-    // so a gated step under it can fail neither on budget nor on failureCount != 0.
-    func testThePointGeometryStepIsNotContinueOnError() throws {
-        for step in try pointGeometrySteps() {
-            XCTAssertNil(
-                step.continueOnError,
-                "\(step.name): carries continue-on-error: \(step.continueOnError ?? "") — a "
-                    + "continue-on-error step cannot be a gate; it swallows budget misses, "
-                    + "correctness failures and crashes alike")
+    // Invariant 2. Exact command equality, not `runTokens.contains("--gate")`. Subsumes the
+    // --gate check and forecloses a double invocation inside one `|` block scalar and a
+    // trailing `|| true`, both of which a token probe reports as green.
+    func testEachPinnedGateRunsExactlyTheExpectedCommand() throws {
+        let all = try hostJobSteps()
+        for spec in pinnedGateSteps {
+            for step in steps(for: spec, in: all) {
+                XCTAssertEqual(
+                    step.runTokens.joined(separator: " "), spec.command,
+                    "\(step.name): run payload is not the expected single gated command.\n"
+                        + "  want: \(spec.command)\n"
+                        + "  got:  \(step.runTokens.joined(separator: " "))")
+            }
         }
     }
 
-    // Invariant 4. The same docs-only guard every sibling gate carries, asserted as the
-    // literal expression so no other step's shape can turn this test red or green.
-    func testThePointGeometryStepCarriesTheDocsOnlyGuard() throws {
-        for step in try pointGeometrySteps() {
-            XCTAssertEqual(
-                step.ifCondition, docsOnlyGuard,
-                "\(step.name): does not carry the sibling docs-only guard")
+    // Invariant 3. THE one that matters: continue-on-error swallows every non-zero exit, so
+    // a gated step under it can fail neither on budget nor on failureCount != 0.
+    func testNoPinnedGateIsContinueOnError() throws {
+        let all = try hostJobSteps()
+        for spec in pinnedGateSteps {
+            for step in steps(for: spec, in: all) {
+                XCTAssertNil(
+                    step.continueOnError,
+                    "\(step.name): carries continue-on-error: \(step.continueOnError ?? "") — "
+                        + "a continue-on-error step cannot be a gate; it swallows budget "
+                        + "misses, correctness failures and crashes alike")
+            }
+        }
+    }
+
+    // Invariant 4. The same docs-only guard every sibling gate carries.
+    func testEachPinnedGateCarriesTheDocsOnlyGuard() throws {
+        let all = try hostJobSteps()
+        for spec in pinnedGateSteps {
+            for step in steps(for: spec, in: all) {
+                XCTAssertEqual(
+                    step.ifCondition, docsOnlyGuard,
+                    "\(step.name): does not carry the sibling docs-only guard")
+            }
         }
     }
 
     // Invariant 5. The name is the only place a reader learns whether the step is blocking,
-    // so a stale "observational"/"until Slice 40" qualifier is a lie in the log of every run.
-    func testThePointGeometryStepIsNamedForItsSiblings() throws {
-        for step in try pointGeometrySteps() {
-            XCTAssertEqual(
-                step.name, pointGeometryStepName,
-                "step running \(pointGeometryFlag) is named \"\(step.name)\", want "
-                    + "\"\(pointGeometryStepName)\"")
+    // so a stale "observational" qualifier is a lie in the log of every run.
+    func testEachPinnedGateIsNamedForItsSiblings() throws {
+        let all = try hostJobSteps()
+        for spec in pinnedGateSteps {
+            for step in steps(for: spec, in: all) {
+                XCTAssertEqual(
+                    step.name, spec.stepName,
+                    "step running \(spec.flag) is named \"\(step.name)\", want "
+                        + "\"\(spec.stepName)\"")
+            }
         }
     }
 
-    // Invariant 6. All eleven blocking latency gates stay contiguous, ahead of the
-    // diagnostics.
-    func testThePointGeometryStepSitsBetweenThePointQueryGateAndTheMemoryShapeDiagnostic() throws {
-        let steps = try hostJobSteps()
-        let matches = steps.filter { $0.runTokens.contains(pointGeometryFlag) }
-        XCTAssertFalse(matches.isEmpty)
+    // Invariant 6. Every pinned gate stays contiguous, ahead of the diagnostics, in the
+    // order point-query < point-geometry < realistic < memory-shape.
+    func testEachPinnedGateSitsBetweenItsAnchors() throws {
+        let all = try hostJobSteps()
+        for spec in pinnedGateSteps {
+            let matches = all.filter { $0.runTokens.contains(spec.flag) }
+            XCTAssertFalse(matches.isEmpty, "no step runs \(spec.flag)")
 
-        guard let pointQuery = stepNamed(pointQueryStepName, in: steps),
-              let memoryShape = stepNamed(memoryShapeStepName, in: steps) else {
-            XCTFail("\(workflowPath): missing \"\(pointQueryStepName)\" or "
-                + "\"\(memoryShapeStepName)\" — the ordering anchors are gone")
-            return
-        }
+            guard let after = stepNamed(spec.afterStepName, in: all),
+                  let before = stepNamed(spec.beforeStepName, in: all) else {
+                XCTFail("\(workflowPath): missing \"\(spec.afterStepName)\" or "
+                    + "\"\(spec.beforeStepName)\" — the ordering anchors for \(spec.flag) "
+                    + "are gone")
+                continue
+            }
 
-        for step in matches {
-            XCTAssertLessThan(
-                pointQuery.index, step.index,
-                "\(step.name) must sit after \"\(pointQueryStepName)\"")
-            XCTAssertLessThan(
-                step.index, memoryShape.index,
-                "\(step.name) must sit before \"\(memoryShapeStepName)\"")
+            for step in matches {
+                XCTAssertLessThan(
+                    after.index, step.index,
+                    "\(step.name) must sit after \"\(spec.afterStepName)\"")
+                XCTAssertLessThan(
+                    step.index, before.index,
+                    "\(step.name) must sit before \"\(spec.beforeStepName)\"")
+            }
         }
     }
 }
