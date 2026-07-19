@@ -497,7 +497,9 @@ prepare_wasm_sdk() {
   esac
 }
 
-# Build one package for a WASM kind using the prepared SDK. Always non-blocking.
+# Build one package for a WASM kind using the prepared SDK, with blocking
+# status per-kind: wasm always blocks, wasm_embedded blocks by default but is
+# demotable via CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false.
 compile_wasm_package_for_kind() {
   local kind="$1" pkg="$2" package_target="$3" logfile="$4" sdk_id skip scratch_path result
   LAST_BLOCKING="$(wasm_kind_blocking "$kind")"
