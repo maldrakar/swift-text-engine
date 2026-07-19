@@ -276,21 +276,29 @@ committed. The only file this task adds is this document itself.
 
 ---
 
-## Hosted CI — Pending
+## Hosted CI — Discharged
 
-**Not yet discharged.** This section is a placeholder for the AC7 hosted-proof
-follow-up, matching the Slices 24-43 pattern of anchoring proof in the
-merged-code `push` run rather than the PR-head run alone. To be filled in
-once both runs are read **at step level** (never trusting a job-level
-`continue-on-error` conclusion, per the Slice 16 dead-step-trap rule in
-`AGENTS.md`):
+**Discharged 2026-07-19.** Both runs were read **at step level** (never trusting a
+job-level `continue-on-error` conclusion, per the Slice 16 dead-step-trap rule in
+`AGENTS.md`), matching the Slices 24-43 pattern of anchoring proof in the merged-code
+`push` run rather than the PR-head run alone. PR #99 merged as commit `ec265d3`.
+
+The realistic-provider observation step is **PR-only** (gated on the `pull_request`
+event, so it does not run on the `push` build) **and** writes its benchmark output to a
+temp file, so it emits no `gate=`/`checksum=` line in either run's log — it is not part
+of this proof. The docs-only fast path was correctly **not** taken by either run: the
+merge diff carries a Swift test, so the heavy path ran in both.
 
 | | PR-head run | Post-merge push run |
 |---|---|---|
-| Run ID / commit | *pending* | *pending* |
-| Three required jobs | *pending* | *pending* |
-| Eleven blocking gate steps | *pending* | *pending* |
-| Gate tally | *pending* | *pending* |
-| Host tests | *pending — expect `Executed 311 tests, with 0 failures`* | *pending* |
-| `testEveryCommittedBudgetReproducesFromCorpus` | *pending — expect pass* | *pending* |
-| 45-row checksum set | *pending — expect baseline-identical* | *pending* |
+| Run ID / commit | 29679693875 / `2b5e132` | 29680120202 / `ec265d3` (merge of PR #99) |
+| Trigger | `pull_request` (PR #99) | `push` to `main` |
+| Three required jobs (step level) | all ✓ — host 88173481190, iOS 88173481198, WASM 88173481185 | all ✓ — host 88174634071, iOS 88174634067, WASM 88174634069 |
+| Eleven blocking gate steps | all ✓ | all ✓ |
+| Gate tally | 45× `gate=pass`, 0 fail (40 hot-path @ `budget_absolute_p99_ns=1666666`, 5 bulk `=exempt`) | 45× `gate=pass`, 0 fail (40 hot-path @ 1666666, 5 bulk `=exempt`) |
+| Host tests | `Executed 311 tests, with 0 failures` | `Executed 311 tests, with 0 failures` |
+| `testEveryCommittedBudgetReproducesFromCorpus` | passed (0.068 s) | passed (0.067 s) |
+| Checksum set | 53 `checksum=` lines (45 gated + 5 `memory_shape` + 3 `memory_observation`) | 53 `checksum=` lines, **byte-identical to PR-head** (tuple diff empty) and to the local Task 3 set (== Slice 43 baseline; checksums are deterministic/workload-derived) |
+
+The merged-code `push` run **29680120202** anchors the proof. Both halves green at step
+level; the new reproduction test passed hosted, and no gate reddened.
