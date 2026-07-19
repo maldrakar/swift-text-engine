@@ -14,9 +14,10 @@ Task 3.
 output captured directly by this task, run against the current tree
 (`c229bb7`).
 
-> **Hosted proof filled post-merge.** The `## Hosted CI — Pending` section below
-> is completed by a docs-only follow-up once this branch merges, citing the
-> PR-head run and the post-merge `push` run.
+> **Hosted proof discharged post-merge.** The `## Hosted CI — Discharged (AC7)`
+> section below was filled by this docs-only follow-up after PR #102 merged,
+> citing the PR-head run (`29692848870`) and the post-merge `push` run
+> (`29694705807`), both read at step level.
 
 ---
 
@@ -200,29 +201,54 @@ change, zero engine/budget behavior touched, consistent with `9630bfb`'s commit
 message ("Zero engine behavior change: the mode already honours --gate") and
 `c229bb7`'s ("Comment/doc only — no code, budget, or behavior change").
 
-## Hosted CI — Pending
+## Hosted CI — Discharged (AC7)
 
-AC7 not yet discharged — filled in by a docs-only follow-up once this branch
-merges. Required (per `AGENTS.md`'s required-check policy and the standing
-"read step logs, not job conclusion" rule — a `continue-on-error` step can
-conclude its job green while the step itself failed, the Slice 16 dead-step
-trap):
+AC7 discharged post-merge by this docs-only follow-up (PR #102 merged as
+`413390d`, 2026-07-19). Both runs read at **step level** via `gh run view <id>
+--log`, not by job conclusion — a `continue-on-error` step can conclude its job
+green while the step itself failed (the Slice 16 dead-step trap), so the job
+context alone is not proof.
 
-- All three required job contexts green on both runs: `Host tests and
-  benchmark gate`, `iOS cross-target compile`, `WASM cross-target observation`.
-- All twelve blocking gate steps present (not skipped) and passing at **step
-  level** on both the PR-head run and the post-merge `push` run: synthetic,
-  variable-height, variable-height-mutation, structural-mutation,
-  bulk-structural-mutation, line-query, line-geometry-query, column-query,
-  column-geometry-query, point-query, point-geometry-query, and — new this
-  slice — **realistic-provider**.
-- The realistic-provider step specifically reports `gate=pass` (not merely
-  "step succeeded") at step level.
-- `swift test` green (host tests step) on both runs.
+**PR-head run:** `29692848870` — `pull_request`, branch
+`slice-45-realistic-provider-ci-gate-promotion`, commit `144e08e`.
+**Post-merge `push` run:** `29694705807` — `push` to `main`, merge commit
+`413390d`.
 
-PR-head run: `<PENDING — fill after PR opens and CI completes>`
-Post-merge `push` run: `<PENDING — fill after merge>`
+Both runs, confirmed at step level:
 
-Both to be confirmed via `gh run view <id> --log` (or equivalent), reading step
-logs directly rather than trusting job conclusion, per this project's standing
-verification discipline.
+- **All three required job contexts green on both runs:** `Host tests and
+  benchmark gate` = success, `iOS cross-target compile` = success, `WASM
+  cross-target observation` = success (3/3 on each run).
+- **All twelve blocking gate steps present (not skipped) and passing at step
+  level** on both runs — host-job steps 8–19, each `conclusion=success`:
+  synthetic (8), variable-height (9), variable-height-mutation (10),
+  structural-mutation (11), bulk-structural-mutation (12), line-query (13),
+  line-geometry-query (14), column-query (15), column-geometry-query (16),
+  point-query (17), point-geometry-query (18), and — new this slice —
+  **realistic-provider (step 19)**. The removed `Observe realistic provider
+  relative performance` step is absent from both runs; the `Complete docs-only
+  PR` step is `skipped` (the heavy path ran), and `Run host tests` (step 7),
+  `Run memory shape diagnostic` (20), and `Run RSS memory observation
+  diagnostic` (21) are all `success`.
+- **The realistic-provider step reports `gate=pass` at step level** on both
+  runs (not merely "step succeeded"), with the fixed 60-FPS absolute ceiling
+  and a deterministic checksum matching the local run:
+  - PR-head (job `88208517525`): `mode=realistic_provider ... p95_ns=13157
+    p99_ns=13462 ... budget_absolute_p99_ns=1666666 headroom_absolute_p99=123.8x
+    gate=pass checksum=756321289736960`
+  - Post-merge `push` (job `88213341178`): `mode=realistic_provider ...
+    p95_ns=13079 p99_ns=13445 ... budget_absolute_p99_ns=1666666
+    headroom_absolute_p99=124.0x gate=pass checksum=756321289736960`
+  - `checksum=756321289736960` is byte-identical across both hosted runs **and**
+    the local run above — the mode's fold hashes byte offsets/lengths/content,
+    not timing, so it is deterministic across platform and run. Hosted p95
+    (~13 µs) is ~2.4× the local p95 (~5.4 µs), consistent with `AGENTS.md`'s
+    "hosted Linux x86_64 runs 2–3× slower than local macOS" calibration note;
+    absolute headroom (~124×) stays far under the 1.67 ms frame ceiling.
+- **`gate=pass` count = 46, `gate=fail` count = 0** across the host-job log on
+  each run (the 45 pre-existing gated scenarios plus realistic-provider's one
+  new line).
+- **`swift test` green (host tests step) on both runs** — every `Executed N
+  tests` suite line reports `0 failures`.
+
+AC7 fully satisfied on both the PR-head and post-merge `push` runs.
