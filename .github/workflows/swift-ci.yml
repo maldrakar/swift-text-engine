@@ -131,6 +131,10 @@ jobs:
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --point-geometry-query --gate
 
+      - name: Run realistic provider benchmark gate
+        if: steps.change-scope.outputs.docs_only_pr != 'true'
+        run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --realistic-provider --gate
+
       - name: Run memory shape diagnostic
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-shape
@@ -138,48 +142,6 @@ jobs:
       - name: Run RSS memory observation diagnostic
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks -- --memory-observation
-
-      - name: Observe realistic provider relative performance
-        if: github.event_name == 'pull_request' && steps.change-scope.outputs.docs_only_pr != 'true'
-        continue-on-error: true
-        # The host job runs in a container, where GitHub executes `run` steps
-        # under `sh`. This step uses `set -o pipefail`, a bashism, so it must
-        # request bash explicitly or it fails at line 1 (silently, since the
-        # step is continue-on-error).
-        shell: bash
-        env:
-          REALISTIC_RELATIVE_OBSERVATION_THRESHOLD: "1.221556"
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          echo "observation_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          echo "runner_image=${ImageOS:-unknown}"
-          swift --version 2>&1 | sed -n '1p' || true
-          git --version
-          uname -a
-          cat /etc/os-release || true
-          lscpu || true
-
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*'
-          git cat-file -e "${BASE_SHA}^{commit}"
-          git cat-file -e "${HEAD_SHA}^{commit}"
-
-          work_root="${RUNNER_TEMP}/realistic-relative"
-          rm -rf "${work_root}"
-          mkdir -p "${work_root}"
-          git worktree add --detach "${work_root}/base" "${BASE_SHA}"
-          git worktree add --detach "${work_root}/head" "${HEAD_SHA}"
-
-          ./.github/scripts/realistic-relative-observation.sh \
-            --base-dir "${work_root}/base" \
-            --head-dir "${work_root}/head" \
-            --base-sha "${BASE_SHA}" \
-            --head-sha "${HEAD_SHA}" \
-            --threshold "${REALISTIC_RELATIVE_OBSERVATION_THRESHOLD}"
-
-          echo "observation_finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   ios-cross-target-compile:
     name: iOS cross-target compile
