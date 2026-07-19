@@ -138,11 +138,13 @@ a located cell, fewer on a blank line or a failure path), so its cost class equa
   (with a bijective `derived.count == everyGatedBudget().count` cardinality check), so a
   committed budget that no longer reproduces from the corpus fails the build.
   `WorkflowShapeTests.swift` is the third guard: it reads
-  `.github/workflows/swift-ci.yml` and pins the point-geometry-query gate step's
-  shape — exactly one step carries the flag, its `run:` payload **equals** the
-  expected gated command, it is not `continue-on-error`, it carries the docs-only
-  guard, it is named `Run point geometry query benchmark gate`, and it sits
-  between the point-query gate and the memory-shape diagnostic. Equality rather
+  `.github/workflows/swift-ci.yml` and pins each promoted gate step's shape from a
+  small explicit `pinnedGateSteps` table (currently the point-geometry-query and
+  realistic-provider gates) — for each: exactly one step carries the flag, its `run:`
+  payload **equals** the expected gated command, it is not `continue-on-error`, it
+  carries the docs-only guard, it is named for its siblings, and it sits between its
+  ordering anchors (the tail order is point-query < point-geometry < realistic <
+  memory-shape). Equality rather
   than a token probe: a step-level count cannot see a second invocation or a
   trailing `|| true` inside one step's payload, and both disarm the gate. There is
   no YAML parser in reach (the package is zero-dependency and Foundation ships
@@ -179,6 +181,7 @@ swift run -c release ViewportBenchmarks -- --column-query --gate   # x->cell wit
 swift run -c release ViewportBenchmarks -- --column-geometry-query --gate   # x->cell+box+fraction within-line blocking CI gate
 swift run -c release ViewportBenchmarks -- --point-query --gate   # (x,y)->(line,cell) 2D composite CI gate
 swift run -c release ViewportBenchmarks -- --point-geometry-query --gate   # (x,y)->(line+box+fraction, cell+box+fraction) 2D geometry blocking CI gate
+swift run -c release ViewportBenchmarks -- --realistic-provider --gate   # realistic 100k/10MB scroll compute blocking CI gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --help            # all flags
@@ -223,14 +226,13 @@ Three jobs:
   (blocking) → `--line-geometry-query --gate` (blocking)
   → `--column-query --gate` (blocking)
   → `--column-geometry-query --gate` (blocking) → `--point-query --gate`
-  (blocking) → `--point-geometry-query --gate` (blocking) →
+  (blocking) → `--point-geometry-query --gate` (blocking)
+  → `--realistic-provider --gate` (blocking) →
   `--memory-shape`
-  → `--memory-observation` → realistic relative
-  observation (PR-only,
-  `continue-on-error`). Eleven blocking gates: synthetic, static variable-height,
+  → `--memory-observation`. Twelve blocking gates: synthetic, static variable-height,
   mutation variable-height, structural-mutation, bulk-structural-mutation,
   line-query, line-geometry-query, column-query, column-geometry-query,
-  point-query, and point-geometry-query — all **fail the job on perf
+  point-query, point-geometry-query, and realistic-provider — all **fail the job on perf
   regression**.
   Budget calibration is not restated here — see `## Gate budgets` below. SwiftPM
   build artifacts use `/tmp/text-engine-host-build`, not workspace `.build`.
@@ -415,13 +417,16 @@ a *new line shape* (as it did for `realistic_provider`): previously-harvested ru
 then hold rows the corpus never captured, so the corpus must be **rebuilt** from a
 full sweep, not appended to.
 
-`--realistic-provider` is the one gated mode CI never runs with `--gate` (the
-PR-only observation step runs it bare and keeps the benchmark output in a temp
-file), so its samples reach the corpus only through the
-`mode=realistic_relative_observation` line, which the harvester knows how to read.
-That is why it was the last budget still under the floor after the rest of the
-suite had been re-derived. Every gated scenario now carries corpus rows, and
-`GateFloorTests` fails if a new one ever doesn't.
+`--realistic-provider` runs as a blocking `--gate` step like every other gated mode
+(Slice 45), so its `p95_ns=`/`p99_ns=` summary line reaches the hosted log and the
+harvester reads it as the standard shape. Before Slice 45 it was the one gated mode CI
+never ran with `--gate`: a PR-only relative-observation step printed its samples inside a
+`mode=realistic_relative_observation` line instead, which is why it was the last budget
+still under the floor after the rest of the suite had been re-derived. Those historical
+shape-2 rows remain in the corpus (append-only); the harvester still reads that line so
+pre-Slice-45 run logs still in retention harvest correctly, and that branch retires once
+they age out. Every gated scenario carries corpus rows, and `GateFloorTests` fails if a
+new one ever doesn't.
 
 **Never hand-type a budget.** Slices 27/31/33/35/37 shipped copy-pasted
 "starter budgets" that ran 815x-3000x loose, and no gate could fail for five

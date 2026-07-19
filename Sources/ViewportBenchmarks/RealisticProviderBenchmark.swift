@@ -85,14 +85,15 @@ struct RealisticLineSource: DocumentLineSource {
 // Hosted is the calibration authority: it runs 2-3x slower than local macOS, so it
 // binds. Do not hand-edit — re-derive.
 //
-// This mode's samples reach the corpus by a different route than every other gate's.
-// It is the one gated mode CI never runs with --gate: the PR-only observation step runs
-// it bare and keeps the raw benchmark output in a temp file, so no `p95_ns=` line for
-// this mode ever reaches the hosted log. Its per-repetition values ride inside the
-// `mode=realistic_relative_observation` line instead, and
-// .github/scripts/harvest-gate-corpus.sh reads them from there. That is why this mode
-// was missing from the first corpus, and why its budget was the last one in the suite
-// still sitting under the 3x floor after everything else had been re-derived.
+// This mode is gated in CI like every other: `--realistic-provider --gate` runs as a
+// blocking step (see .github/workflows/swift-ci.yml), so its
+// `mode=realistic_provider ... p95_ns=... p99_ns=...` summary line reaches the hosted log
+// and .github/scripts/harvest-gate-corpus.sh reads it as the standard shape. Before
+// Slice 45 this mode was observation-only: its samples arrived via a
+// `mode=realistic_relative_observation` line that a now-removed relative-observation step
+// printed, which is why it was the last budget in the suite still under the 3x floor after
+// everything else had been re-derived. Those historical rows remain in the corpus
+// (append-only).
 func realisticProviderScenarios() -> [RealisticProviderScenario] {
     [
         RealisticProviderScenario(
