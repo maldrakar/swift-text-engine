@@ -328,6 +328,12 @@ final class WorkflowShapeTests: XCTestCase {
             "\(workflowPath): the WASM compile step must not be continue-on-error — it "
                 + "would swallow the fail-closed WASM gate (the Slice 16 trap)")
         XCTAssertEqual(
+            step.runTokens.joined(separator: " "),
+            "./.github/scripts/cross-target-compile.sh --targets wasm",
+            "\(workflowPath): the WASM compile step's run payload must be exactly the "
+                + "cross-target script invocation — a trailing `|| true` or a second "
+                + "invocation would disarm the gate (the Slice 16 trap)")
+        XCTAssertEqual(
             step.ifCondition, docsOnlyGuard,
             "\(workflowPath): the WASM compile step must carry the docs-only guard")
     }
