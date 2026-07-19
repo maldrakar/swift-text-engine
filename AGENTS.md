@@ -219,7 +219,18 @@ wasm` installs that SDK itself (checksum-verified, bounded-retry) from
 vars to point it at a pinned swift.org bundle (see the CI job below for the
 current pin, and `## Gate budgets`-style verification records under
 `docs/superpowers/verification/` for the recompute command). Without them the
-script falls back to whatever SDK ids are already installed locally.
+script falls back to whatever SDK ids are already installed locally — and if
+that finds nothing, the WASM targets now **fail** (`result=fail
+reason=sdk_unavailable blocking=true`, `exit=1`). They no longer skip quietly:
+that is the fail-closed gate working, not a broken checkout.
+
+The resolver matches an installed SDK id against the **local toolchain
+version**, so the CI pin above only resolves on a 6.2.1 toolchain. On any other
+version (`swift --version`) that bundle will not resolve even after a
+successful install, and `--targets wasm` fails closed. To exercise the WASM
+path locally on a different toolchain, point `CROSS_TARGET_WASM_SDK_URL` at a
+swift.org bundle matching your own version; otherwise use `--self-test` (which
+needs no toolchain) and let the hosted 6.2.1 container job be the real check.
 
 ## CI (`.github/workflows/swift-ci.yml`)
 
