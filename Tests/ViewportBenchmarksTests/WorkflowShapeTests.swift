@@ -23,6 +23,7 @@ import XCTest
 
 private let workflowPath = ".github/workflows/swift-ci.yml"
 private let hostJobKey = "host-tests-and-benchmark-gate"
+private let wasmJobKey = "wasm-cross-target-observation"
 private let docsOnlyGuard = "steps.change-scope.outputs.docs_only_pr != 'true'"
 private let memoryShapeStepName = "Run memory shape diagnostic"
 private let pointGeometryFlag = "--point-geometry-query"
@@ -153,17 +154,17 @@ private func parseStep(_ block: [String], index: Int) -> WorkflowStep {
                         continueOnError: continueOnError, runTokens: runTokens)
 }
 
-// Scoped to the host job's own region -- from its 2-space key to the next one. All three
+// Scoped to a single job's own region -- from its 2-space key to the next one. All three
 // jobs indent their steps identically, and four step names (`Check out repository`,
 // `Detect PR change scope`, `Complete docs-only PR`, `Show toolchain`) repeat verbatim
 // across them, so a whole-file split would make every name lookup ambiguous.
-private func hostJobSteps() throws -> [WorkflowStep] {
+private func jobSteps(_ jobKey: String) throws -> [WorkflowStep] {
     let url = repositoryRoot().appendingPathComponent(workflowPath)
     let text = try String(contentsOf: url, encoding: .utf8)
     let allLines = text.components(separatedBy: "\n")
 
-    guard let jobStart = allLines.firstIndex(where: { $0.hasPrefix("  \(hostJobKey):") }) else {
-        XCTFail("\(workflowPath): no job keyed \(hostJobKey)")
+    guard let jobStart = allLines.firstIndex(where: { $0.hasPrefix("  \(jobKey):") }) else {
+        XCTFail("\(workflowPath): no job keyed \(jobKey)")
         return []
     }
 
@@ -183,6 +184,14 @@ private func hostJobSteps() throws -> [WorkflowStep] {
         let end = order + 1 < starts.count ? starts[order + 1] : lines.count
         return parseStep(Array(lines[start..<end]), index: order)
     }
+}
+
+private func hostJobSteps() throws -> [WorkflowStep] {
+    try jobSteps(hostJobKey)
+}
+
+private func wasmJobSteps() throws -> [WorkflowStep] {
+    try jobSteps(wasmJobKey)
 }
 
 private func stepNamed(_ name: String, in steps: [WorkflowStep]) -> WorkflowStep? {
@@ -299,5 +308,27 @@ final class WorkflowShapeTests: XCTestCase {
                     "\(step.name) must sit before \"\(spec.beforeStepName)\"")
             }
         }
+    }
+
+    // The WASM job is now a real blocking gate; pin its compile step's shape so a
+    // future `continue-on-error` cannot silently swallow a fail-closed WASM failure
+    // (the Slice 16 dead-step trap, in a different job).
+    func testWasmCompileStepIsBlockingShaped() throws {
+        let steps = try wasmJobSteps()
+        let matches = steps.filter {
+            $0.runTokens.contains("--targets") && $0.runTokens.contains("wasm")
+        }
+        XCTAssertEqual(
+            matches.count, 1,
+            "\(workflowPath): expected exactly one WASM compile step running "
+                + "--targets wasm in \(wasmJobKey)")
+        guard let step = matches.first else { return }
+        XCTAssertNil(
+            step.continueOnError,
+            "\(workflowPath): the WASM compile step must not be continue-on-error — it "
+                + "would swallow the fail-closed WASM gate (the Slice 16 trap)")
+        XCTAssertEqual(
+            step.ifCondition, docsOnlyGuard,
+            "\(workflowPath): the WASM compile step must carry the docs-only guard")
     }
 }
