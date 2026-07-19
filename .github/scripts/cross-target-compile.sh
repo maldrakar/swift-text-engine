@@ -21,6 +21,20 @@ Usage:
   cross-target-compile.sh
   cross-target-compile.sh --targets all|ios|wasm
   cross-target-compile.sh --self-test
+
+Environment:
+  CROSS_TARGET_WASM_SDK_URL          Pinned Swift SDK bundle to install for the
+  CROSS_TARGET_WASM_SDK_CHECKSUM     WASM/embedded-WASM targets. Without a URL
+                                      set (and no already-installed matching
+                                      SDK), the WASM targets now FAIL rather
+                                      than skip.
+  CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false
+                                      Demote embedded WASM to observational
+                                      (default: blocking).
+  CROSS_TARGET_SDK_INSTALL_ATTEMPTS  Bounded retry attempts for the SDK
+                                      install (default 3).
+  CROSS_TARGET_SDK_INSTALL_BACKOFF   Seconds between install attempts
+                                      (default 3).
 EOF
 }
 
@@ -351,6 +365,7 @@ WASM_SDK_ID_WASM=""
 WASM_SKIP_WASM=""
 WASM_SDK_ID_WASM_EMBEDDED=""
 WASM_SKIP_WASM_EMBEDDED=""
+WASM_BUNDLE_INSTALL_FAILED=""
 PAIRS=()
 
 # Print the tail of a log file with clear delimiters, so failures are visible in
@@ -468,17 +483,26 @@ prepare_wasm_sdk() {
     skip="swift_version_unresolved"
   elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
     # Both kinds come from ONE swift.org bundle: installing it produces both the
-    # _wasm and _wasm-embedded ids, so both read the shared URL + checksum. The
-    # first kind installs; the second resolves the already-installed id and does
-    # not re-install.
+    # _wasm and _wasm-embedded ids, so both read the shared URL + checksum.
+    # Happy path: the first kind installs; the second kind's resolve above
+    # already succeeds (the bundle now provides its id too), so this branch is
+    # never entered for it and no second install happens.
+    # Failure path: if the shared install genuinely fails, WASM_BUNDLE_INSTALL_FAILED
+    # (set below) short-circuits the second kind straight to the same failure
+    # reason instead of burning a second full bounded-retry ladder against a
+    # host that just failed the first one.
     url="${CROSS_TARGET_WASM_SDK_URL:-}"
     checksum="${CROSS_TARGET_WASM_SDK_CHECKSUM:-}"
     if [[ -z "$url" ]]; then
       skip="sdk_unavailable"
+    elif [[ -n "$WASM_BUNDLE_INSTALL_FAILED" ]]; then
+      skip="sdk_install_failed"
+      echo "cross_target_sdk_install_skipped target=${kind} reason=bundle_install_already_failed"
     else
       echo "cross_target_command target=${kind} cmd=\"swift $(sdk_install_display "$url" "$checksum")\""
       if ! swift_sdk_install_retry "$url" "$checksum" "${logfile}.install"; then
         skip="sdk_install_failed"
+        WASM_BUNDLE_INSTALL_FAILED="true"
         print_log_tail "${kind}-sdk-install" "${logfile}.install"
       elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
         skip="sdk_unresolved_after_install"
