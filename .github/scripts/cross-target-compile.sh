@@ -5,9 +5,12 @@ set -uo pipefail
 # Compiles both packages for non-host targets and prints stable key-value lines
 # carrying a package= field (core | providers).
 #   iOS device + simulator: blocking, through the Swift package graph (xcodebuild).
-#   WASM + embedded WASM: observational, via a Swift SDK matched to the runner
-#   toolchain; skipped-with-record when no matching SDK can be provisioned.
-# The exit code reflects only the blocking iOS results, across both packages.
+#   WASM + embedded WASM: blocking, cross-compiled against a swift.org Swift SDK
+#   pinned by URL + checksum (CROSS_TARGET_WASM_SDK_URL / _CHECKSUM) and installed
+#   with a bounded retry. Provisioning is FAIL-CLOSED: a missing/failed/mismatched
+#   SDK is a blocking failure, never a silent skip. Embedded can be demoted to
+#   observational via CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false (the fallback ladder).
+# The exit code reflects the blocking iOS AND WASM results, across both packages.
 
 TAIL_LINES="${CROSS_TARGET_LOG_TAIL:-40}"
 SELECTED_TARGETS="all"
@@ -145,6 +148,39 @@ sdk_install_display() {
   fi
 }
 
+# Pure: is this WASM kind blocking? `wasm` always is; `wasm_embedded` blocks by
+# default but can be demoted to observational via env (Decision 1's fallback
+# ladder -- a one-flag flip, not new code). Covered by --self-test.
+wasm_kind_blocking() {
+  case "$1" in
+    wasm) printf 'true' ;;
+    wasm_embedded)
+      if [[ "${CROSS_TARGET_WASM_EMBEDDED_BLOCKING:-true}" == "false" ]]; then
+        printf 'false'
+      else
+        printf 'true'
+      fi
+      ;;
+    *) printf 'false' ;;
+  esac
+}
+
+# Pure: given a provisioning skip reason (may be empty) and the kind's blocking
+# flag, the per-target result. Empty reason => "" (caller proceeds to compile).
+# Non-empty on a blocking kind => "fail" (fail-closed: a gate that cannot fail is
+# not a gate). Non-empty on an observational kind => "skipped". Covered by
+# --self-test.
+wasm_skip_result() {
+  local skip="$1" blocking="$2"
+  if [[ -z "$skip" ]]; then
+    printf ''
+  elif [[ "$blocking" == "true" ]]; then
+    printf 'fail'
+  else
+    printf 'skipped'
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Self-test
 # ---------------------------------------------------------------------------
@@ -279,6 +315,26 @@ some descriptive header with spaces"
     "$(sdk_install_display http://b abc123)" "install_display_with_checksum"
   assert_equal "sdk install http://b" \
     "$(sdk_install_display http://b "")" "install_display_without_checksum"
+
+  # Task 2 — per-kind blocking flag (the fallback ladder is a config flip)
+  assert_equal "true" "$(wasm_kind_blocking wasm)" "wasm_blocks"
+  assert_equal "true" "$(wasm_kind_blocking wasm_embedded)" "embedded_blocks_by_default"
+  assert_equal "false" \
+    "$(CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false wasm_kind_blocking wasm_embedded)" \
+    "embedded_ladder_demotes_to_observational"
+  # Task 2 — fail-closed: a provisioning skip on a blocking kind is a FAIL
+  assert_equal "" "$(wasm_skip_result "" true)" "no_skip_proceeds_to_compile"
+  assert_equal "fail" "$(wasm_skip_result sdk_unavailable true)" "skip_on_blocking_is_fail"
+  assert_equal "skipped" "$(wasm_skip_result sdk_unavailable false)" "skip_on_observational_is_skip"
+  # Task 2 — WASM pairs now count toward blocking failures (a fail counts; a
+  # demoted/observational embedded skip does not). Pair order is 2 packages x
+  # {ios_device, ios_simulator, wasm, wasm_embedded}.
+  assert_equal "1" \
+    "$(count_blocking_failures pass:true pass:true fail:true pass:true pass:true pass:true pass:true pass:true)" \
+    "wasm_fail_counts"
+  assert_equal "0" \
+    "$(count_blocking_failures pass:true pass:true pass:true skipped:false pass:true pass:true pass:true skipped:false)" \
+    "wasm_embedded_demoted_not_counted"
   echo "self_test=pass"
 }
 
@@ -443,14 +499,15 @@ prepare_wasm_sdk() {
 
 # Build one package for a WASM kind using the prepared SDK. Always non-blocking.
 compile_wasm_package_for_kind() {
-  local kind="$1" pkg="$2" package_target="$3" logfile="$4" sdk_id skip scratch_path
-  LAST_BLOCKING="false"
+  local kind="$1" pkg="$2" package_target="$3" logfile="$4" sdk_id skip scratch_path result
+  LAST_BLOCKING="$(wasm_kind_blocking "$kind")"
   case "$kind" in
     wasm) sdk_id="$WASM_SDK_ID_WASM"; skip="$WASM_SKIP_WASM" ;;
     wasm_embedded) sdk_id="$WASM_SDK_ID_WASM_EMBEDDED"; skip="$WASM_SKIP_WASM_EMBEDDED" ;;
   esac
-  if [[ -n "$skip" ]]; then
-    LAST_RESULT="skipped"
+  result="$(wasm_skip_result "$skip" "$LAST_BLOCKING")"
+  if [[ -n "$result" ]]; then
+    LAST_RESULT="$result"      # fail (blocking kind) or skipped (observational kind)
     LAST_REASON="$skip"
     return
   fi
