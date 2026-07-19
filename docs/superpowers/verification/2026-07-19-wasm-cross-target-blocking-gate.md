@@ -342,8 +342,30 @@ follow-up PR after merge. No run ID is fabricated here.
   and mismatch rejected.
 - **AC3** (fail-closed compile, live) — confirmed hosted: run `29701547123`,
   job failure, four `reason=compile_failed` lines.
+- **AC4** (version drift stays fail-closed) — needed no new code: the
+  resolve-by-detected-version path's fail-closed behavior (yielding
+  `sdk_unresolved_after_install` on a mismatch) is already covered by the
+  existing `wasm_skip_result`/`count_blocking_failures` self-tests exercised
+  by `./.github/scripts/cross-target-compile.sh --self-test` above; the
+  optional explicit `version_mismatch` guard was not built (spec allows this).
 - **AC5** (self-test + swift test + build + Foundation scan) — all green
   locally, transcripts above.
+- **AC6** (governance — minimal path, ruleset unchanged) — confirmed via
+  `gh api`:
+
+  ```
+  $ gh api repos/maldrakar/swift-text-engine/rulesets/17656807 --jq '{name, id, required_checks: [.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context]}'
+  {"id":17656807,"name":"Main","required_checks":["Host tests and benchmark gate","iOS cross-target compile","WASM cross-target observation"]}
+  ```
+
+  The `Main` ruleset (id `17656807`) still requires exactly the same three
+  contexts — `Host tests and benchmark gate`, `iOS cross-target compile`, and
+  `WASM cross-target observation` — as recorded in
+  `docs/superpowers/verification/2026-06-16-swift-ci-required-checks.md`. This
+  slice did not touch the ruleset or rename the WASM job/context, so the
+  `WASM cross-target observation` context name survives intact even though the
+  job it names is now blocking; the rename + ruleset update stays a deferred
+  follow-up per the spec's non-goals.
 - **AC7** (multi-run hosted reliability, step level) — three independent
   hosted runs (`29701110835`, `29701547123`, `29701773264`) all show
   `cross_target_sdk_install_seconds` in the 5-6s range with `attempts=1`; the
