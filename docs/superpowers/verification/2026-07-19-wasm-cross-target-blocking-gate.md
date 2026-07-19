@@ -277,6 +277,18 @@ character flipped: `...f18af` -> `...f18ae`, in `swift-ci.yml`'s
   wrong pin fails deterministically on every attempt, so the retry ladder
   exhausts and the step fails closed rather than hanging or silently
   skipping).
+- **Correction to an earlier draft of this record**, which transcribed only one
+  ladder: this run's log actually contains **six** `warn=sdk_install_attempt_failed`
+  lines — two complete `1/3 … 3/3` ladders (~21 s), one per kind. `prepare_wasm_sdk`
+  was called once per kind, and because the failed install left nothing to resolve,
+  the second kind re-ran the whole ladder against an already-failing host. The
+  outcome was always correct (fail-closed, `exit=1`); only the time-to-red was
+  doubled. Fixed after this run by `4dd7111`: a definitive bundle-install failure is
+  now recorded once and reused, so the second kind logs
+  `cross_target_sdk_install_skipped target=wasm_embedded reason=bundle_install_already_failed`
+  instead of retrying. Reproduced locally post-fix with a bogus URL: **3** attempt
+  lines, same `blocking_failures=4 exit=1`. A future re-run of this probe will
+  therefore show three attempts, not the six recorded here.
 - `Error: Computed archive checksum '482b9f95462b87bedfafca94a092cf9ec4496671ca13b43745097122d20f18af'` —
   Swift's own SDK installer computed the *real* checksum of the downloaded
   bytes and reported it while rejecting the corrupted pin. This both proves
