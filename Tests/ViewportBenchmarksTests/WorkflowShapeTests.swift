@@ -23,7 +23,22 @@ import XCTest
 
 private let workflowPath = ".github/workflows/swift-ci.yml"
 private let hostJobKey = "host-tests-and-benchmark-gate"
+private let iosJobKey = "ios-cross-target-compile"
 private let wasmJobKey = "wasm-cross-target-observation"
+
+// Each job's `name:` IS its required-status-check context in ruleset `Main`
+// (id 17656807) on maldrakar/swift-text-engine. GitHub matches required checks by that
+// exact string, and the ruleset lives OUTSIDE this repository -- so renaming a job here
+// without a matching `gh api` update leaves every open PR waiting forever on a context
+// no run will ever report. `swift test` has no network, so this pin canNOT prove the
+// two agree; it makes the repository half LOUD, and carries the ruleset id and the
+// update command in its failure message so whoever trips it knows what else to change.
+// Slice 47 renamed the WASM context and this table together.
+private let requiredCheckContexts: [(jobKey: String, context: String)] = [
+    (hostJobKey, "Host tests and benchmark gate"),
+    (iosJobKey, "iOS cross-target compile"),
+    (wasmJobKey, "WASM cross-target compile"),
+]
 private let docsOnlyGuard = "steps.change-scope.outputs.docs_only_pr != 'true'"
 private let memoryShapeStepName = "Run memory shape diagnostic"
 private let pointGeometryFlag = "--point-geometry-query"
@@ -467,5 +482,34 @@ final class WorkflowShapeTests: XCTestCase {
                 + "must be bumped together -- a mismatch fails closed at runtime as "
                 + "sdk_unresolved_after_install, which does not read as a version-drift "
                 + "hint on its own.")
+    }
+
+    // The `name:` of each job is the exact string GitHub matches required status checks
+    // against. Nothing in this repo enforced that until Slice 47, so a rename could
+    // silently orphan a required context -- the hazard Slice 47 itself had to sequence
+    // around. All three required jobs are pinned, not just WASM: the coupling is
+    // identical for all three and nobody will think about job renames again for many
+    // slices.
+    func testJobNamesMatchRequiredCheckContexts() throws {
+        for (jobKey, context) in requiredCheckContexts {
+            guard let name = try jobLevelValue(of: "name", jobKey: jobKey) else {
+                XCTFail("\(workflowPath): no name: key in job \(jobKey)")
+                continue
+            }
+            XCTAssertEqual(
+                name, context,
+                "\(workflowPath): job \(jobKey) is named \"\(name)\", but ruleset Main "
+                    + "(id 17656807) on maldrakar/swift-text-engine requires the "
+                    + "status-check context \"\(context)\". GitHub matches required "
+                    + "checks by this exact string, and the ruleset lives outside this "
+                    + "repository -- so renaming a job without updating the ruleset "
+                    + "wedges every open PR on a context nothing reports. Change BOTH, "
+                    + "in the same slice: this table, and the ruleset via\n"
+                    + "  gh api repos/maldrakar/swift-text-engine/rulesets/17656807 "
+                    + "--method PUT --input <edited.json>\n"
+                    + "See docs/superpowers/specs/"
+                    + "2026-07-20-wasm-required-check-rename-design.md for the safe "
+                    + "drop-rename-readd sequence.")
+        }
     }
 }

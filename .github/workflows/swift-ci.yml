@@ -214,7 +214,7 @@ jobs:
         run: ./.github/scripts/cross-target-compile.sh --targets ios
 
   wasm-cross-target-observation:
-    name: WASM cross-target observation
+    name: WASM cross-target compile
     runs-on: ubuntu-latest
     container: swift:6.2.1-bookworm
     timeout-minutes: 20
