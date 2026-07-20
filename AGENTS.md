@@ -202,7 +202,7 @@ swift run -c release ViewportBenchmarks -- --help            # all flags
 ./.github/scripts/cross-target-compile.sh --self-test        # shell logic self-test (no toolchain)
 ./.github/scripts/cross-target-compile.sh                    # local iOS/WASM cross-compile
 ./.github/scripts/cross-target-compile.sh --targets ios      # iOS-only compile path
-./.github/scripts/cross-target-compile.sh --targets wasm     # WASM-only compile path (blocking, since Slice 46)
+./.github/scripts/cross-target-compile.sh --targets wasm     # WASM-only compile path (blocking; exits 1 without a pinned SDK — see below)
 ```
 
 Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
@@ -373,8 +373,9 @@ frame, not a scroll-frame op, so its gate line prints `budget_absolute_p99_ns=ex
 and it stays gated on its regression budget alone. Two standing tests keep the axes
 coherent: `GateLogicTests` pins the excluded set to exactly
 `{bulk_structural_mutation}`, and `GateFloorTests` pins that **every frame-hot-path
-regression p99 budget stays under the absolute ceiling** (binding scenario
-`structural_mutation|1m`, 580 µs, 2.87× under) — so the runtime absolute gate can never
+regression p99 budget stays under the absolute ceiling** — read the binding scenario
+and its margin from that test against the committed budgets, not from a number quoted
+here, which the next re-derivation falsifies. So the runtime absolute gate can never
 redden a clean tree.
 
 **The recipe** is two committed scripts, not a table to copy — harvest fresh
