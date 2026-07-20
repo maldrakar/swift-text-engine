@@ -326,21 +326,78 @@ pinned-checksum string appears exactly once via `grep`, no `nonexistent`
 token anywhere in the compile script, and the real
 `--target "$package_target"` invocation restored byte-for-byte.
 
-**Final green run on the merge candidate — run `29701773264`**, commit
-`3457a8e` (the current branch HEAD), event `pull_request`. **All 3 required
-jobs `success`.**
+**Green run at `3457a8e` — run `29701773264`**, event `pull_request`. **All 3
+required jobs `success`.**
 
 - `cross_target_sdk_install_seconds=6 attempts=1`
 - Four `result=pass` lines (all target/package pairs), `blocking_failures=0 exit=0`
 
-### Post-merge push run
+**Superseded as the merge candidate.** This section originally called
+`3457a8e` "the current branch HEAD". A review pass after that run added four
+more commits — `0de1ef6` (pin the step's env; cross-pin the container tag),
+`4dd7111` (don't re-run the install ladder for the second kind), `9ee33f0`
+and `7ad1839` (doc corrections) — moving the tip to `7ad1839`. Because
+`4dd7111` changed `cross-target-compile.sh` itself, run `29701773264` no
+longer covered the code being merged, so it is **not** the merge-candidate
+proof; the run below is.
 
-**`<PENDING>`** — PR #105 is not yet merged as of this record. Per this
-repo's established pattern (see e.g. Slice 45's
-`docs/superpowers/verification/2026-07-19-realistic-provider-ci-gate-promotion.md`,
-"Hosted CI — Discharged (AC7)"), the post-merge `push` run to `main` will be
-read at step level and this section will be filled in by a docs-only
-follow-up PR after merge. No run ID is fabricated here.
+**Final green run on the merge candidate — run `29704646269`**, commit
+`7ad1839` (the branch tip that was merged), event `pull_request`. **All 3
+required jobs `success`,** read at step level:
+
+- `cross_target_sdk_install_seconds=6 attempts=1`
+- Four `result=pass reason=none blocking=true` lines,
+  `mode=cross_target_compile_overall blocking_failures=0 exit=0`
+- Host job: **46 `gate=pass`, 0 `gate=fail`**; `Executed 314 tests, with 0
+  failures` (312 + the two pins added by `0de1ef6`)
+
+### Post-merge push run — AC7 DISCHARGED
+
+**Run `29727064661`**, commit `1a14fc8` (the PR #105 merge commit, merged
+2026-07-20T08:12:02Z), event `push` to `main`. **All 3 required jobs
+`success`.** This is the run that anchors AC7: it is the only evidence taken
+from the **merged code on `main`**, not from a PR head.
+
+Read at **step level** (`gh run view 29727064661 --log`), per the Slice 16
+dead-step rule — job conclusion alone is never proof:
+
+- **WASM cross-target observation** (the job this slice made blocking):
+
+  ```
+  cross_target_swift_version=6.2.1
+  cross_target_sdk_install_seconds=5 attempts=1
+  cross_target_wasm_sdk_id target=wasm          package=core      id=swift-6.2.1-RELEASE_wasm
+  mode=cross_target_compile target=wasm          package=core      result=pass reason=none blocking=true
+  cross_target_wasm_sdk_id target=wasm_embedded package=core      id=swift-6.2.1-RELEASE_wasm-embedded
+  mode=cross_target_compile target=wasm_embedded package=core      result=pass reason=none blocking=true
+  cross_target_wasm_sdk_id target=wasm          package=providers id=swift-6.2.1-RELEASE_wasm
+  mode=cross_target_compile target=wasm          package=providers result=pass reason=none blocking=true
+  cross_target_wasm_sdk_id target=wasm_embedded package=providers id=swift-6.2.1-RELEASE_wasm-embedded
+  mode=cross_target_compile target=wasm_embedded package=providers result=pass reason=none blocking=true
+  mode=cross_target_compile_overall blocking_failures=0 exit=0
+  ```
+
+  All four pairs `blocking=true` — the four load-bearing WASM compiles AC1
+  asks for, now proven on merged `main` rather than on a PR head.
+
+- **Host tests and benchmark gate**: **46 `gate=pass`, 0 `gate=fail`**;
+  `Executed 314 tests, with 0 failures (0 unexpected)`. Unchanged from the
+  merge-candidate run — this slice moved no budget and no benchmark.
+- **iOS cross-target compile**: `success`.
+
+**Install-time series across all five runs that provisioned successfully** —
+in run order (`29701110835`, `29701547123`, `29701773264`, `29704646269`,
+`29727064661`): **5s, 5s, 6s, 6s, 5s**, every one `attempts=1`, no retry ever
+consumed. This extends the AC9 caching
+evidence from three samples to five and leaves the "skip caching" decision
+unchanged: ~0.4–0.5% of the job's 1200s budget, no visible variance.
+
+**Local re-verification on the merged tree** (`1a14fc8`, this branch's base):
+`swift test` **314/0**; `cross-target-compile.sh --self-test` `self_test=pass`;
+`swift build -c release` clean; `rg -n Foundation Sources/TextEngineCore`
+empty (`exit=1`); and `git diff 7ad1839 1a14fc8` is **empty** — the merge
+introduced no drift, so the hosted evidence above and the local evidence
+recorded earlier describe byte-identical trees.
 
 ---
 
@@ -378,10 +435,16 @@ follow-up PR after merge. No run ID is fabricated here.
   `WASM cross-target observation` context name survives intact even though the
   job it names is now blocking; the rename + ruleset update stays a deferred
   follow-up per the spec's non-goals.
-- **AC7** (multi-run hosted reliability, step level) — three independent
-  hosted runs (`29701110835`, `29701547123`, `29701773264`) all show
-  `cross_target_sdk_install_seconds` in the 5-6s range with `attempts=1`; the
-  post-merge push run remains `<PENDING>` per above.
+- **AC7** (multi-run hosted reliability, step level) — **DISCHARGED.** Five
+  independent hosted runs provisioned the SDK successfully
+  (`29701110835`, `29701547123`, `29701773264`, `29704646269`, `29727064661`),
+  every one `cross_target_sdk_install_seconds` 5-6s with `attempts=1` — the
+  download is demonstrably not a one-off. Four of them compiled all four WASM
+  pairs `result=pass blocking=true` with `exit=0` (`29701547123` is the AC3
+  liveness run, deliberately red on compile, and still provisioned cleanly).
+  Anchored in the **post-merge push run `29727064661`** at merge commit
+  `1a14fc8`, read at step level: all 3 required jobs `success`, four blocking
+  WASM passes, host 46 `gate=pass` / 0 fail, 314 tests / 0 failures.
 - **AC8** (AGENTS.md updated; no engine source touched) — see the `AGENTS.md`
   diff in this same commit; `Sources/TextEngineCore` and
   `Sources/TextEngineReferenceProviders` are untouched on the whole branch
