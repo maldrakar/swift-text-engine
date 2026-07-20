@@ -235,6 +235,180 @@ target=wasm_embedded package=providers  result=pass reason=none blocking=true
 plus four iOS `blocking=true` passes. Embedded WASM passed on its own merit — no engine or
 provider source change was made this slice.
 
+## AC4 — the ruleset sequence (three snapshots)
+
+Executed as three separate `gh api` calls with a snapshot after each, in the order the
+spec's Decision 1 requires. The context is the job's `name:` and the ruleset lives outside
+the repository, so the two halves cannot land atomically — the sequence is what makes the
+non-atomicity safe.
+
+### 1. Drop the stale context
+
+```
+gh api repos/maldrakar/swift-text-engine/rulesets/17656807 --method PUT --input ruleset-intermediate.json
+```
+
+Required contexts became:
+
+```
+Host tests and benchmark gate
+iOS cross-target compile
+```
+
+Assertion that nothing else moved — both sides with the `required_status_checks` list and
+`updated_at` deleted:
+
+```
+diff <(jq -S 'del(...)' ruleset-before.json) <(jq -S 'del(...)' ruleset-intermediate-applied.json)
+-> empty
+"ONLY the context list changed — bypass actors and strict policy intact"
+```
+
+### 2. Merge, read at STEP level (AC5)
+
+Merge candidate run **`29751576859`**, head `bb6e67b`. Read at step level, not job
+conclusion:
+
+```
+status=completed conclusion=success head_sha=bb6e67b
+gate=pass 46    gate=fail 0
+target=wasm          package=core       result=pass reason=none blocking=true
+target=wasm          package=providers  result=pass reason=none blocking=true
+target=wasm_embedded package=core       result=pass reason=none blocking=true
+target=wasm_embedded package=providers  result=pass reason=none blocking=true
+mode=cross_target_compile_overall blocking_failures=0 exit=0
+Executed 315 tests, with 0 failures
+grep 'result=fail|gate=fail|blocking_failures=[1-9]'  -> 0 matches
+```
+
+Merged as **`cdae8d3`** (PR #108, `state=MERGED`).
+
+The wedge had cleared before the merge: with the stale context dropped,
+`mergeStateStatus` went `BLOCKED` → `CLEAN` while all three jobs continued to report and
+pass. Nothing was force-merged and no bypass was used.
+
+### 3. Re-add under the new name
+
+```
+gh api repos/maldrakar/swift-text-engine/rulesets/17656807 --method PUT --input ruleset-after-payload.json
+```
+
+Live contexts now:
+
+```
+Host tests and benchmark gate
+iOS cross-target compile
+WASM cross-target compile
+```
+
+### The before → after assertion
+
+The **entire** ruleset diff, `updated_at` excluded, is one line:
+
+```
+71c71
+<             "context": "WASM cross-target observation"
+---
+>             "context": "WASM cross-target compile"
+```
+
+Explicitly re-checked on both snapshots:
+
+| Field | before | after |
+|---|---|---|
+| `strict_required_status_checks_policy` | `true` | `true` |
+| `bypass_actors` | `[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}]` | identical |
+| `enforcement` | `active` | `active` |
+| rule types | `creation, non_fast_forward, pull_request, required_deployments, required_status_checks` | identical |
+
+**Bypass caveat, restated:** the ruleset preserves the pre-existing bypass actor, so a
+bypass-capable admin can still override it. Required checks are enforced for normal PR
+flow only. This slice did not change that shape and did not attempt to.
+
+**The unrequired window.** Between steps 1 and 3, `main` required two contexts instead of
+three, so WASM was briefly not merge-blocking. Mitigations actually applied: the
+no-open-PRs precondition was re-confirmed empty immediately before the PR was opened (so
+no third-party PR was exposed); the merge candidate was read at step level for four WASM
+`blocking=true` passes before merging; and no pause was taken between merge and re-add.
+
+## AC6 — post-merge push run on `main`
+
+Run **`29753085265`**, head `cdae8d3`, `event=push`:
+
+```
+status=completed conclusion=success head_sha=cdae8d3
+gate=pass 46    gate=fail 0
+target=wasm          package=core       result=pass reason=none blocking=true
+target=wasm          package=providers  result=pass reason=none blocking=true
+target=wasm_embedded package=core       result=pass reason=none blocking=true
+target=wasm_embedded package=providers  result=pass reason=none blocking=true
+mode=cross_target_compile_overall blocking_failures=0 exit=0
+Executed 315 tests, with 0 failures
+grep 'result=fail|gate=fail|blocking_failures=[1-9]'  -> 0 matches
+```
+
+Job names as reported by the API on `main` — the rename observed in the merged tree, not
+merely on a branch:
+
+```
+Host tests and benchmark gate:  success
+iOS cross-target compile:       success
+WASM cross-target compile:      success
+```
+
+Run state was confirmed via `gh api ... --jq '.status, .conclusion'`, **not**
+`gh run watch --exit-status` — Slice 46 recorded that the latter exits 0 after dying on a
+network error.
+
+## AC7 — enforcement proof
+
+PR [#109](https://github.com/maldrakar/swift-text-engine/pull/109), opened only **after**
+the step-3 re-add: GitHub labels a context "Required" from the ruleset state at evaluation
+time, so a PR opened earlier can keep showing stale labelling.
+
+Reported checks:
+
+```
+Host tests and benchmark gate   SUCCESS   pass
+iOS cross-target compile        SUCCESS   pass
+WASM cross-target compile       SUCCESS   pass
+
+state=OPEN  mergeStateStatus=CLEAN
+```
+
+Live ruleset at the same moment:
+
+```
+Host tests and benchmark gate
+iOS cross-target compile
+WASM cross-target compile
+```
+
+The renamed context is both **required** and **reported**, and the PR is mergeable — the
+mirror image of the AC3 wedge, where the same three jobs all passed yet the PR was
+`BLOCKED`. Taken together the two captures show the rename moved the requirement rather
+than merely adding a name.
+
+### The docs-only guard still routes under the new job key
+
+This PR is docs-only, so the guard short-circuited each required job — and it printed the
+**new** key, independently confirming the `job=` echo rename is live in the merged tree:
+
+```
+mode=docs_only_pr result=docs_only docs_only_pr=true file_count=1 non_doc_count=0
+mode=docs_only_pr job=host-tests-and-benchmark-gate result=success
+mode=docs_only_pr job=ios-cross-target-compile     result=success
+mode=docs_only_pr job=wasm-cross-target-compile    result=success
+```
+
+**One log artefact, checked rather than assumed.** Run `29753701084` also contains lines
+reading `reason=$1` and `event=$EVENT_NAME` with the variables unexpanded. These are
+GitHub Actions echoing the inline `run:` block's *source* (the `fail_scope() { ... }`
+function definition, in the ANSI command-echo colour) — not executed output. Verified:
+run `conclusion=success`, all three jobs `success`, and a query for any step whose
+conclusion is neither `success` nor `skipped` returns nothing. Not a failure, and not
+introduced by this slice.
+
 ## AC coverage
 
 | AC | Status | Where |
@@ -242,14 +416,28 @@ provider source change was made this slice.
 | AC1 seven sites, `--hidden -U` | ✅ *with one sanctioned historical mention* | above |
 | AC2 pin live, self-servicing message | ✅ | above |
 | AC3 wedge recorded | ✅ | above |
-| AC4 three snapshots, one-string diff | before-snapshot ✅; intermediate/after `<PENDING Task 9>` | above |
-| AC5 merge, read at step level | `<PENDING Task 9>` | — |
-| AC6 post-merge push run | `<PENDING Task 9>` | — |
-| AC7 enforcement, PR opened after re-add | `<PENDING Task 10>` | — |
+| AC4 three snapshots, one-string diff | ✅ | above |
+| AC5 merge, read at step level | ✅ run `29751576859` | above |
+| AC6 post-merge push run | ✅ run `29753085265` | above |
+| AC7 enforcement, PR opened after re-add | ✅ | below |
 | AC8 `--self-test` covers new cases | ✅ | above |
 | AC9 confinement + checksum baseline | ✅ *via corrected extractor* | above |
 | AC10 Foundation scan | ✅ | above |
 | Precondition: no open PRs | ✅ measured twice | above |
 
-Pending items are marked `<PENDING>` rather than pre-filled. They are discharged in the
-follow-up commit after the ruleset sequence completes.
+## Deviations from the plan — summary
+
+Recorded so a future reader does not mistake them for oversights:
+
+1. **AC9's extractor could not work as written** (captures per-run timings). Compared
+   `(mode, scenario, checksum)` triples instead; 46/46 byte-identical. Independently
+   corroborated by the whole-branch reviewer's scratch-worktree rebuild of `be763dc`.
+2. **AC1 cannot reach zero hits**, because the plan's own Task 4 Step 4 mandates prose
+   quoting the old name. Human-adjudicated: one sanctioned historical mention at
+   `AGENTS.md:316`. AC1 now reads "one sanctioned historical mention, no stale uses."
+3. **Two findings from the final whole-branch review were fixed before the PR** (commit
+   `38ac4e4`): a shell comment stated a false mechanism *and* a backwards conclusion (an
+   empty return would fail loudly, not pass silently — the real hazard is a helper that
+   errors while still printing `true`); and the drift path emitted
+   `reason=bundle_install_already_failed` where nothing install-failed, now
+   `bundle_already_failed`. Verified no consumer parses that token.
