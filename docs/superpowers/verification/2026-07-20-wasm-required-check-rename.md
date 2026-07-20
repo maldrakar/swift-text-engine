@@ -362,10 +362,52 @@ network error.
 
 ## AC7 — enforcement proof
 
-Opened only **after** the step-3 re-add: GitHub labels a context "Required" from the
-ruleset state at evaluation time, so a PR opened earlier can keep showing stale labelling.
+PR [#109](https://github.com/maldrakar/swift-text-engine/pull/109), opened only **after**
+the step-3 re-add: GitHub labels a context "Required" from the ruleset state at evaluation
+time, so a PR opened earlier can keep showing stale labelling.
 
-See the capture in the closing section below.
+Reported checks:
+
+```
+Host tests and benchmark gate   SUCCESS   pass
+iOS cross-target compile        SUCCESS   pass
+WASM cross-target compile       SUCCESS   pass
+
+state=OPEN  mergeStateStatus=CLEAN
+```
+
+Live ruleset at the same moment:
+
+```
+Host tests and benchmark gate
+iOS cross-target compile
+WASM cross-target compile
+```
+
+The renamed context is both **required** and **reported**, and the PR is mergeable — the
+mirror image of the AC3 wedge, where the same three jobs all passed yet the PR was
+`BLOCKED`. Taken together the two captures show the rename moved the requirement rather
+than merely adding a name.
+
+### The docs-only guard still routes under the new job key
+
+This PR is docs-only, so the guard short-circuited each required job — and it printed the
+**new** key, independently confirming the `job=` echo rename is live in the merged tree:
+
+```
+mode=docs_only_pr result=docs_only docs_only_pr=true file_count=1 non_doc_count=0
+mode=docs_only_pr job=host-tests-and-benchmark-gate result=success
+mode=docs_only_pr job=ios-cross-target-compile     result=success
+mode=docs_only_pr job=wasm-cross-target-compile    result=success
+```
+
+**One log artefact, checked rather than assumed.** Run `29753701084` also contains lines
+reading `reason=$1` and `event=$EVENT_NAME` with the variables unexpanded. These are
+GitHub Actions echoing the inline `run:` block's *source* (the `fail_scope() { ... }`
+function definition, in the ANSI command-echo colour) — not executed output. Verified:
+run `conclusion=success`, all three jobs `success`, and a query for any step whose
+conclusion is neither `success` nor `skipped` returns nothing. Not a failure, and not
+introduced by this slice.
 
 ## AC coverage
 
