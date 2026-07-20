@@ -5,9 +5,12 @@ set -uo pipefail
 # Compiles both packages for non-host targets and prints stable key-value lines
 # carrying a package= field (core | providers).
 #   iOS device + simulator: blocking, through the Swift package graph (xcodebuild).
-#   WASM + embedded WASM: observational, via a Swift SDK matched to the runner
-#   toolchain; skipped-with-record when no matching SDK can be provisioned.
-# The exit code reflects only the blocking iOS results, across both packages.
+#   WASM + embedded WASM: blocking, cross-compiled against a swift.org Swift SDK
+#   pinned by URL + checksum (CROSS_TARGET_WASM_SDK_URL / _CHECKSUM) and installed
+#   with a bounded retry. Provisioning is FAIL-CLOSED: a missing/failed/mismatched
+#   SDK is a blocking failure, never a silent skip. Embedded can be demoted to
+#   observational via CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false (the fallback ladder).
+# The exit code reflects the blocking iOS AND WASM results, across both packages.
 
 TAIL_LINES="${CROSS_TARGET_LOG_TAIL:-40}"
 SELECTED_TARGETS="all"
@@ -18,6 +21,20 @@ Usage:
   cross-target-compile.sh
   cross-target-compile.sh --targets all|ios|wasm
   cross-target-compile.sh --self-test
+
+Environment:
+  CROSS_TARGET_WASM_SDK_URL          Pinned Swift SDK bundle to install for the
+  CROSS_TARGET_WASM_SDK_CHECKSUM     WASM/embedded-WASM targets. Without a URL
+                                      set (and no already-installed matching
+                                      SDK), the WASM targets now FAIL rather
+                                      than skip.
+  CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false
+                                      Demote embedded WASM to observational
+                                      (default: blocking).
+  CROSS_TARGET_SDK_INSTALL_ATTEMPTS  Bounded retry attempts for the SDK
+                                      install (default 3).
+  CROSS_TARGET_SDK_INSTALL_BACKOFF   Seconds between install attempts
+                                      (default 3).
 EOF
 }
 
@@ -132,6 +149,50 @@ resolve_wasm_sdk_id_from_list() {
     esac
   done
   return 1
+}
+
+# Pure: the `swift sdk install` argument string, with --checksum appended iff a
+# checksum is supplied. Covered by --self-test. (url/checksum contain no spaces.)
+sdk_install_display() {
+  local url="$1" checksum="$2"
+  if [[ -n "$checksum" ]]; then
+    printf 'sdk install %s --checksum %s' "$url" "$checksum"
+  else
+    printf 'sdk install %s' "$url"
+  fi
+}
+
+# Pure: is this WASM kind blocking? `wasm` always is; `wasm_embedded` blocks by
+# default but can be demoted to observational via env (Decision 1's fallback
+# ladder -- a one-flag flip, not new code). Covered by --self-test.
+wasm_kind_blocking() {
+  case "$1" in
+    wasm) printf 'true' ;;
+    wasm_embedded)
+      if [[ "${CROSS_TARGET_WASM_EMBEDDED_BLOCKING:-true}" == "false" ]]; then
+        printf 'false'
+      else
+        printf 'true'
+      fi
+      ;;
+    *) printf 'false' ;;
+  esac
+}
+
+# Pure: given a provisioning skip reason (may be empty) and the kind's blocking
+# flag, the per-target result. Empty reason => "" (caller proceeds to compile).
+# Non-empty on a blocking kind => "fail" (fail-closed: a gate that cannot fail is
+# not a gate). Non-empty on an observational kind => "skipped". Covered by
+# --self-test.
+wasm_skip_result() {
+  local skip="$1" blocking="$2"
+  if [[ -z "$skip" ]]; then
+    printf ''
+  elif [[ "$blocking" == "true" ]]; then
+    printf 'fail'
+  else
+    printf 'skipped'
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -262,6 +323,32 @@ some descriptive header with spaces"
   assert_resolver_missing "$clean_list" 9.9.9 wasm "resolve_missing_version"
   assert_resolver_missing "$clean_list" 6.1.2 wasm_embedded_typo "resolve_missing_kind"
   assert_resolver_missing "$clean_list" "" wasm "resolve_empty_version"
+
+  # Task 1 — install arg builder: --checksum appended iff a checksum is supplied
+  assert_equal "sdk install http://b --checksum abc123" \
+    "$(sdk_install_display http://b abc123)" "install_display_with_checksum"
+  assert_equal "sdk install http://b" \
+    "$(sdk_install_display http://b "")" "install_display_without_checksum"
+
+  # Task 2 — per-kind blocking flag (the fallback ladder is a config flip)
+  assert_equal "true" "$(wasm_kind_blocking wasm)" "wasm_blocks"
+  assert_equal "true" "$(wasm_kind_blocking wasm_embedded)" "embedded_blocks_by_default"
+  assert_equal "false" \
+    "$(CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false wasm_kind_blocking wasm_embedded)" \
+    "embedded_ladder_demotes_to_observational"
+  # Task 2 — fail-closed: a provisioning skip on a blocking kind is a FAIL
+  assert_equal "" "$(wasm_skip_result "" true)" "no_skip_proceeds_to_compile"
+  assert_equal "fail" "$(wasm_skip_result sdk_unavailable true)" "skip_on_blocking_is_fail"
+  assert_equal "skipped" "$(wasm_skip_result sdk_unavailable false)" "skip_on_observational_is_skip"
+  # Task 2 — WASM pairs now count toward blocking failures (a fail counts; a
+  # demoted/observational embedded skip does not). Pair order is 2 packages x
+  # {ios_device, ios_simulator, wasm, wasm_embedded}.
+  assert_equal "1" \
+    "$(count_blocking_failures pass:true pass:true fail:true pass:true pass:true pass:true pass:true pass:true)" \
+    "wasm_fail_counts"
+  assert_equal "0" \
+    "$(count_blocking_failures pass:true pass:true pass:true skipped:false pass:true pass:true pass:true skipped:false)" \
+    "wasm_embedded_demoted_not_counted"
   echo "self_test=pass"
 }
 
@@ -278,6 +365,7 @@ WASM_SDK_ID_WASM=""
 WASM_SKIP_WASM=""
 WASM_SDK_ID_WASM_EMBEDDED=""
 WASM_SKIP_WASM_EMBEDDED=""
+WASM_BUNDLE_INSTALL_FAILED=""
 PAIRS=()
 
 # Print the tail of a log file with clear delimiters, so failures are visible in
@@ -361,26 +449,60 @@ resolve_wasm_sdk_id() {
   printf '%s\n' "$list" | resolve_wasm_sdk_id_from_list "$version" "$kind"
 }
 
+# Install a Swift SDK with a bounded retry. download.swift.org is now in the
+# merge path, so a transient network error gets a few attempts before failing
+# red. Echoes the measured install seconds (feeds the caching decision) on
+# success. Not pure -- exercised by the hosted spike, not --self-test.
+swift_sdk_install_retry() {
+  local url="$1" checksum="$2" logfile="$3"
+  local attempts="${CROSS_TARGET_SDK_INSTALL_ATTEMPTS:-3}"
+  local backoff="${CROSS_TARGET_SDK_INSTALL_BACKOFF:-3}"
+  local i=1 start end
+  local -a args=(sdk install "$url")
+  [[ -n "$checksum" ]] && args+=(--checksum "$checksum")
+  start=$(date +%s)
+  while (( i <= attempts )); do
+    if swift "${args[@]}" >"$logfile" 2>&1; then
+      end=$(date +%s)
+      echo "cross_target_sdk_install_seconds=$((end - start)) attempts=${i}"
+      return 0
+    fi
+    echo "warn=sdk_install_attempt_failed attempt=${i}/${attempts}" >&2
+    (( i < attempts )) && sleep "$backoff"
+    i=$((i + 1))
+  done
+  return 1
+}
+
 # Resolve (and if a URL is provided, install) the SDK for a kind once. Stores
 # the resolved id and a skip reason ("" on success) in per-kind globals so both
 # packages reuse the same SDK without re-installing.
 prepare_wasm_sdk() {
-  local kind="$1" logfile="$2" sdk_id="" url_var url skip=""
+  local kind="$1" logfile="$2" sdk_id="" url checksum skip=""
   if [[ -z "$SWIFT_VERSION" ]]; then
     skip="swift_version_unresolved"
   elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
-    if [[ "$kind" == "wasm_embedded" ]]; then
-      url_var="CROSS_TARGET_WASM_EMBEDDED_SDK_URL"
-    else
-      url_var="CROSS_TARGET_WASM_SDK_URL"
-    fi
-    url="${!url_var:-}"
+    # Both kinds come from ONE swift.org bundle: installing it produces both the
+    # _wasm and _wasm-embedded ids, so both read the shared URL + checksum.
+    # Happy path: the first kind installs; the second kind's resolve above
+    # already succeeds (the bundle now provides its id too), so this branch is
+    # never entered for it and no second install happens.
+    # Failure path: if the shared install genuinely fails, WASM_BUNDLE_INSTALL_FAILED
+    # (set below) short-circuits the second kind straight to the same failure
+    # reason instead of burning a second full bounded-retry ladder against a
+    # host that just failed the first one.
+    url="${CROSS_TARGET_WASM_SDK_URL:-}"
+    checksum="${CROSS_TARGET_WASM_SDK_CHECKSUM:-}"
     if [[ -z "$url" ]]; then
       skip="sdk_unavailable"
+    elif [[ -n "$WASM_BUNDLE_INSTALL_FAILED" ]]; then
+      skip="sdk_install_failed"
+      echo "cross_target_sdk_install_skipped target=${kind} reason=bundle_install_already_failed"
     else
-      echo "cross_target_command target=${kind} cmd=\"swift sdk install ${url}\""
-      if ! swift sdk install "$url" >"${logfile}.install" 2>&1; then
+      echo "cross_target_command target=${kind} cmd=\"swift $(sdk_install_display "$url" "$checksum")\""
+      if ! swift_sdk_install_retry "$url" "$checksum" "${logfile}.install"; then
         skip="sdk_install_failed"
+        WASM_BUNDLE_INSTALL_FAILED="true"
         print_log_tail "${kind}-sdk-install" "${logfile}.install"
       elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
         skip="sdk_unresolved_after_install"
@@ -399,16 +521,19 @@ prepare_wasm_sdk() {
   esac
 }
 
-# Build one package for a WASM kind using the prepared SDK. Always non-blocking.
+# Build one package for a WASM kind using the prepared SDK, with blocking
+# status per-kind: wasm always blocks, wasm_embedded blocks by default but is
+# demotable via CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false.
 compile_wasm_package_for_kind() {
-  local kind="$1" pkg="$2" package_target="$3" logfile="$4" sdk_id skip scratch_path
-  LAST_BLOCKING="false"
+  local kind="$1" pkg="$2" package_target="$3" logfile="$4" sdk_id skip scratch_path result
+  LAST_BLOCKING="$(wasm_kind_blocking "$kind")"
   case "$kind" in
     wasm) sdk_id="$WASM_SDK_ID_WASM"; skip="$WASM_SKIP_WASM" ;;
     wasm_embedded) sdk_id="$WASM_SDK_ID_WASM_EMBEDDED"; skip="$WASM_SKIP_WASM_EMBEDDED" ;;
   esac
-  if [[ -n "$skip" ]]; then
-    LAST_RESULT="skipped"
+  result="$(wasm_skip_result "$skip" "$LAST_BLOCKING")"
+  if [[ -n "$result" ]]; then
+    LAST_RESULT="$result"      # fail (blocking kind) or skipped (observational kind)
     LAST_REASON="$skip"
     return
   fi

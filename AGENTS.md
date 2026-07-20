@@ -27,8 +27,9 @@ per-slice verification. Treat them as invariants, not preferences:
 3. **Zero-dependency.** No third-party packages in the core. Adding any
    dependency is a separate, explicitly-approved decision.
 4. **Compiles for iOS and WASM with no source changes.** iOS device/simulator
-   are blocking in CI; WASM/embedded WASM are currently proven locally and
-   observed in CI only when a matching Swift SDK is available.
+   are blocking in CI; WASM and embedded WASM are now **also blocking in CI**
+   (Slice 46), cross-compiled against a swift.org 6.2.1 Swift SDK pinned by
+   URL + checksum, fail-closed if provisioning fails.
 5. **Core-owned memory must not grow linearly with document size.** Strict
    virtualization: compute only for the visible viewport + overscan/buffer.
    `--memory-shape` asserts this invariant.
@@ -107,7 +108,7 @@ a located cell, fewer on a blank line or a failure path), so its cost class equa
 - `Sources/TextEngineReferenceProviders` — Foundation-free reference provider
   library. Reference providers live outside the core. It is a supported portable
   product: the hosted cross-target helper compiles it for iOS (blocking) and
-  WASM (observational) alongside `TextEngineCore`.
+  WASM (blocking, since Slice 46) alongside `TextEngineCore`.
 - `Sources/ViewportBenchmarks` — executable. Benchmarks, gates, and diagnostics
   live here, NOT in the core.
 - `Tests/TextEngineCoreTests` — XCTest only. (`swift test` also prints a
@@ -192,7 +193,7 @@ swift run -c release ViewportBenchmarks -- --help            # all flags
 ./.github/scripts/cross-target-compile.sh --self-test        # shell logic self-test (no toolchain)
 ./.github/scripts/cross-target-compile.sh                    # local iOS/WASM cross-compile
 ./.github/scripts/cross-target-compile.sh --targets ios      # iOS-only compile path
-./.github/scripts/cross-target-compile.sh --targets wasm     # WASM-only observational path
+./.github/scripts/cross-target-compile.sh --targets wasm     # WASM-only compile path (blocking, since Slice 46)
 ```
 
 Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
@@ -212,7 +213,24 @@ flag at a time. `--gate` is valid with the default pipeline, `--realistic-provid
 
 Local WASM build (needs a matching Swift SDK installed):
 `swift build --swift-sdk <id> --target TextEngineCore` for both `wasm` and
-`wasm-embedded` ids from `swift sdk list`.
+`wasm-embedded` ids from `swift sdk list`. `cross-target-compile.sh --targets
+wasm` installs that SDK itself (checksum-verified, bounded-retry) from
+`CROSS_TARGET_WASM_SDK_URL` / `CROSS_TARGET_WASM_SDK_CHECKSUM` — set both env
+vars to point it at a pinned swift.org bundle (see the CI job below for the
+current pin, and `## Gate budgets`-style verification records under
+`docs/superpowers/verification/` for the recompute command). Without them the
+script falls back to whatever SDK ids are already installed locally — and if
+that finds nothing, the WASM targets now **fail** (`result=fail
+reason=sdk_unavailable blocking=true`, `exit=1`). They no longer skip quietly:
+that is the fail-closed gate working, not a broken checkout.
+
+The resolver matches an installed SDK id against the **local toolchain
+version**, so the CI pin above only resolves on a 6.2.1 toolchain. On any other
+version (`swift --version`) that bundle will not resolve even after a
+successful install, and `--targets wasm` fails closed. To exercise the WASM
+path locally on a different toolchain, point `CROSS_TARGET_WASM_SDK_URL` at a
+swift.org bundle matching your own version; otherwise use `--self-test` (which
+needs no toolchain) and let the hosted 6.2.1 container job be the real check.
 
 ## CI (`.github/workflows/swift-ci.yml`)
 
@@ -241,11 +259,22 @@ Three jobs:
   `./.github/scripts/cross-target-compile.sh --targets ios`. This is the only
   hosted macOS job.
 - **WASM cross-target observation** on `ubuntu-latest` with
-  `swift:6.2.1-bookworm`: WASM + embedded WASM run for both `TextEngineCore` and
-  `TextEngineReferenceProviders` via
-  `./.github/scripts/cross-target-compile.sh --targets wasm`. They remain
-  **observational**: the helper compiles them when a matching Swift SDK is
-  installed/provisioned, otherwise records a non-blocking skip.
+  `swift:6.2.1-bookworm`: WASM + embedded WASM compile for both `TextEngineCore`
+  and `TextEngineReferenceProviders` via
+  `./.github/scripts/cross-target-compile.sh --targets wasm`. Since Slice 46 this
+  job **compiles and blocks** (four `result=pass/fail blocking=true` lines: two
+  kinds x two packages) — it is no longer observational. The SDK is provisioned
+  by URL + checksum (`CROSS_TARGET_WASM_SDK_URL` / `CROSS_TARGET_WASM_SDK_CHECKSUM`,
+  set on the compile step in `swift-ci.yml`) with bounded-retry install, and
+  provisioning failure is fail-closed (job goes red, does not skip). Blocking is
+  per-kind: embedded WASM alone can be demoted back to observational via
+  `CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false` if a future SDK regresses it,
+  without touching the non-embedded `wasm` kind.
+  **Known wart**: the job/context is still *named* `WASM cross-target
+  observation` even though it now blocks — renaming it (and updating the `Main`
+  ruleset's required-check context to match) is deliberately deferred to a
+  follow-up repo-policy slice, so the required-check context does not move out
+  from under an in-flight PR. Do not rename it as a drive-by edit.
 
 A `continue-on-error` step cannot be a gate. It swallows every non-zero exit —
 budget misses, correctness failures, and crashes alike (the Slice 16 dead-step

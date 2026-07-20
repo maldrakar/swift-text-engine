@@ -23,10 +23,19 @@ import XCTest
 
 private let workflowPath = ".github/workflows/swift-ci.yml"
 private let hostJobKey = "host-tests-and-benchmark-gate"
+private let wasmJobKey = "wasm-cross-target-observation"
 private let docsOnlyGuard = "steps.change-scope.outputs.docs_only_pr != 'true'"
 private let memoryShapeStepName = "Run memory shape diagnostic"
 private let pointGeometryFlag = "--point-geometry-query"
 private let realisticFlag = "--realistic-provider"
+
+// The pinned WASM SDK bundle. Declared once here so both the exact-env test and the
+// container-version cross-pin test read the same literal rather than two copies that could
+// drift apart from each other.
+private let wasmSdkURL =
+    "https://download.swift.org/swift-6.2.1-release/wasm-sdk/swift-6.2.1-RELEASE/"
+        + "swift-6.2.1-RELEASE_wasm.artifactbundle.tar.gz"
+private let wasmSdkChecksum = "482b9f95462b87bedfafca94a092cf9ec4496671ca13b43745097122d20f18af"
 
 // The exact whitespace-joined `run:` payload every gate step must carry. Pinned as a
 // whole command rather than probed for tokens: a step-level token count cannot see a
@@ -80,6 +89,7 @@ private struct WorkflowStep {
     let ifCondition: String?
     let continueOnError: String?
     let runTokens: [String]
+    let env: [String: String]
 }
 
 private func indentation(of line: String) -> Int {
@@ -103,8 +113,9 @@ private func value(of key: String, in line: String) -> String? {
 
 // There is no YAML parser in reach -- the package is zero-dependency and Foundation ships
 // none -- so this is a deliberately narrow reader of the one shape swift-ci.yml actually
-// uses: 6-space `- name:` step headers, 8-space step keys, and a `run:` that is either
-// inline or a `|` block scalar whose body is indented past the key.
+// uses: 6-space `- name:` step headers, 8-space step keys, a `run:` that is either inline or
+// a `|` block scalar whose body is indented past the key, and an `env:` block whose entries
+// sit at 10-space indent (one level past the 8-space `env:` key itself).
 //
 // Comment lines are excluded everywhere, though the two `isComment` checks below earn
 // their keep differently. `value(of:)` only matches an exact 8-space-anchored key prefix
@@ -124,6 +135,7 @@ private func parseStep(_ block: [String], index: Int) -> WorkflowStep {
     var ifCondition: String?
     var continueOnError: String?
     var runTokens: [String] = []
+    var env: [String: String] = [:]
 
     for (offset, line) in block.enumerated() {
         if isComment(line) { continue }
@@ -147,23 +159,53 @@ private func parseStep(_ block: [String], index: Int) -> WorkflowStep {
                 .split(whereSeparator: { $0 == " " || $0 == "\t" })
                 .map(String.init)
         }
+        if value(of: "env", in: line) != nil {
+            // Entries sit one level past the `env:` key itself (10-space indent here,
+            // vs. the 8-space step keys `value(of:)` anchors on), so the same "sibling key
+            // ends the block" rule as the run-payload loop above uses a shallower
+            // threshold: > 8, not > 10, because the only thing that can end an env block
+            // at this depth is the next 8-space step key.
+            var cursor = offset + 1
+            while cursor < block.count {
+                let next = block[cursor]
+                cursor += 1
+                if isBlank(next) { continue }
+                if indentation(of: next) <= 8 { break }   // a sibling key ends the block
+                if isComment(next) { continue }
+                // Split on the FIRST `:` only -- the SDK URL value contains `://`, and a
+                // naive split-on-every-`:` would shear it apart.
+                let parts = next.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+                guard parts.count == 2 else { continue }
+                let entryKey = String(parts[0]).trimmingCharacters(in: .whitespaces)
+                var entryValue = String(parts[1]).trimmingCharacters(in: .whitespaces)
+                // Strip surrounding double quotes so `"false"` and `false` compare equal --
+                // a disarm must not slip through on quoting style alone.
+                if entryValue.hasPrefix("\""), entryValue.hasSuffix("\""), entryValue.count >= 2 {
+                    entryValue = String(entryValue.dropFirst().dropLast())
+                }
+                env[entryKey] = entryValue
+            }
+        }
     }
 
     return WorkflowStep(name: name, index: index, ifCondition: ifCondition,
-                        continueOnError: continueOnError, runTokens: runTokens)
+                        continueOnError: continueOnError, runTokens: runTokens, env: env)
 }
 
-// Scoped to the host job's own region -- from its 2-space key to the next one. All three
+// Scoped to a single job's own region -- from its 2-space key to the next one. All three
 // jobs indent their steps identically, and four step names (`Check out repository`,
 // `Detect PR change scope`, `Complete docs-only PR`, `Show toolchain`) repeat verbatim
-// across them, so a whole-file split would make every name lookup ambiguous.
-private func hostJobSteps() throws -> [WorkflowStep] {
+// across them, so a whole-file split would make every name lookup ambiguous. Shared by
+// `jobSteps` (which further splits it into step blocks) and `jobLevelValue` (which reads a
+// job-level key that sits above `steps:` entirely), so the file-read and job-boundary logic
+// lives in exactly one place.
+private func jobLines(_ jobKey: String) throws -> [String] {
     let url = repositoryRoot().appendingPathComponent(workflowPath)
     let text = try String(contentsOf: url, encoding: .utf8)
     let allLines = text.components(separatedBy: "\n")
 
-    guard let jobStart = allLines.firstIndex(where: { $0.hasPrefix("  \(hostJobKey):") }) else {
-        XCTFail("\(workflowPath): no job keyed \(hostJobKey)")
+    guard let jobStart = allLines.firstIndex(where: { $0.hasPrefix("  \(jobKey):") }) else {
+        XCTFail("\(workflowPath): no job keyed \(jobKey)")
         return []
     }
 
@@ -177,12 +219,39 @@ private func hostJobSteps() throws -> [WorkflowStep] {
         }
     }
 
-    let lines = Array(allLines[jobStart..<jobEnd])
+    return Array(allLines[jobStart..<jobEnd])
+}
+
+private func jobSteps(_ jobKey: String) throws -> [WorkflowStep] {
+    let lines = try jobLines(jobKey)
     let starts = lines.indices.filter { lines[$0].hasPrefix("      - name:") }
     return starts.enumerated().map { order, start in
         let end = order + 1 < starts.count ? starts[order + 1] : lines.count
         return parseStep(Array(lines[start..<end]), index: order)
     }
+}
+
+// A job-level key (e.g. `container:`) at 4-space indent -- one level shallower than the
+// 8-space step keys `value(of:)` anchors on, since job-level keys sit above the `steps:`
+// list. Used to cross-pin the WASM job's container tag to its pinned SDK URL below.
+private func jobLevelValue(of key: String, jobKey: String) throws -> String? {
+    let lines = try jobLines(jobKey)
+    let prefix = "    \(key):"
+    for line in lines {
+        if isBlank(line) || isComment(line) { continue }
+        if line.hasPrefix(prefix) {
+            return String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+        }
+    }
+    return nil
+}
+
+private func hostJobSteps() throws -> [WorkflowStep] {
+    try jobSteps(hostJobKey)
+}
+
+private func wasmJobSteps() throws -> [WorkflowStep] {
+    try jobSteps(wasmJobKey)
 }
 
 private func stepNamed(_ name: String, in steps: [WorkflowStep]) -> WorkflowStep? {
@@ -299,5 +368,104 @@ final class WorkflowShapeTests: XCTestCase {
                     "\(step.name) must sit before \"\(spec.beforeStepName)\"")
             }
         }
+    }
+
+    // The WASM job is now a real blocking gate; pin its compile step's shape so a
+    // future `continue-on-error` cannot silently swallow a fail-closed WASM failure
+    // (the Slice 16 dead-step trap, in a different job).
+    func testWasmCompileStepIsBlockingShaped() throws {
+        let steps = try wasmJobSteps()
+        let matches = steps.filter {
+            $0.runTokens.contains("--targets") && $0.runTokens.contains("wasm")
+        }
+        XCTAssertEqual(
+            matches.count, 1,
+            "\(workflowPath): expected exactly one WASM compile step running "
+                + "--targets wasm in \(wasmJobKey)")
+        guard let step = matches.first else { return }
+        XCTAssertNil(
+            step.continueOnError,
+            "\(workflowPath): the WASM compile step must not be continue-on-error — it "
+                + "would swallow the fail-closed WASM gate (the Slice 16 trap)")
+        XCTAssertEqual(
+            step.runTokens.joined(separator: " "),
+            "./.github/scripts/cross-target-compile.sh --targets wasm",
+            "\(workflowPath): the WASM compile step's run payload must be exactly the "
+                + "cross-target script invocation — a trailing `|| true` or a second "
+                + "invocation would disarm the gate (the Slice 16 trap)")
+        XCTAssertEqual(
+            step.ifCondition, docsOnlyGuard,
+            "\(workflowPath): the WASM compile step must carry the docs-only guard")
+    }
+
+    // The script's `CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false` fallback ladder stays
+    // available -- this pin does not remove it, and does not need to. It only makes
+    // engaging it a deliberate, reviewed edit: adding that key (quoted or not) to this
+    // step's env makes THIS test fail, so the demotion has to show up as a diff to this
+    // file in code review instead of shipping silently with the whole suite green. This
+    // mirrors how a gate joins `pinnedGateSteps` by hand above -- widening what a step is
+    // allowed to do is always a hand-edit to a test, never free.
+    //
+    // Verified before this test existed: adding
+    // `CROSS_TARGET_WASM_EMBEDDED_BLOCKING: "false"` to the step's env left all existing
+    // WorkflowShapeTests green -- the reader did not model `env:` at all, so a step that
+    // silently downgraded embedded WASM from blocking to observational was indistinguishable
+    // from one that didn't.
+    func testWasmCompileStepEnvIsExactlyThePinnedSdk() throws {
+        let steps = try wasmJobSteps()
+        guard let step = steps.first(where: {
+            $0.runTokens.contains("--targets") && $0.runTokens.contains("wasm")
+        }) else {
+            XCTFail("\(workflowPath): no WASM compile step running --targets wasm in "
+                + "\(wasmJobKey)")
+            return
+        }
+        let expected = [
+            "CROSS_TARGET_WASM_SDK_URL": wasmSdkURL,
+            "CROSS_TARGET_WASM_SDK_CHECKSUM": wasmSdkChecksum,
+        ]
+        XCTAssertEqual(
+            step.env, expected,
+            "\(workflowPath): the WASM compile step's env does not equal exactly the "
+                + "pinned SDK URL/checksum pair. An extra env key here -- most importantly "
+                + "CROSS_TARGET_WASM_EMBEDDED_BLOCKING -- can silently demote embedded "
+                + "WASM from a blocking failure to an observational one while every other "
+                + "test in this file stays green; this exact-equality pin is what forces "
+                + "that demotion to be a deliberate, reviewed edit instead of a quiet one.\n"
+                + "  want: \(expected)\n  got:  \(step.env)")
+    }
+
+    // The WASM job's container image and the SDK bundle pinned in the compile step's env
+    // both encode a Swift toolchain version, and those two versions must move together.
+    // A mismatch fails closed at runtime (the script reports
+    // `sdk_unresolved_after_install`), but that reason string does not obviously read as
+    // "you bumped the container tag without bumping the SDK pin" -- so pin the relationship
+    // itself, the same way `testWindowConstantMatchesDeriveScript` cross-pins the Swift
+    // `windowSize` constant to the shell script's `WINDOW=`.
+    func testWasmContainerVersionMatchesPinnedSdkURL() throws {
+        guard let container = try jobLevelValue(of: "container", jobKey: wasmJobKey) else {
+            XCTFail("\(workflowPath): no container: key in \(wasmJobKey)")
+            return
+        }
+        // "swift:6.2.1-bookworm" -> tag "6.2.1-bookworm" -> version "6.2.1"
+        guard let colonIndex = container.firstIndex(of: ":") else {
+            XCTFail("\(workflowPath): container \"\(container)\" is not of the form "
+                + "image:tag")
+            return
+        }
+        let tag = String(container[container.index(after: colonIndex)...])
+        guard let version = tag.split(separator: "-").first else {
+            XCTFail("\(workflowPath): container tag \"\(tag)\" is not of the form "
+                + "VERSION-suffix")
+            return
+        }
+        XCTAssertTrue(
+            wasmSdkURL.contains(version),
+            "\(workflowPath): \(wasmJobKey)'s container is pinned to Swift \(version) "
+                + "(container: \(container)), but the pinned WASM SDK URL does not mention "
+                + "\(version) (\(wasmSdkURL)). The container tag and the SDK bundle version "
+                + "must be bumped together -- a mismatch fails closed at runtime as "
+                + "sdk_unresolved_after_install, which does not read as a version-drift "
+                + "hint on its own.")
     }
 }
