@@ -367,10 +367,15 @@ some descriptive header with spaces"
   assert_equal "false" \
     "$(CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false wasm_kind_blocking wasm_embedded)" \
     "embedded_ladder_demotes_to_observational"
-  # Slice 47 (P3 #3) — an unknown kind must fail CLOSED. This is asserted as a VALUE,
-  # not an exit code, and deliberately so: assert_equal runs its argument in a command
-  # substitution, and with no `set -e` an erroring helper would yield "" here and pass
-  # this assertion silently -- while also un-blocking the target at runtime.
+  # Slice 47 (P3 #3) — an unknown kind must fail CLOSED. wasm_kind_blocking returns a
+  # VALUE, not a non-zero exit, because its sole caller,
+  # LAST_BLOCKING="$(wasm_kind_blocking "$kind")", runs under no `set -e`: an erroring
+  # helper there would leave LAST_BLOCKING="" -- read as non-blocking by
+  # wasm_skip_result and never counted by count_blocking_failures, quieter than the bug
+  # it replaces. assert_equal runs none of this itself: `$(...)` expands at the call
+  # site before assert_equal is ever invoked, so it only compares two already-resolved
+  # strings and can't see an exit status -- a helper that errors while still printing
+  # "true" would pass here unnoticed.
   assert_equal "true" "$(wasm_kind_blocking bogus_kind 2>/dev/null)" "unknown_kind_blocks"
   # Task 2 — fail-closed: a provisioning skip on a blocking kind is a FAIL
   assert_equal "" "$(wasm_skip_result "" true)" "no_skip_proceeds_to_compile"
@@ -553,7 +558,7 @@ prepare_wasm_sdk() {
       skip="$precheck"
       if [[ "$precheck" != "sdk_unavailable" ]]; then
         echo "cross_target_sdk_install_skipped target=${kind}" \
-          "reason=bundle_install_already_failed prior_reason=${precheck}"
+          "reason=bundle_already_failed prior_reason=${precheck}"
       fi
     else
       echo "cross_target_command target=${kind} cmd=\"swift $(sdk_install_display "$url" "$checksum")\""
