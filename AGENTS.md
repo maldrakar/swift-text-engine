@@ -152,6 +152,15 @@ a located cell, fewer on a blank line or a failure path), so its cost class equa
   none), so it hand-rolls a narrow reader and compares whitespace-separated
   **tokens**, never substrings — `--variable-height` is a prefix of
   `--variable-height-mutation`.
+  It also carries `testJobNamesMatchRequiredCheckContexts`, a pin of a different
+  *class* from the rest of the file: every other guard here compares the workflow
+  against something else in the repository, but this one pins each job's `name:`
+  to its required-status-check context in the `Main` ruleset — GitHub
+  configuration that lives **outside** the repo and that `swift test` cannot
+  reach. So it does not prove the pair agrees; it makes the repository half
+  loud, and its failure message carries the ruleset id and the `gh api` command
+  because the realistic drift (rename job + table together, forget the ruleset)
+  is exactly what it cannot catch.
   `PointGeometryChecksumTests.swift` is the byte-identity checksum guard for
   `--point-geometry-query`: it pins the checksum to fold the full geometry (both
   boxes, both fractions), not just the indices, so a zeroed multiplier or a
@@ -258,7 +267,7 @@ Three jobs:
   **blocking** for both `TextEngineCore` and `TextEngineReferenceProviders`, via
   `./.github/scripts/cross-target-compile.sh --targets ios`. This is the only
   hosted macOS job.
-- **WASM cross-target observation** on `ubuntu-latest` with
+- **WASM cross-target compile** on `ubuntu-latest` with
   `swift:6.2.1-bookworm`: WASM + embedded WASM compile for both `TextEngineCore`
   and `TextEngineReferenceProviders` via
   `./.github/scripts/cross-target-compile.sh --targets wasm`. Since Slice 46 this
@@ -270,11 +279,6 @@ Three jobs:
   per-kind: embedded WASM alone can be demoted back to observational via
   `CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false` if a future SDK regresses it,
   without touching the non-embedded `wasm` kind.
-  **Known wart**: the job/context is still *named* `WASM cross-target
-  observation` even though it now blocks — renaming it (and updating the `Main`
-  ruleset's required-check context to match) is deliberately deferred to a
-  follow-up repo-policy slice, so the required-check context does not move out
-  from under an in-flight PR. Do not rename it as a drive-by edit.
 
 A `continue-on-error` step cannot be a gate. It swallows every non-zero exit —
 budget misses, correctness failures, and crashes alike (the Slice 16 dead-step
@@ -285,7 +289,7 @@ point one step is both.
 Required-check policy: the public repository `maldrakar/swift-text-engine` has
 an active default-branch ruleset named `Main` (id `17656807`) that requires the
 three Swift CI job contexts for PRs targeting `main`: `Host tests and benchmark
-gate`, `iOS cross-target compile`, and `WASM cross-target observation`.
+gate`, `iOS cross-target compile`, and `WASM cross-target compile`.
 Strict required-status-check policy is enabled, so PRs must be tested with the
 latest base branch state.
 
@@ -309,7 +313,15 @@ checks are the merge gate.
 Bypass caveat: the ruleset preserves the existing bypass actor shape, and the
 current admin user can bypass it. Required checks are configured and enforced
 for normal PR flow, but bypass-capable actors can still override the ruleset.
-Last verified: 2026-06-16 via `gh api`; see
+The WASM context was renamed from `WASM cross-target observation` in Slice 47;
+the ruleset was updated in the same slice, via a drop-rename-readd sequence
+(the context is the job's `name:`, and the ruleset lives outside the repo, so
+the two cannot land atomically). `WorkflowShapeTests`'s
+`testJobNamesMatchRequiredCheckContexts` pins each job's `name:` to its context
+at `swift test` time — it cannot reach the ruleset, so it makes the repository
+half loud rather than proving the pair agrees.
+Last verified: 2026-07-20 via `gh api`; see
+`docs/superpowers/verification/2026-07-20-wasm-required-check-rename.md` and
 `docs/superpowers/verification/2026-06-16-swift-ci-required-checks.md`.
 
 ## Gate budgets
