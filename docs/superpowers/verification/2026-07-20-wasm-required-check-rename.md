@@ -8,7 +8,7 @@ written, the deviation is recorded rather than silently "passed".
 - **Plan:** `docs/superpowers/plans/2026-07-20-wasm-required-check-rename.md`
 - **Branch:** `slice-47-wasm-required-check-rename`
 - **Merge base:** `be763dc`
-- **Implementation HEAD:** `38ac4e4`
+- **Implementation HEAD:** `bb6e67b` (the commit merged by PR #108)
 - **PR:** [#108](https://github.com/maldrakar/swift-text-engine/pull/108)
 - **Ruleset:** `Main`, id `17656807`, repo `maldrakar/swift-text-engine`
 
@@ -22,6 +22,7 @@ written, the deviation is recorded rather than silently "passed".
 | `77ba95c` | fix: fail closed on an unknown WASM kind |
 | `dbaf2a8` | fix: short-circuit the SDK drift path with its own reason |
 | `88e7694` | docs: stop quoting a frozen 580us, and caveat the bare wasm command |
+| `bb6e67b` | docs: record local verification and the deliberate PR wedge |
 | `38ac4e4` | docs: correct comment mechanics and drift-path reason literal in cross-target-compile.sh |
 
 ## Task 1 — pre-change baseline (measured, not recalled)
@@ -375,6 +376,13 @@ WASM cross-target compile       SUCCESS   pass
 
 state=OPEN  mergeStateStatus=CLEAN
 ```
+
+> **Correction (added in the Slice 47 post-slice review).** The capture above is the state
+> at the moment AC7 was recorded. PR #109 has since been **merged** as `34c7fb1`, which is
+> the current `main`. Note also that the run cited below (`29753701084`) is at head
+> `f7af501`, one commit before #109's merged head `39294bc` — the enforcement evidence is
+> from the earlier head. Nothing asserted above is false; both facts are recorded so a
+> later reader is not misled by a snapshot.
 
 Live ruleset at the same moment:
 
