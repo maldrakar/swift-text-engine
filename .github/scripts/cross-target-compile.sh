@@ -175,7 +175,18 @@ wasm_kind_blocking() {
         printf 'true'
       fi
       ;;
-    *) printf 'false' ;;
+    *)
+      # Fail CLOSED. Returning a non-zero exit instead would be WORSE than the `false`
+      # this replaces: the sole caller is `LAST_BLOCKING="$(wasm_kind_blocking "$kind")"`
+      # and this script has no `set -e`, so the error is swallowed and LAST_BLOCKING
+      # becomes "" -- which wasm_skip_result reads as non-blocking and
+      # count_blocking_failures never counts. `false` at least PRINTS blocking=false in
+      # the target line; "" prints an empty field and is equally uncounted. The hard
+      # exit for an unknown kind lives at the dispatch sites below, where it is not
+      # inside a command substitution and can actually propagate.
+      echo "warn=unknown_wasm_kind fn=wasm_kind_blocking kind=$1 defaulting=blocking" >&2
+      printf 'true'
+      ;;
   esac
 }
 
@@ -336,6 +347,11 @@ some descriptive header with spaces"
   assert_equal "false" \
     "$(CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false wasm_kind_blocking wasm_embedded)" \
     "embedded_ladder_demotes_to_observational"
+  # Slice 47 (P3 #3) — an unknown kind must fail CLOSED. This is asserted as a VALUE,
+  # not an exit code, and deliberately so: assert_equal runs its argument in a command
+  # substitution, and with no `set -e` an erroring helper would yield "" here and pass
+  # this assertion silently -- while also un-blocking the target at runtime.
+  assert_equal "true" "$(wasm_kind_blocking bogus_kind 2>/dev/null)" "unknown_kind_blocks"
   # Task 2 — fail-closed: a provisioning skip on a blocking kind is a FAIL
   assert_equal "" "$(wasm_skip_result "" true)" "no_skip_proceeds_to_compile"
   assert_equal "fail" "$(wasm_skip_result sdk_unavailable true)" "skip_on_blocking_is_fail"
@@ -518,6 +534,10 @@ prepare_wasm_sdk() {
       WASM_SDK_ID_WASM_EMBEDDED="${sdk_id:-}"
       WASM_SKIP_WASM_EMBEDDED="$skip"
       ;;
+    *)
+      echo "error=unknown_wasm_kind fn=prepare_wasm_sdk kind=${kind}" >&2
+      exit 1
+      ;;
   esac
 }
 
@@ -530,6 +550,10 @@ compile_wasm_package_for_kind() {
   case "$kind" in
     wasm) sdk_id="$WASM_SDK_ID_WASM"; skip="$WASM_SKIP_WASM" ;;
     wasm_embedded) sdk_id="$WASM_SDK_ID_WASM_EMBEDDED"; skip="$WASM_SKIP_WASM_EMBEDDED" ;;
+    *)
+      echo "error=unknown_wasm_kind fn=compile_wasm_package_for_kind kind=${kind}" >&2
+      exit 1
+      ;;
   esac
   result="$(wasm_skip_result "$skip" "$LAST_BLOCKING")"
   if [[ -n "$result" ]]; then
