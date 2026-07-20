@@ -24,7 +24,7 @@ import XCTest
 private let workflowPath = ".github/workflows/swift-ci.yml"
 private let hostJobKey = "host-tests-and-benchmark-gate"
 private let iosJobKey = "ios-cross-target-compile"
-private let wasmJobKey = "wasm-cross-target-observation"
+private let wasmJobKey = "wasm-cross-target-compile"
 
 // Each job's `name:` IS its required-status-check context in ruleset `Main`
 // (id 17656807) on maldrakar/swift-text-engine. GitHub matches required checks by that
