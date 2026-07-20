@@ -213,8 +213,8 @@ jobs:
         if: steps.change-scope.outputs.docs_only_pr != 'true'
         run: ./.github/scripts/cross-target-compile.sh --targets ios
 
-  wasm-cross-target-observation:
-    name: WASM cross-target observation
+  wasm-cross-target-compile:
+    name: WASM cross-target compile
     runs-on: ubuntu-latest
     container: swift:6.2.1-bookworm
     timeout-minutes: 20
@@ -268,7 +268,7 @@ jobs:
 
       - name: Complete docs-only PR
         if: steps.change-scope.outputs.docs_only_pr == 'true'
-        run: echo "mode=docs_only_pr job=wasm-cross-target-observation result=success"
+        run: echo "mode=docs_only_pr job=wasm-cross-target-compile result=success"
 
       - name: Show toolchain
         if: steps.change-scope.outputs.docs_only_pr != 'true'

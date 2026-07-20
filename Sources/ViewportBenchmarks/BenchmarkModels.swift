@@ -142,8 +142,10 @@ struct BenchmarkSummary {
         // The absolute PRODUCT ceiling, checked for frame-hot-path modes only (bulk edits
         // are discrete, possibly multi-frame actions -- exempt). It sits between
         // budgetExceeded and budgetStale on purpose: across the frame-hot-path set every
-        // regression p99 budget is <= 580us < the 1.67ms ceiling (GateFloorTests pins
-        // this), so exceeding the ceiling always also exceeds the regression budget and a
+        // regression p99 budget sits under the 1.67ms ceiling (GateFloorTests pins this
+        // against the committed budgets -- read the binding scenario and its margin from
+        // that test, not from a number frozen into this comment), so exceeding the
+        // ceiling always also exceeds the regression budget and a
         // plain regression already reported budget_exceeded above. This therefore fires
         // ONLY when the regression budget passes but the frame is blown -- the slow drift a
         // re-derived regression budget cannot catch. It never masks budget_stale, which

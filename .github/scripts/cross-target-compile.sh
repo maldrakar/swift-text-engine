@@ -175,7 +175,18 @@ wasm_kind_blocking() {
         printf 'true'
       fi
       ;;
-    *) printf 'false' ;;
+    *)
+      # Fail CLOSED. Returning a non-zero exit instead would be WORSE than the `false`
+      # this replaces: the sole caller is `LAST_BLOCKING="$(wasm_kind_blocking "$kind")"`
+      # and this script has no `set -e`, so the error is swallowed and LAST_BLOCKING
+      # becomes "" -- which wasm_skip_result reads as non-blocking and
+      # count_blocking_failures never counts. `false` at least PRINTS blocking=false in
+      # the target line; "" prints an empty field and is equally uncounted. The hard
+      # exit for an unknown kind lives at the dispatch sites below, where it is not
+      # inside a command substitution and can actually propagate.
+      echo "warn=unknown_wasm_kind fn=wasm_kind_blocking kind=$1 defaulting=blocking" >&2
+      printf 'true'
+      ;;
   esac
 }
 
@@ -192,6 +203,26 @@ wasm_skip_result() {
     printf 'fail'
   else
     printf 'skipped'
+  fi
+}
+
+# Decide what prepare_wasm_sdk should do for a kind BEFORE touching the network.
+# Prints one of:
+#   ""                    -> proceed to a real install attempt
+#   "sdk_unavailable"     -> no URL configured; nothing to install
+#   "<recorded reason>"   -> the shared bundle already failed definitively; short-
+#                            circuit with the SAME reason the first kind reported
+#
+# Both WASM kinds come from ONE swift.org bundle and prepare_wasm_sdk runs per kind.
+# Once that bundle has definitively failed -- whether the install failed or it installed
+# but yielded no resolvable id -- the second kind must not burn a second bounded-retry
+# ladder against it, and must report the same reason, so the log reads as one fault.
+wasm_install_precheck() {
+  local url="$1" recorded_reason="$2"
+  if [[ -z "$url" ]]; then
+    printf 'sdk_unavailable'
+  elif [[ -n "$recorded_reason" ]]; then
+    printf '%s' "$recorded_reason"
   fi
 }
 
@@ -336,10 +367,38 @@ some descriptive header with spaces"
   assert_equal "false" \
     "$(CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false wasm_kind_blocking wasm_embedded)" \
     "embedded_ladder_demotes_to_observational"
+  # Slice 47 (P3 #3) — an unknown kind must fail CLOSED. wasm_kind_blocking returns a
+  # VALUE, not a non-zero exit, because its sole caller,
+  # LAST_BLOCKING="$(wasm_kind_blocking "$kind")", runs under no `set -e`: an erroring
+  # helper there would leave LAST_BLOCKING="" -- read as non-blocking by
+  # wasm_skip_result and never counted by count_blocking_failures, quieter than the bug
+  # it replaces. assert_equal runs none of this itself: `$(...)` expands at the call
+  # site before assert_equal is ever invoked, so it only compares two already-resolved
+  # strings and can't see an exit status -- a helper that errors while still printing
+  # "true" would pass here unnoticed.
+  assert_equal "true" "$(wasm_kind_blocking bogus_kind 2>/dev/null)" "unknown_kind_blocks"
   # Task 2 — fail-closed: a provisioning skip on a blocking kind is a FAIL
   assert_equal "" "$(wasm_skip_result "" true)" "no_skip_proceeds_to_compile"
   assert_equal "fail" "$(wasm_skip_result sdk_unavailable true)" "skip_on_blocking_is_fail"
   assert_equal "skipped" "$(wasm_skip_result sdk_unavailable false)" "skip_on_observational_is_skip"
+  # Slice 47 (P3 #2, #4) — the shared-bundle precheck, now a PURE helper so the
+  # short-circuit is reachable from --self-test at all. Slice 46 could only exercise it
+  # by a live run with a bogus URL.
+  assert_equal "sdk_unavailable" "$(wasm_install_precheck "" "")" "precheck_no_url"
+  assert_equal "" "$(wasm_install_precheck http://b "")" "precheck_proceeds"
+  assert_equal "sdk_install_failed" \
+    "$(wasm_install_precheck http://b sdk_install_failed)" \
+    "precheck_short_circuits_install_failure"
+  # The P3 #2 fix proper: the DRIFT path short-circuits with ITS OWN reason. Before
+  # this, the second kind re-ran the whole ladder and could report a different reason
+  # than the first, reading as two unrelated faults instead of one.
+  assert_equal "sdk_unresolved_after_install" \
+    "$(wasm_install_precheck http://b sdk_unresolved_after_install)" \
+    "precheck_short_circuits_drift_with_same_reason"
+  # No URL wins over a recorded failure: with nothing configured to install, the
+  # actionable reason is the missing configuration.
+  assert_equal "sdk_unavailable" \
+    "$(wasm_install_precheck "" sdk_install_failed)" "precheck_no_url_precedence"
   # Task 2 — WASM pairs now count toward blocking failures (a fail counts; a
   # demoted/observational embedded skip does not). Pair order is 2 packages x
   # {ios_device, ios_simulator, wasm, wasm_embedded}.
@@ -365,7 +424,7 @@ WASM_SDK_ID_WASM=""
 WASM_SKIP_WASM=""
 WASM_SDK_ID_WASM_EMBEDDED=""
 WASM_SKIP_WASM_EMBEDDED=""
-WASM_BUNDLE_INSTALL_FAILED=""
+WASM_BUNDLE_FAILED_REASON=""
 PAIRS=()
 
 # Print the tail of a log file with clear delimiters, so failures are visible in
@@ -478,7 +537,7 @@ swift_sdk_install_retry() {
 # the resolved id and a skip reason ("" on success) in per-kind globals so both
 # packages reuse the same SDK without re-installing.
 prepare_wasm_sdk() {
-  local kind="$1" logfile="$2" sdk_id="" url checksum skip=""
+  local kind="$1" logfile="$2" sdk_id="" url checksum skip="" precheck
   if [[ -z "$SWIFT_VERSION" ]]; then
     skip="swift_version_unresolved"
   elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
@@ -487,25 +546,32 @@ prepare_wasm_sdk() {
     # Happy path: the first kind installs; the second kind's resolve above
     # already succeeds (the bundle now provides its id too), so this branch is
     # never entered for it and no second install happens.
-    # Failure path: if the shared install genuinely fails, WASM_BUNDLE_INSTALL_FAILED
-    # (set below) short-circuits the second kind straight to the same failure
-    # reason instead of burning a second full bounded-retry ladder against a
-    # host that just failed the first one.
+    # Failure path: once the shared bundle fails definitively -- install failure OR
+    # installed-but-unresolvable -- WASM_BUNDLE_FAILED_REASON (set below) short-
+    # circuits the second kind to the SAME reason via wasm_install_precheck, instead
+    # of burning a second full bounded-retry ladder against a host that just failed
+    # the first one.
     url="${CROSS_TARGET_WASM_SDK_URL:-}"
     checksum="${CROSS_TARGET_WASM_SDK_CHECKSUM:-}"
-    if [[ -z "$url" ]]; then
-      skip="sdk_unavailable"
-    elif [[ -n "$WASM_BUNDLE_INSTALL_FAILED" ]]; then
-      skip="sdk_install_failed"
-      echo "cross_target_sdk_install_skipped target=${kind} reason=bundle_install_already_failed"
+    precheck="$(wasm_install_precheck "$url" "$WASM_BUNDLE_FAILED_REASON")"
+    if [[ -n "$precheck" ]]; then
+      skip="$precheck"
+      if [[ "$precheck" != "sdk_unavailable" ]]; then
+        echo "cross_target_sdk_install_skipped target=${kind}" \
+          "reason=bundle_already_failed prior_reason=${precheck}"
+      fi
     else
       echo "cross_target_command target=${kind} cmd=\"swift $(sdk_install_display "$url" "$checksum")\""
       if ! swift_sdk_install_retry "$url" "$checksum" "${logfile}.install"; then
         skip="sdk_install_failed"
-        WASM_BUNDLE_INSTALL_FAILED="true"
+        WASM_BUNDLE_FAILED_REASON="sdk_install_failed"
         print_log_tail "${kind}-sdk-install" "${logfile}.install"
       elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
         skip="sdk_unresolved_after_install"
+        # Slice 47 (P3 #2): record THIS reason too. Slice 46 recorded only the
+        # install failure, so the drift path let the second kind re-run a full
+        # ladder against an already-installed SDK and report a different reason.
+        WASM_BUNDLE_FAILED_REASON="sdk_unresolved_after_install"
       fi
     fi
   fi
@@ -517,6 +583,10 @@ prepare_wasm_sdk() {
     wasm_embedded)
       WASM_SDK_ID_WASM_EMBEDDED="${sdk_id:-}"
       WASM_SKIP_WASM_EMBEDDED="$skip"
+      ;;
+    *)
+      echo "error=unknown_wasm_kind fn=prepare_wasm_sdk kind=${kind}" >&2
+      exit 1
       ;;
   esac
 }
@@ -530,6 +600,10 @@ compile_wasm_package_for_kind() {
   case "$kind" in
     wasm) sdk_id="$WASM_SDK_ID_WASM"; skip="$WASM_SKIP_WASM" ;;
     wasm_embedded) sdk_id="$WASM_SDK_ID_WASM_EMBEDDED"; skip="$WASM_SKIP_WASM_EMBEDDED" ;;
+    *)
+      echo "error=unknown_wasm_kind fn=compile_wasm_package_for_kind kind=${kind}" >&2
+      exit 1
+      ;;
   esac
   result="$(wasm_skip_result "$skip" "$LAST_BLOCKING")"
   if [[ -n "$result" ]]; then
