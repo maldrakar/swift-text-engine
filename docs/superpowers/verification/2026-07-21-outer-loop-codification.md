@@ -635,6 +635,44 @@ PASS/FAIL is NOT decided here: the comparison target
 (`docs/superpowers/arcs/wrap.md`) is created by Task 4, which performs the
 subject-level mapping and records the verdict below.
 
+### AC6 comparison and verdict (Task 4)
+
+Subject-level mapping of the subagent's scoreboard rows onto the committed
+`docs/superpowers/arcs/wrap.md` scoreboard:
+
+| Subagent row (abridged subject) | Subject class | Committed criterion |
+|---|---|---|
+| 1 — wrap-width change (rotation/resize) doesn't recompute the document; frame cost viewport-bounded | width-change cost | 1 |
+| 2 — core memory not linear with wrap on; provider abstraction; `--memory-shape` extends | memory + memory-shape | 2 |
+| 3 — wrap-aware equivalents (visual-row compute, y→row, point→(row, cell)); no-wrap preserved; infinite-width equivalence oracle | wrap-aware queries + oracle | 3 |
+| 4 — 100k+/>10MB scroll holds p95/p99 + absolute 60 FPS; wrap modes become blocking gates via harvest → derive | budgets + gates | 4 |
+| 5 — incremental edits under wrap stay in frame-hot-path budget | incremental edits | 5 |
+| 6 — iOS CoreText host + browser canvas `measureText` host, both smooth-scroll | hosts | 6 |
+
+Set equality: six-for-six, and no extra criterion rows — the subagent's
+"Constraints" block is correctly rendered as non-scored bullets under the
+table (the skill's "Constraints are NOT rows" instruction, followed by a
+non-author).
+
+Named top feasibility risk: criterion 1, with a structural rationale (wrap
+width is a runtime parameter, so cumulative visual-row offsets become a
+width-dependent prefix sum; eager recomputation violates criterion 1 while
+full per-width memoization violates criterion 2 — no existing prefix-search
+hook has faced this). This is the SAME choice as the committed arc file's
+risk-first note, so there is no divergence to record as design signal —
+the two rationales agree on the mechanism (who owns row data at a width /
+what recomputes on change).
+
+Fork markers: two — "FORK A" (sequencing after the y→row node: resize-safe
+indexing vs breadth vs gate-first) and "FORK B" (which platform host ships
+first). Requirement is "at least one": met. Design signal worth keeping:
+FORK B coincides in subject with the committed map's node-8 fork; FORK A is
+sequencing signal the committed map absorbs by its linear node ordering
+(nodes 2 → 5) — noted for the first live map pass, no action now.
+
+**AC6: PASS** — subject-level set equality (6/6, no extras), a named top
+feasibility risk with a defensible rationale, and two fork markers.
+
 ## Artifact checks (AC1–AC4)
 
 ### AC1 — skill file checks (Task 2)
@@ -653,6 +691,29 @@ OK: Candidate options
 No workflow summary leaks into the frontmatter description (the grep found
 nothing; `leak_exit=1` is the pass), and all four contract headers are
 present as `###` headings.
+
+Bonus discovery evidence (beyond what the plan expected): the
+`choosing-next-slice` skill appeared in THIS session's available-skills
+listing shortly after the file was created — the plan assumed a file
+created mid-session cannot appear in its own session's list and deferred
+discovery evidence to the post-slice-review session (which still records
+its own, per AC1).
+
+### AC2 — arc file checks (Task 4)
+
+```
+$ grep -c '^| [1-6] |' docs/superpowers/arcs/wrap.md
+6
+$ grep -c '| open | — |' docs/superpowers/arcs/wrap.md
+6
+$ grep -c 'fork:' docs/superpowers/arcs/wrap.md
+1
+$ grep -q 'pointOf(line:column:)' docs/superpowers/arcs/wrap.md && echo "decision-log OK"
+decision-log OK
+```
+
+Six scoreboard rows, all six open with no evidence yet, one `fork:` marker
+(node 8), and the decision log carries the wrap-over-`pointOf` entry.
 
 ## AC8 — PR run evidence
 
