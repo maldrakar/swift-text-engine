@@ -505,7 +505,135 @@ P2).
 
 ## AC6 — Mode 1 executability run
 
-<prompt, transcript, and comparison recorded by Tasks 3–4>
+Precondition verified immediately before dispatch (part of test validity —
+the committed arc file must not exist yet, so the run cannot crib from it):
+
+```
+$ ls docs/superpowers/arcs 2>&1; echo "arcs_exit=$?"
+ls: docs/superpowers/arcs: No such file or directory
+arcs_exit=1
+```
+
+Dispatched via the harness Agent tool, `subagent_type: general-purpose`,
+model `sonnet`. Dispatch prompt, verbatim:
+
+> This is a process-execution exercise. Read EXACTLY two files and nothing
+> else: `.claude/skills/choosing-next-slice/SKILL.md` and
+> `docs/wrap-project-brief.md`. Do not open any other file, do not list
+> directories, do not search, do not read the initial brief the wrap brief
+> references — where the wrap brief inherits constraints by reference,
+> assume they exist and are enforced. A new arc is starting from that
+> brief; the previous arc closed with all its criteria met and CI green.
+> Execute the skill's Mode 1 (Arc start) and output, as one markdown
+> message: (1) the scoreboard table derived from the brief; (2) a draft
+> slice map with fork markers; (3) the named top feasibility risk with your
+> rationale; (4) which slice you would run first and why. Output only — do
+> not create or modify any files. End with a line `Files read: <list>`.
+
+Transcript (verbatim; one restoration applied: the harness notification
+layer XML-escapes `>` in agent output, and those transport escapes were
+restored to the `>` characters the agent wrote — e.g. ">10MB" and the
+map's ASCII "->" arrows. No other characters altered):
+
+````markdown
+# Wrap Arc — Mode 1 (Arc Start) Execution
+
+## 1. Scoreboard
+
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| 1 | Wrap-width change (rotation/resize) doesn't require recomputing the whole document — frame cost stays viewport-bounded, in the spirit of the existing O(log N) + O(buffer) | open | — |
+| 2 | Core memory doesn't grow linearly with document size when wrap is enabled — wrap data lives behind the provider abstraction like other metrics; `--memory-shape` extends to the wrap path | open | — |
+| 3 | Existing queries gain wrap-aware equivalents — compute over visual rows, y→row, point→(row, cell); no-wrap path is preserved; wrap path at infinite wrap width must equal it (equivalence oracle, mirroring "variable == fixed at uniform metrics") | open | — |
+| 4 | Scrolling 100k+ lines / >10MB with wrap enabled holds p95/p99 budgets and the absolute 60 FPS ceiling; new wrap modes become blocking CI gates via the existing harvest → derive recipe | open | — |
+| 5 | Incremental edits with wrap enabled (in-line edit, structural insert/delete) stay within the frame-hot-path budget | open | — |
+| 6 | iOS verification host feeds the core CoreText-measured advances; browser verification host feeds canvas `measureText`-measured advances over the WASM build; both observably scroll a wrapped document smoothly | open | — |
+
+**Constraints** (enforced per-slice, not scored as rows):
+- All constraints of the [initial brief](../initial-project-brief.md) — Foundation-free core, Swift Embedded compatibility, zero-dependency, iOS+WASM compile with no source changes, strict viewport-bounded core memory — carry forward in full to the wrap layer.
+- Break opportunities and advance metrics are provider-supplied; the core contains no Unicode tables, shaping, or font knowledge — only the math of packing advances into rows.
+- Bidi and shaping are out of scope; rows are described in visual order.
+- No rendering in the core. Verification hosts are separate non-core targets with no reusable-component commitment — "a scrolling rectangle with text."
+
+All six criteria are open — this is an arc start, nothing wrap-related has shipped yet.
+
+## 2. Draft slice map
+
+```
+W1 [pending] Wrap provider abstraction + single-line row-packing math
+   (no deps — entry point; front-loads the top risk, see §3)
+   |
+   v
+W2 [pending] Cross-document wrap compute (visual-row viewport range)
+   (fallback/generic indexing first; equivalence oracle v1 @ infinite width)
+   |
+   v
+W3 [pending] y->row query + geometry companion (wrap-aware lineAt/lineGeometryAt)
+   |
+   v
+FORK A: sequencing call, all three still ship —
+        (a) harden to resize-safe O(log N) wrap indexing now [lean — retires
+            the named top risk for real, see §3/§4],
+        (b) extend breadth to point->(row,cell) first, or
+        (c) promote --memory-shape + a first wrap CI gate on what exists first?
+   |
+   +-- W4a [pending] Resize-safe O(log N) wrap indexing
+   +-- W4b [pending] point->(row,cell) 2D composite for wrap
+   +-- W4c [pending] --memory-shape wrap extension + first wrap gate promotion
+   |
+   v
+W5 [pending] Incremental edits under wrap (in-line + structural insert/delete)
+   (topological dep on W4a — needs an incrementally-updatable wrap index)
+   |
+   v
+W6 [pending] Remaining blocking CI-gate promotions for wrap benchmark modes
+   |
+   v
+W8 [pending] Arc-closing hardening (remaining oracle/gate gaps, scoreboard all-done)
+   ^
+   |
+FORK B (parallel branch — only needs W2/W3, does not wait on W4-W6):
+        iOS CoreText host first, vs. browser/WASM canvas-measureText host
+        first, vs. both together in one slice? [no lean — symmetric platforms,
+        pure scheduling call]
+   |
+   +-- W7a [pending] iOS verification host (CoreText advances, smooth-scroll demo)
+   +-- W7b [pending] Browser/WASM verification host (canvas measureText, smooth-scroll demo)
+```
+
+(Labels are placeholders for map slugs, not committed slice numbers — the first would likely land after the in-flight Slice 48 outer-loop-codification work, but that's scheduling, not this map's concern.)
+
+## 3. Top feasibility risk
+
+**Criterion 1 — wrap-width change must not require a full-document recompute, with frame cost bounded by the viewport.**
+
+Every other criterion is a mechanical extension of a pattern already proven up to twelve times in this codebase: add a wrap-aware overload of an existing query, wire an equivalence oracle against the no-wrap path, promote a new benchmark mode to a blocking gate via harvest→derive, extend `--memory-shape`. Slices 27 through 40 are a long, repeated demonstration that this shape of work lands cleanly.
+
+Criterion 1 is structurally different. Everything the engine currently indexes cumulatively (line offsets, column offsets) is a **static** per-document-state quantity that only changes on an explicit structural mutation the engine already knows how to update incrementally (Fenwick/balanced-tree providers). Wrap width is not document state — it's a **runtime parameter**, and the row count a single logical line produces is a function of that parameter. That makes the cumulative visual-row offset of every line downstream of line 0 a width-dependent prefix sum. A resize invalidates that entire prefix sum at once, yet criterion 1 demands the next frame's cost stay viewport-bounded, and criterion 2 simultaneously forbids caching per-width layouts in core memory (that would grow with document size). Naive eager recomputation violates criterion 1; naive full memoization violates criterion 2. Nothing in the current architecture's prefix-search hooks (`lineIndex(containingOffset:)`, `firstLineIndex(withOffsetAtOrAbove:startingAtLine:)`) has ever had to answer a query whose underlying cumulative structure itself changes on every call with a new parameter — this needs either a genuinely new provider-hook shape or a lazy/incremental re-flow structure that has no precedent in this codebase yet.
+
+This is exactly the kind of thing the skill's red flag warns about ("If the scariest thing feels comfortable to postpone, that is the red flag") — it would be easy to instead start with the breadth work (point→(row,cell), more query surface) since that's comfortable, proven territory, and defer the resize question until "later." The map above resists that by putting the packing-math foundation (W1) and cross-document compute (W2) first, and by making "harden to resize-safe indexing" the leaned option at Fork A rather than letting breadth-first or gate-first quietly become the path of least resistance.
+
+## 4. First slice to run
+
+**W1 — wrap provider abstraction + single-line row-packing math.**
+
+It's the only node in the map with no dependencies, so it's the only legal entry point regardless of risk. It's also where the risk named in §3 first becomes tractable: before any cross-document indexing question can be answered, the core needs a settled shape for what a visual row *is* (its provider-supplied inputs — break opportunities, advances — and the packing algorithm that turns one line's advances into an ordered sequence of rows in visual order). Getting that single-line contract right first is what makes it possible to reason about the resize/prefix-sum problem in W2/Fork A concretely instead of abstractly. Starting anywhere else (e.g., jumping to compute or to a platform host) would mean building on a data model that hasn't been proven out yet.
+
+---
+
+**Process note:** Mode 1 step 4 (debt carry-over from `docs/superpowers/debt-ledger.md`) and a full Mode 2 pass for step 5 (scoreboard delta / debt-ledger delta / falsifiability audit for slice selection) were not performed — both require reading files outside the two this exercise permitted. The "first slice" answer above is the direct selection the map and risk analysis support, not the output of a complete Mode 2 checklist.
+
+Files read: .claude/skills/choosing-next-slice/SKILL.md, docs/wrap-project-brief.md
+````
+
+Self-declared **`Files read:`** line: exactly the two permitted files —
+`.claude/skills/choosing-next-slice/SKILL.md` and
+`docs/wrap-project-brief.md` (see the subagent-run caveat at the top of
+this doc: this declaration is the recordable evidence).
+
+PASS/FAIL is NOT decided here: the comparison target
+(`docs/superpowers/arcs/wrap.md`) is created by Task 4, which performs the
+subject-level mapping and records the verdict below.
 
 ## Artifact checks (AC1–AC4)
 
