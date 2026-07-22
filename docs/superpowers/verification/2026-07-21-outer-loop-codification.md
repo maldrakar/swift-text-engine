@@ -715,6 +715,67 @@ decision-log OK
 Six scoreboard rows, all six open with no evidence yet, one `fork:` marker
 (node 8), and the decision log carries the wrap-over-`pointOf` entry.
 
+### AC3 — debt ledger checks (Task 5)
+
+```
+$ grep -c '^| D-' docs/superpowers/debt-ledger.md
+11
+$ grep -E '^\| D-' docs/superpowers/debt-ledger.md | awk -F'|' '{print $6}' | grep -vE 'open|scheduled\(slice-[0-9]+\)|discharged\(|deferred\(user, [0-9-]+\)|accepted-risk'; echo "badstatus_exit=$?"
+badstatus_exit=1
+$ grep -E '^\| D-' docs/superpowers/debt-ledger.md | grep -vE '\[.*\]\(|ruleset config'; echo "unlinked_exit=$?"
+unlinked_exit=1
+$ grep -n 'from step 1' docs/superpowers/debt-ledger.md; echo "placeholder_exit=$?"
+placeholder_exit=1
+```
+
+Eleven rows (the plan's template floor is five): every status is from the
+legal set, every row cites a linked origin review (or the sanctioned
+"ruleset config" source for D-4), and no extraction placeholder survived.
+
+Seeding decisions, recorded for the record (all statements trued against
+the review texts, each named file/function re-verified on the current
+tree by `grep`/`ls` before seeding):
+
+- The spec's "precheck success state" residual is D-1's fix description,
+  not a separate row — slice 47's P2 #1 *is* the precheck-success-state
+  item (its Fix line proposes the third state).
+- The "cross-target script residuals" slot split into D-3 (retry logfile
+  overwrite, slice 47 P3 #6) and D-6 (unpinned shell-purity exemption,
+  slice 47 risks table), ids continued sequentially per the plan. Born
+  links corrected to the reviews that actually name them: the plan
+  template attributed the residuals to the slice 45 review, but the slice
+  45 review (realistic-provider gate promotion) contains no cross-target
+  script findings — the naming rows are slice 47's (debt stemming from the
+  slice 45/46 script work, as D-3's statement records).
+- D-7/D-8/D-9 (harvester provenance, bulk-edit absolute backstop, p95 thin
+  axis) are the three cross-review P2s carried by the slice 44/45/46
+  reviews and dropped silently by slice 47's. Decision 7's operative
+  sentence ("re-reads those four reviews and takes what is still real")
+  plus its P3-only staleness presumption ("older P3s are presumed stale")
+  put them in; after this slice the ledger — not the review chain — is the
+  carry mechanism, so leaving still-real P2s out of the seed would orphan
+  them. All three verified still real (harvester has no
+  conclusion/event/fork check; `BenchmarkMode.isFrameHotPath` still
+  excludes `bulk_structural_mutation`; the p95 floor's median-only backup
+  term is structural). Note: their origins are ≥ 3 completed slices old,
+  so the escalation rule fires for all three at the first live Mode 2 run
+  (AC7) — by design, giving the user one consolidated schedule-or-defer
+  moment.
+- D-10/D-11 are slice 47's own still-real P3s (stale AGENTS.md "see"
+  pointer; pin models `name:` only) — from the newest in-bound review, so
+  the staleness presumption does not apply.
+- Pruned as stale or discharged (spot-verified): slice 46's P3 #3/#4
+  (closed by slice 47 Tasks 5–6), the frozen-580 sites (closed by slice 47
+  Task 7), and the recurring plan-checkbox / parser-unit-test /
+  "contributes 8" P3 tails (not re-observed by the slice 47 review —
+  presumed stale per Decision 7; they re-enter only by being
+  re-observed).
+- NOT pruned — corrected at task review's finding (this bullet originally
+  mislisted it as closed): slice 46's P3 #2, the success→drift
+  double-install. Slice 47 closed only the failure→failure sibling path;
+  its review re-observed the drift path and escalated it to P2 #1, which
+  this ledger seeds open as D-1.
+
 ## AC8 — PR run evidence
 
 <recorded by Task 7>
