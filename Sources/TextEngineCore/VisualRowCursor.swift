@@ -85,6 +85,24 @@ extension ViewportVirtualizer {
         metrics: Metrics
     ) -> VisualRowQuery<Metrics> {
         let count = metrics.columnCount(inLine: line)
+        if count < 0 {
+            return .failure(.negativeColumnCount)
+        }
+        // `wrapWidth > 0` accepts +∞ (the equivalence case) and rejects NaN, −∞, ≤ 0.
+        // Do NOT write `wrapWidth.isFinite && wrapWidth > 0`: +∞ is not finite.
+        if !(wrapWidth > 0) {
+            return .failure(.nonPositiveWrapWidth)
+        }
+        // O(1) contract probe, before the blank short-circuit, for parity with columnAt.
+        if metrics.columnOffset(inLine: line, column: 0) != 0.0 {
+            return .failure(.invalidColumnMetrics)
+        }
+        if count > 0 {
+            let total = metrics.columnOffset(inLine: line, column: count)
+            if !total.isFinite || total <= 0.0 {
+                return .failure(.invalidColumnMetrics)
+            }
+        }
         return .rows(VisualRowCursor(line: line, columnCount: count, wrapWidth: wrapWidth, metrics: metrics))
     }
 }
