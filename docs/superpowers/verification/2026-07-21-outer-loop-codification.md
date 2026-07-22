@@ -801,6 +801,30 @@ policy_exit=1
 Every changed path is Markdown and none is under `.github/` — the diff
 qualifies for the docs-only fast path on all three required CI contexts.
 
+### Artifact file tree (Task 7)
+
+```
+$ ls -la .claude/skills/choosing-next-slice/ docs/superpowers/arcs/ && ls docs/superpowers/debt-ledger.md
+.claude/skills/choosing-next-slice/:
+total 16
+drwxr-xr-x@ 3 aabanschikov  staff    96 Jul 22 16:25 .
+drwxr-xr-x@ 3 aabanschikov  staff    96 Jul 22 16:25 ..
+-rw-r--r--@ 1 aabanschikov  staff  5026 Jul 22 16:25 SKILL.md
+
+docs/superpowers/arcs/:
+total 8
+drwxr-xr-x@ 3 aabanschikov  staff    96 Jul 22 16:58 .
+drwxr-xr-x@ 8 aabanschikov  staff   256 Jul 22 17:07 ..
+-rw-r--r--@ 1 aabanschikov  staff  3570 Jul 22 16:58 wrap.md
+docs/superpowers/debt-ledger.md
+```
+
+`SKILL.md`, `wrap.md`, and `debt-ledger.md` all present at their contract
+paths. A final whole-branch review (most capable model) ran before this
+push and returned READY: zero Critical/Important findings; its three
+cosmetic notes and the per-task Minor triage live in the session's progress
+ledger and the post-slice review picks them up.
+
 ## AC8 — PR run evidence
 
 <recorded by Task 7>
