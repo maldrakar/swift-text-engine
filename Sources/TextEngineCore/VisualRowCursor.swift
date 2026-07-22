@@ -78,7 +78,9 @@ extension ViewportVirtualizer {
     /// Streams the visual rows of logical line `inLine` packed to `wrapWidth`, in
     /// visual order. Stateless; the cursor is lazy (no packing happens here).
     /// `inLine` is a precondition (the source carries no `lineCount`), exactly like
-    /// `columnAt`. Task 4 adds the width + metrics validation ladder.
+    /// `columnAt`. Validates `wrapWidth` (`> 0`, so `+∞` is allowed — the
+    /// equivalence case) and runs the same O(1) metrics ladder as `columnAt`
+    /// before handing back the lazy cursor.
     public static func visualRows<Metrics: WrapMetricsSource>(
         inLine line: Int,
         wrapWidth: Double,
