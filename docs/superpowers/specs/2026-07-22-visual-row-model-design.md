@@ -153,57 +153,102 @@ but kept as a self-describing addressing field (node 4 will want it), mirroring
 how `LineGeometry` carries its own `lineIndex`. Placed in `ViewportTypes.swift`
 beside `LineGeometry`/`ColumnGeometry`.
 
-### Decision 4 — Streaming `VisualRowCursor`, O(1) core memory
+### Decision 4 — Streaming `VisualRowCursor<Metrics>`, O(1) core memory
+
+The cursor **holds the metrics provider** so `next()` can lazily read
+`columnOffset`/`canBreak` as the greedy walk advances — so, like
+`VariableLineGeometryCursor<Metrics: LineMetricsSource>` (its direct
+precedent, which stores `private let metrics: Metrics`), it **must be
+generic**:
 
 ```swift
-public struct VisualRowCursor { /* forward, non-Equatable, mutable state */
+public struct VisualRowCursor<Metrics: WrapMetricsSource> { // forward, mutable, non-Equatable
+    private let metrics: Metrics
     public mutating func next() -> VisualRow?
 }
 ```
 
-State is O(1): line index, `columnCount`, `wrapWidth`, and the current start
-column; each `next()` runs one greedy walk. This matches `LineGeometryCursor`
-(standalone struct + `mutating func next() -> T?`, handed back by a
-`ViewportVirtualizer` factory) and keeps core memory constant per the hard
-constraint. It **composes into node 2** — node 2 chains per-line cursors across
-the viewport buffer with no array materialized. The cursor holds the metrics
-value; tests collect it into `[VisualRow]` in two lines.
+State is O(1): `line`, `columnCount`, `wrapWidth`, the current start column,
+`rowInLine`, a `finished` flag, and the `metrics` value; each `next()` runs one
+greedy walk. This matches `VariableLineGeometryCursor` (standalone generic
+struct + `mutating func next() -> T?`, handed back by a `ViewportVirtualizer`
+factory) and keeps core memory constant per the hard constraint. It **composes
+into node 2** — node 2 chains per-line cursors across the viewport buffer with
+no array materialized. Tests collect it into `[VisualRow]` in two lines.
+Embedded-safe: `VariableLineGeometryCursor<Metrics>` already compiles for
+iOS + WASM + embedded WASM.
 
 For a valid line the cursor yields **≥ 1** row (a blank line yields exactly the
 `[0, 0)` row, then `nil`).
 
 ### Decision 5 — `visualRows` entry point validates width; `inLine` is a precondition
 
+Because `.rows` carries the generic `VisualRowCursor<Metrics>`, the query enum
+is **also generic** — the project's **first generic query enum**. This is a
+deliberate, explicitly-ratified new public form, not an accident of the plan:
+it is the hybrid the codebase does not yet have — a *validating* entry point
+(so it needs a typed `.failure` channel) that hands back a *provider-holding
+cursor* (so the payload is generic). The two existing patterns kept these
+apart — validating query methods return a non-generic `Equatable` enum of
+value types (`LineQuery`/`ColumnQuery`), and non-validating cursor factories
+return a bare generic cursor (`geometry(for:metrics:) → VariableLineGeometryCursor<Metrics>`).
+`visualRows` needs both, so:
+
 ```swift
-public enum VisualRowQuery {   // NOT Equatable: carries a mutable, non-Equatable cursor
-    case rows(VisualRowCursor)               // one or more rows (blank line ⇒ one)
-    case failure(ViewportValidationError)    // invalid wrapWidth
+public enum VisualRowQuery<Metrics: WrapMetricsSource> {  // generic; NOT Equatable (carries a cursor)
+    case rows(VisualRowCursor<Metrics>)      // one or more rows (blank line ⇒ one)
+    case failure(ViewportValidationError)    // invalid wrapWidth or malformed metrics
 }
 
 extension ViewportVirtualizer {
     public static func visualRows<Metrics: WrapMetricsSource>(
-        inLine line: Int, wrapWidth: Double, metrics: Metrics) -> VisualRowQuery
+        inLine line: Int, wrapWidth: Double, metrics: Metrics) -> VisualRowQuery<Metrics>
 }
 ```
 
-`VisualRowQuery` is **not** `Equatable` (unlike `ColumnQuery`/`LineQuery`,
+`VisualRowQuery<Metrics>` is **not** `Equatable` (unlike `ColumnQuery`/`LineQuery`,
 whose payloads are all value types) — its `.rows` payload is the mutable
-`VisualRowCursor`, for which structural equality is meaningless. Tests
+`VisualRowCursor<Metrics>`, for which structural equality is meaningless. Tests
 pattern-match the case and compare the extracted `[VisualRow]` (which *is*
 `Equatable`) for `.rows`, and the extracted `ViewportValidationError` for
-`.failure`. This matches the bare-cursor factory `geometry(for:lineHeight:)`,
-which also returns a non-`Equatable` cursor.
+`.failure`. The alternative — split width validation out and return a bare
+generic cursor like `geometry(for:)` — was rejected because it fragments
+"validation centralized in the query method" (and F3's metrics-validation ladder
+makes the `.failure` channel load-bearing, not incidental).
 
-- Validates `wrapWidth` **finite and `> 0`** → new
-  `ViewportValidationError.nonPositiveWrapWidth`. `wrapWidth == .infinity` is
-  **not** an error — it is the equivalence case (one row). Non-finite (`NaN`,
-  `−∞`) and `≤ 0` fail.
+- Validates `wrapWidth` with the predicate **`wrapWidth > 0`** → new
+  `ViewportValidationError.nonPositiveWrapWidth`. Do **not** write
+  `wrapWidth.isFinite && wrapWidth > 0`: `Double.infinity.isFinite == false`,
+  so that guard would reject `.infinity` — the equivalence case the whole spec
+  rests on. `> 0` alone is exactly the intended IEEE semantics: `NaN > 0`,
+  `−∞ > 0`, and `0/negative > 0` are all `false` (rejected), while `+∞ > 0` and
+  every finite positive are `true` (accepted).
 - `inLine` is a **precondition**, not validated — `WrapMetricsSource` (via
   `LineHorizontalMetricsSource`) carries no `lineCount`, exactly as `columnAt`
   treats its `inLine`. The caller passes a valid line index.
+- **Metrics validation ladder (parity with `columnAt`, F3):** `visualRows`
+  runs the same O(1) contract probes `columnAt` runs, reusing the shared
+  `ViewportValidationError` cases, in this order (mirroring
+  `HorizontalPositionQuery.swift`, whose "Do not reorder" comment this honours):
+  1. `count = columnCount(inLine:)`; `count < 0` → `.failure(.negativeColumnCount)`.
+  2. `!(wrapWidth > 0)` → `.failure(.nonPositiveWrapWidth)` (the input coordinate
+     check, early — like `columnAt`'s `!x.isFinite`).
+  3. `columnOffset(inLine:column: 0) != 0` → `.failure(.invalidColumnMetrics)`
+     (before the blank short-circuit, per `columnAt`).
+  4. `count == 0` → hand back the cursor (which yields the single `[0,0)` blank
+     row). The blank line short-circuits **before** the line-width check, since
+     its total advance is legitimately 0.
+  5. `count > 0`: `total = columnOffset(inLine:column: count)`;
+     `!total.isFinite || total <= 0` → `.failure(.invalidColumnMetrics)`.
+  6. Otherwise return `.rows(VisualRowCursor(...))`.
+  This closes the asymmetry where a malformed `count < 0` would trap in the
+  cursor's greedy walk while `columnAt` on the same line returns a handled
+  failure. Interior offsets stay trusted-monotone (same as `columnAt`'s binary
+  search), so the cursor re-reads them without re-validation.
 - **No `.empty` case:** a blank line is still one real row, delivered through
   the cursor, so there is no empty-result branch (contrast `ColumnQuery.empty`,
-  which means "blank line, no cell"). The only non-row outcome is invalid width.
+  which means "blank line, no cell"). The non-row outcomes are invalid width and
+  malformed metrics, both `.failure`.
 
 Validation lives in this method (public semantics centralized here); the cursor
 is the raw, precondition-based streaming primitive — the codebase's split
@@ -248,16 +293,19 @@ reachable there and needs no reference-provider dependency — the same reason
 
 ### `visualRows(inLine:wrapWidth:metrics:)` (new)
 
-Validate `wrapWidth` (finite & `> 0`); on failure return
-`.failure(.nonPositiveWrapWidth)`. Otherwise construct and return
-`.rows(VisualRowCursor(line:wrapWidth:metrics:))`. No packing work happens
-here — the cursor is lazy.
+Run the O(1) validation ladder of Decision 5 (in that exact order:
+`count < 0` → `wrapWidth > 0` → `columnOffset(0) == 0` → blank short-circuit →
+line-total finite/positive), returning the matching `.failure` on any breach.
+Otherwise construct and return `.rows(VisualRowCursor(line:count:wrapWidth:metrics:))`.
+No packing work happens here — the cursor is lazy. The width predicate is
+`wrapWidth > 0` (accepts `+∞`), **not** `wrapWidth.isFinite && wrapWidth > 0`.
 
-### `VisualRowCursor` (new)
+### `VisualRowCursor<Metrics>` (new)
 
-Holds `line`, `columnCount` (read once at init for a stable snapshot),
-`wrapWidth`, `metrics`, `nextStartColumn` (init 0), `nextRowInLine` (init 0),
-and a `finished` flag. `next()`:
+Holds `line`, `columnCount` (passed in from `visualRows`, which already read
+and validated it — one stable snapshot shared with the validation ladder),
+`wrapWidth`, `metrics: Metrics`, `nextStartColumn` (init 0), `nextRowInLine`
+(init 0), and a `finished` flag. `next()`:
 
 - If `finished`, return `nil`.
 - If `columnCount == 0`: emit the single blank row `[0, 0)` width 0, set
@@ -273,8 +321,10 @@ in the row) per `next()`, O(1) state.
 
 ### Types (new)
 
-`VisualRow`, `VisualRowQuery` (Decisions 3, 5), `WrapMetricsSource`
-(Decision 1), `ViewportValidationError.nonPositiveWrapWidth`.
+`VisualRow` (value type, `Equatable`), `VisualRowQuery<Metrics>` and
+`VisualRowCursor<Metrics>` (both generic over `Metrics: WrapMetricsSource`,
+non-`Equatable`) (Decisions 3, 4, 5), `WrapMetricsSource` (Decision 1),
+`ViewportValidationError.nonPositiveWrapWidth`.
 
 ### Untouched
 
@@ -310,7 +360,15 @@ line (one `[0,0)` row) and a single-cell line.
 - **Blank line** → one `[0,0)` row, width 0, then `nil`.
 - **Width validation:** `wrapWidth ∈ { 0, −1, −∞, NaN }` →
   `.failure(.nonPositiveWrapWidth)`; `.infinity` and tiny positive widths do
-  **not** fail.
+  **not** fail. (`.infinity` must reach the one-row equivalence result — this is
+  the regression test for the F1 `isFinite` trap.)
+- **Metrics validation ladder (parity with `columnAt`, F3):** `columnCount < 0`
+  → `.failure(.negativeColumnCount)`; `columnOffset(0) != 0` →
+  `.failure(.invalidColumnMetrics)`; a non-blank line with non-finite or `≤ 0`
+  total advance → `.failure(.invalidColumnMetrics)`. Plus an **ordering** test
+  pinning the ladder: a line that is *both* `count < 0` and `wrapWidth ≤ 0`
+  returns `.negativeColumnCount` (count is checked first), matching `columnAt`'s
+  fixed order.
 
 ### Not tested here
 
@@ -355,12 +413,17 @@ proof in the post-merge run.
 
 1. `WrapMetricsSource` exists, refines `LineHorizontalMetricsSource`, adds
    `canBreak(beforeColumn:inLine:)` with no default.
-2. `VisualRow` (`Equatable`), `VisualRowQuery` (**not** `Equatable`),
-   `VisualRowCursor` (streaming, non-`Equatable`), and
-   `ViewportValidationError.nonPositiveWrapWidth` exist with the ratified
+2. `VisualRow` (value type, `Equatable`), `VisualRowQuery<Metrics>` (generic,
+   **not** `Equatable` — the project's first generic query enum, ratified in
+   Decision 5), `VisualRowCursor<Metrics>` (streaming, generic, non-`Equatable`),
+   and `ViewportValidationError.nonPositiveWrapWidth` exist with the ratified
    shapes.
 3. `ViewportVirtualizer.visualRows(inLine:wrapWidth:metrics:)` validates width
-   (finite & `> 0`; `.infinity` allowed) and returns a lazy cursor.
+   with the predicate `wrapWidth > 0` (**`.infinity` allowed**; `NaN`/`−∞`/`≤ 0`
+   rejected) and runs the `columnAt`-parity O(1) metrics ladder
+   (`negativeColumnCount`, `columnOffset(0) != 0` and non-finite/`≤ 0` line
+   total → `invalidColumnMetrics`), in `columnAt`'s fixed order, then returns a
+   lazy cursor.
 4. Greedy packing honours Decision 2 (largest-fit, overflow-at-smallest-end,
    break-only-at-opportunities, tile-the-line, blank→one row).
 5. Equivalence oracle (Decision 6) passes over irregular inputs at
@@ -373,11 +436,15 @@ proof in the post-merge run.
 
 ## Risks And Gaps
 
-- **Provider monotonicity trust.** The packer assumes `columnOffset` is finite
-  and strictly increasing (the existing `LineHorizontalMetricsSource`
-  precondition). It does not re-validate per cell — same trust model as
-  `columnAt`. A malformed provider is a precondition violation, not a handled
-  case.
+- **Provider monotonicity trust (interior only).** `visualRows` validates the
+  same O(1) contract probes as `columnAt` up front (count sign,
+  `columnOffset(0) == 0`, non-blank line total finite/positive — Decision 5's
+  ladder), so those malformed-provider cases are *handled* failures, at genuine
+  parity with `columnAt` — not a crash. What remains trusted, exactly as in
+  `columnAt`'s binary search, is that **interior** `columnOffset(c)` values
+  (`0 < c < count`) are finite and strictly increasing; the cursor re-reads them
+  during the greedy walk without re-validation. A non-monotone interior offset
+  is a precondition violation, not a handled case.
 - **Overflow visibility.** A row wider than `wrapWidth` is a legitimate result,
   not an error and not flagged. Callers that need to detect overflow compare
   `width` to the wrap width themselves. Recorded so node 2/hosts don't expect a
