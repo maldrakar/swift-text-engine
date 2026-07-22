@@ -66,3 +66,11 @@ Node 1 is the lean.
   model + row-packing + infinite-width equivalence oracle). The three infra
   P2s D-7/D-8/D-9 escalated (origins ≥ 3 slices old) and are surfaced for a
   user schedule-or-defer product call — see that review's Candidate options.
+- 2026-07-22 — **User chose Option A: Slice 49 = node 1** (visual-row model +
+  row-packing math over a wrap-metrics provider contract, with the
+  infinite-width equivalence oracle from day one). Advances criterion 3,
+  front-loads the criterion-1 top risk via nodes 1–2. The three escalated
+  P2s D-7/D-8/D-9 are `deferred(user, 2026-07-22)` in the ledger (rationale:
+  D-7 latent under the current trusted-CI model with no fork-PR exploit path;
+  D-8 cannot be scheduled without a product-target decision; D-9 is a
+  self-healing watch-item as pre-slice-45 rows age out of the N=20 window).
