@@ -156,7 +156,13 @@ deliberate deferral, so it ages visibly instead of being forgotten.
 
 Frontmatter: `name: choosing-next-slice`; description triggers on (a) a
 post-slice review reaching its recommendation section, (b) starting a new
-arc/brief, (c) any "what should we work on next" decision. Body instructs
+arc/brief, (c) any "what should we work on next" decision — and contains ONLY
+those triggers: never the pass list, never the four contract headers.
+writing-skills' rule "Description = When to Use, NOT What the Skill Does"
+documents the trap: a description that summarizes workflow becomes a shortcut
+the agent follows instead of reading the body — for this skill that would be
+an agent printing four empty contract headers while skipping the passes, the
+precise defect the skill exists to treat. Body instructs
 creating a todo per checklist item (superpowers convention). Language: English,
 like every process doc in this repo; brief criteria may be quoted in Russian.
 
@@ -252,7 +258,8 @@ living artifacts live at `docs/superpowers/arcs/<slug>.md` and
 ## Acceptance criteria
 
 1. **AC1** — `.claude/skills/choosing-next-slice/SKILL.md` exists with valid
-   frontmatter (name + trigger description covering the three triggers), both
+   frontmatter (name + a description carrying the three triggers and nothing
+   else — no workflow summary, per the normative description constraint), both
    modes, the red-flags table, and the output contract. (Fresh-session
    discovery evidence lands in the Slice 48 post-slice-review session — a new
    session by convention — and is recorded there; a file created mid-session
@@ -266,27 +273,57 @@ living artifacts live at `docs/superpowers/arcs/<slug>.md` and
    deferral is present.
 4. **AC4** — `AGENTS.md` carries the invariant, pointer-style: it names the
    skill and the four contract headers but does not duplicate checklist steps.
-5. **AC5** — Subagent test (Mode 2): a fresh subagent, given the skill file, a
-   synthetic scenario ("the slice added gate Y; it passed on its first run; no
-   red run is recorded"), and minimal stub artifacts (a scoreboard and ledger
-   state inlined in the prompt, so the test exercises the checklist rather
-   than tripping on missing files), produces a recommendation whose
-   falsifiability audit flags gate Y and whose options include proving gate Y
-   can fail. Transcript excerpt recorded in the verification doc. A run where
-   the subagent does not flag gate Y is a FAIL and blocks the slice.
-6. **AC6** — The Slice 48 post-slice review's recommendation section is
+5. **AC5** — Mode 2 control-vs-treatment test. One synthetic scenario whose
+   traps are seeded in the stub *data*, not the task framing — the task given
+   to both subagents is only "produce the recommendation section". Stub
+   artifacts (scoreboard and ledger states) are inlined in the prompt so the
+   test exercises the checklist rather than tripping on missing files. Three
+   traps: (a) the slice added gate Y, which passed on its first run, no red
+   run recorded; (b) the stub scoreboard carries an open criterion the slice
+   did not touch, while the slice summary offers a tempting diff-neighbor
+   continuation; (c) the stub ledger carries a P2 born four slices ago, still
+   open.
+   *Control (RED)*: a fresh subagent gets scenario + stubs, **no skill**.
+   Expected: it misses at least (a) and (c). If the control surfaces all
+   three traps, the scenario is too easy and MUST be hardened until the
+   control fails — a test the control passes discriminates nothing.
+   *Treatment (GREEN)*: a fresh subagent gets the same inputs plus the skill.
+   PASS requires all three: the falsifiability audit flags gate Y and the
+   options include proving it can fail; the options cite the open criterion
+   rather than only diff neighbors; the escalation rule surfaces the aged P2
+   as schedule-or-defer. Both transcripts land verbatim in the verification
+   doc; a treatment run missing any trap is a FAIL and blocks the slice.
+6. **AC6** — Mode 1 executability test (skill given, deliberately no
+   control): a fresh subagent, given the skill and
+   `docs/wrap-project-brief.md`, executes Arc start. PASS: its scoreboard
+   extracts the same six criteria as AC2's (set equality — mechanical), it
+   names a top feasibility risk with a rationale, and it marks at least one
+   fork. Its risk choice may differ from the committed one: a defensible
+   divergence is recorded in the verification doc as design signal, not
+   failure. Why no control: an agent without the skill cannot spontaneously
+   produce this ritual, so a Mode 1 control could not pass — and a test that
+   cannot pass proves nothing (the plan-assertion lesson, mirrored). Mode 1's
+   discriminating question is executability by a non-author; that is what
+   this AC tests.
+7. **AC7** — The Slice 48 post-slice review's recommendation section is
    produced by Mode 2 (first live run): all four contract headers present, and
    — since this slice moves no wrap criterion — the recommended next slice
    comes from the arc map, not from this slice's diff.
-7. **AC7** — The PR diff touches only Markdown outside policy-sensitive
+8. **AC8** — The PR diff touches only Markdown outside policy-sensitive
    directories; all three required contexts print
    `mode=docs_only_pr ... result=success` at step level on the PR run.
-8. **AC8** — After the user merges, the main tree contains all four artifacts
+9. **AC9** — After the user merges, the main tree contains all four artifacts
    (`git show` on the merge commit), and the memory index carries a Slice 48
-   direction note. No post-merge push run is expected: docs-only pushes to
-   `main` legitimately skip Swift CI via `push.paths-ignore` — the PR run is
-   the hosted evidence for this slice, and asserting a push run would be an
-   assertion that cannot pass.
+   direction note. The PR run is the hosted evidence for this slice. A
+   post-merge push run is *not expected* — `push.paths-ignore` (`docs/**`,
+   `**/*.md`) covers every changed path, and the three most recent docs-only
+   merges (257fc6f, 34c7fb1, e6cfa54) produced no push run (verified
+   2026-07-22 via `gh run list`) — but the skip is not a success condition
+   and a run's appearance is not a failure: if one does appear, it must be
+   green, and it is recorded. Those three precedents were all skipped by
+   `docs/**` alone; this merge is the first push whose skip relies on
+   `**/*.md` for non-docs paths (`AGENTS.md`, `.claude/**`) — exactly why
+   this AC must not hinge on the skip happening.
 
 ## Non-goals / out of scope
 
@@ -303,10 +340,14 @@ Recorded in `docs/superpowers/verification/2026-07-21-outer-loop-codification.md
 - File tree of the four artifacts (`ls` output).
 - `grep` of the AGENTS.md invariant and of the four contract headers in the
   skill.
-- AC5 subagent transcript excerpt with PASS/FAIL verdict.
+- AC5 control and treatment transcripts (verbatim) with PASS/FAIL verdicts,
+  plus any scenario-hardening iterations the calibration clause forced.
+- AC6 Mode 1 transcript with the criteria-set comparison and the risk-choice
+  divergence note, if any.
 - PR run: three required contexts' step-level `mode=docs_only_pr` lines
-  (`gh run view --log` excerpts), per AC7.
-- Post-merge: `git show <merge>:<path>` for the four artifacts, per AC8.
+  (`gh run view --log` excerpts), per AC8.
+- Post-merge: `git show <merge>:<path>` for the four artifacts, per AC9; if a
+  push run appeared, its id and conclusion.
 
 ## Risks & trade-offs
 
@@ -321,12 +362,20 @@ Recorded in `docs/superpowers/verification/2026-07-21-outer-loop-codification.md
   schedule-or-defer; `deferred` requires a user + date, so even deferrals age
   visibly.
 - **Self-referential first test** (the slice validating its own process) →
-  AC5's subagent test injects a scenario the checklist must catch
-  independently of this slice's happy path; AC6's live run has a
-  non-self-serving success condition (the recommendation must come from the
-  map, because the diff offers no wrap-criterion neighbor).
+  AC5's control-vs-treatment test injects trap scenarios the checklist must
+  catch independently of this slice's happy path, with a no-skill baseline
+  proving the skill — not agent common sense — causes the catch; AC7's live
+  run has a non-self-serving success condition (the recommendation must come
+  from the map, because the diff offers no wrap-criterion neighbor).
 
 ## Next step
 
 `superpowers:writing-plans` → task-by-task implementation plan
-(`docs/superpowers/plans/2026-07-21-outer-loop-codification.md`).
+(`docs/superpowers/plans/2026-07-21-outer-loop-codification.md`). The plan
+MUST structure the skill work RED → GREEN → REFACTOR per writing-skills' Iron
+Law ("NO SKILL WITHOUT A FAILING TEST FIRST", explicitly covering new skills):
+author the AC5 scenario + stubs and record the failing control runs **before**
+`SKILL.md` exists; write the skill; record the passing treatment and AC6 runs;
+then close whatever loopholes the transcripts expose. The normative sections
+above are design input to the GREEN step, not a license to write the artifact
+first.
