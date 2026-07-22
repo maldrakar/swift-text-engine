@@ -827,7 +827,32 @@ ledger and the post-slice review picks them up.
 
 ## AC8 — PR run evidence
 
-<recorded by Task 7>
+PR: https://github.com/maldrakar/swift-text-engine/pull/112 (PR head
+`7f30dfc`). Swift CI run `29929826808` (event `pull_request`), overall
+conclusion success in 53s; all three required contexts green:
+
+```
+Host tests and benchmark gate | success
+iOS cross-target compile | success
+WASM cross-target compile | success
+```
+
+Step-level docs-only evidence — the executed output line of each required
+job's "Complete docs-only PR" step (`gh run view 29929826808 --log`,
+filtered to the executed-output lines; the log also carries each step's
+`##[group]` header and ANSI command echo, which are Actions echoing the
+inline script source, not executed output — the lines below are the
+executed ones, timestamp-prefixed):
+
+```
+Host tests and benchmark gate	Complete docs-only PR	2026-07-22T14:42:24.8692760Z mode=docs_only_pr job=host-tests-and-benchmark-gate result=success
+iOS cross-target compile	Complete docs-only PR	2026-07-22T14:41:59.2939230Z mode=docs_only_pr job=ios-cross-target-compile result=success
+WASM cross-target compile	Complete docs-only PR	2026-07-22T14:42:40.1349701Z mode=docs_only_pr job=wasm-cross-target-compile result=success
+```
+
+All three required contexts took the docs-only fast path (7s/34s/49s job
+durations) — no heavy Swift/test/compile work ran, exactly as the
+Markdown-only diff qualifies for.
 
 ## Pending after this plan
 
