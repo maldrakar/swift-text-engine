@@ -776,6 +776,31 @@ tree by `grep`/`ls` before seeding):
   its review re-observed the drift path and escalated it to P2 #1, which
   this ledger seeds open as D-1.
 
+### AC4 — AGENTS.md invariant checks (Task 6)
+
+```
+$ grep -c 'choosing-next-slice' AGENTS.md
+2
+$ grep -nE 'Escalation rule|red flag|Risk-first|Debt carry-over' AGENTS.md; echo "dup_exit=$?"
+dup_exit=1
+```
+
+The invariant names the skill and its path (two mentions); the second grep
+finding nothing (`dup_exit=1`) confirms the checklist's internals stayed
+out of `AGENTS.md` — pointer-style only, per AC4.
+
+Docs-only surface pre-check (pre-AC8), run after the AGENTS.md edit:
+
+```
+$ git diff --name-only origin/main...HEAD | grep -vE '\.md$'; echo "nonmd_exit=$?"
+nonmd_exit=1
+$ git diff --name-only origin/main...HEAD | grep -E '^\.github/'; echo "policy_exit=$?"
+policy_exit=1
+```
+
+Every changed path is Markdown and none is under `.github/` — the diff
+qualifies for the docs-only fast path on all three required CI contexts.
+
 ## AC8 — PR run evidence
 
 <recorded by Task 7>

@@ -511,6 +511,19 @@ Lifecycle: **brainstorm → spec → plan → TDD implement → verification rec
 post-slice review**. For implementing a plan, follow the superpowers
 `executing-plans` / `subagent-driven-development` skills the plan references.
 
+The lifecycle above covers ONE slice. Which slice comes next is the outer
+loop, governed by the project skill `choosing-next-slice`
+(`.claude/skills/choosing-next-slice/SKILL.md`): every post-slice review's
+recommendation section MUST be produced by walking that skill's checklist
+and MUST carry its output contract — the four headers `### Scoreboard
+delta`, `### Debt ledger delta`, `### Falsifiability audit`, `### Candidate
+options` — so the review itself is evidence that selection ran. Its living
+inputs: the arc file `docs/superpowers/arcs/<slug>.md` (scoreboard over the
+active brief's criteria + slice map + decision log) and the cross-arc
+`docs/superpowers/debt-ledger.md`. A new brief starts with the skill's
+Arc-start mode. The checklist lives only in the skill — do not restate it
+here.
+
 Conventions that matter:
 
 - **TDD is the norm here.** Plans are written as failing-test-first steps. Don't
