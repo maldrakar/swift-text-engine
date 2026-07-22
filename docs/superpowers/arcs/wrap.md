@@ -1,10 +1,10 @@
 # Arc: soft-wrap ([brief](../../wrap-project-brief.md))
 
 Status: active. Started 2026-07-21 (Slice 48 codified this process and
-created this file; the first wrap slice is selected by the slice 48
-post-slice review). Constraints are enforced per-slice, not tracked here —
-see the brief's «Ограничения» and the initial brief it inherits by
-reference.
+created this file). Slice 48 merged 2026-07-22 (PR #112, merge `a183205`);
+its post-slice review is the first live Mode 2 run and selects Slice 1 below
+as the lean. Constraints are enforced per-slice, not tracked here — see the
+brief's «Ограничения» and the initial brief it inherits by reference.
 
 ## Scoreboard
 
@@ -44,6 +44,14 @@ what recomputes when that width changes; if that cost is not
 viewport-bounded, the arc's architecture is wrong. Nodes 1–2 front-load it;
 geometry conveniences (nodes 3–4) wait behind it.
 
+Map pass 2026-07-22 (Slice 48 review, first live Mode 2): Slice 48 was a
+process slice and consumed no map node; nodes 1–9 stand unchanged and are
+re-validated — nothing that shipped this slice touched wrap feasibility, so
+the working hypothesis is unrevised. The next step is **topological**, not a
+fork: node 1 (visual-row model) is the forced prerequisite for everything
+downstream, and the first genuine fork is node 8 (host-platform order).
+Node 1 is the lean.
+
 ## Decision log
 
 - 2026-07-20 — User chose the soft-wrap arc over `pointOf(line:column:)`
@@ -53,3 +61,8 @@ geometry conveniences (nodes 3–4) wait behind it.
 - 2026-07-21 — User chose to codify the outer loop first (Slice 48) before
   selecting the first wrap slice; full-slice ceremony; artifacts
   instantiated in-slice.
+- 2026-07-22 — Slice 48 merged (PR #112, `a183205`); its post-slice review
+  ran the first live Mode 2. Lean for the next slice: node 1 (visual-row
+  model + row-packing + infinite-width equivalence oracle). The three infra
+  P2s D-7/D-8/D-9 escalated (origins ≥ 3 slices old) and are surfaced for a
+  user schedule-or-defer product call — see that review's Candidate options.
