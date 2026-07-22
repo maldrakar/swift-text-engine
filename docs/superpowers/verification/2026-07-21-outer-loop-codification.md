@@ -859,3 +859,24 @@ Markdown-only diff qualifies for.
 - AC7 — first live Mode 2 run: produced by the slice 48 post-slice review
   (its own phase, on branch `slice-48-post-slice-review`).
 - AC9 — post-merge tree check + push-run note: after the user merges the PR.
+
+## Amendment 2026-07-22 — spec↔skill map-pass ordering resolved
+
+On reviewing the shipped artifacts the user flagged a prose-level discrepancy:
+the spec's Mode 2 step list (`## Skill content (normative)`) numbered the **map
+pass** as step 4 (after the falsifiability audit), while the shipped
+`.claude/skills/choosing-next-slice/SKILL.md` — and both test runs, the AC5
+treatment and the AC6 Mode 1 exercise — run the map pass **first**, before the
+`### Scoreboard delta` header. The four contract headers of Decision 3
+(Scoreboard delta / Debt ledger delta / Falsifiability audit / Candidate
+options) appear in identical order under both, so AC7 is satisfied either way:
+this was a divergence of the two prose step-lists, not a contract violation.
+
+Resolved by the user in favor of **map-first**, on the rationale that the map is
+re-validated against what the slice taught *before* Candidate options reference
+where a step sits on it — the options then cite a reconciled map, not a stale
+one. The spec's Mode 2 list was amended to lead with the map pass (now step 1),
+matching the committed `SKILL.md`; the four contract headers keep their fixed
+Decision-3 order as steps 2–5, and Routing stays step 6. No skill, arc, ledger,
+or test change — the committed reality already was map-first; only the spec's
+prose is brought into line.

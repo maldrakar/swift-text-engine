@@ -179,15 +179,20 @@ like every process doc in this repo; brief criteria may be quoted in Russian.
 4. Carry surviving debt from the previous arc into the ledger, each with origin.
 5. Select the first slice by running Mode 2.
 
-**Mode 2 — Recommend next** (every post-slice review's recommendation section):
+**Mode 2 — Recommend next** (every post-slice review's recommendation section).
+The **map pass runs first**; its output is the updated arc file, not one of the
+four contract headers of Decision 3, which then follow in their fixed order.
+Map-first is deliberate: it re-validates the map against what this slice taught
+*before* Candidate options reference where a step sits on it, so the options
+cite a map already reconciled with new knowledge rather than a stale one.
 
-1. **Scoreboard pass** — update statuses changed by this slice, with evidence
-   links; list criteria still open.
-2. **Ledger pass** — append this review's new P2/P3s; mark discharged ones;
-   state open counts; apply the Decision 4 escalation rule.
-3. **Falsifiability audit** — per Decision 5.
-4. **Map pass** — mark the finished slice; re-validate the map against new
+1. **Map pass** — mark the finished slice; re-validate the map against new
    knowledge; update it; state whether the next step is topological or a fork.
+2. **Scoreboard pass** — update statuses changed by this slice, with evidence
+   links; list criteria still open.
+3. **Ledger pass** — append this review's new P2/P3s; mark discharged ones;
+   state open counts; apply the Decision 4 escalation rule.
+4. **Falsifiability audit** — per Decision 5.
 5. **Candidate options** — 2–3 options with trade-offs and a lean, as today;
    each option must cite which scoreboard criteria it advances, which ledger
    items it discharges or folds in, and where it sits on the map. An option
