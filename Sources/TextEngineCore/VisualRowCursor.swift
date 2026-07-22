@@ -33,7 +33,7 @@ public struct VisualRowCursor<Metrics: WrapMetricsSource> {
 
         let start = nextStartColumn
         let startOffset = metrics.columnOffset(inLine: line, column: start)
-        let end = columnCount   // Task 3 replaces with: greedyEnd(from: start, startOffset: startOffset)
+        let end = greedyEnd(from: start, startOffset: startOffset)
 
         let row = VisualRow(
             logicalLine: line,
@@ -46,6 +46,31 @@ public struct VisualRowCursor<Metrics: WrapMetricsSource> {
         nextRowInLine += 1
         if end == columnCount { finished = true }
         return row
+    }
+
+    // The largest legal end `e > start` with `columnOffset(e) - startOffset <=
+    // wrapWidth`; if none fits, the smallest legal end `e > start` (forced overflow
+    // — a row wider than wrapWidth). `columnCount` is always a legal end; interior
+    // legal ends are columns `c` with `canBreak(beforeColumn: c)`. Relies on the
+    // monotone `columnOffset` precondition: once a legal end overflows, every later
+    // one does too, so the walk stops there. O(cells in the row).
+    private func greedyEnd(from start: Int, startOffset: Double) -> Int {
+        var lastFitting = -1   // largest legal end seen that fits
+        var firstLegal = -1    // smallest legal end > start (overflow fallback)
+        var c = start + 1
+        while c <= columnCount {
+            let isLegal = (c == columnCount) || metrics.canBreak(beforeColumn: c, inLine: line)
+            if isLegal {
+                if firstLegal == -1 { firstLegal = c }
+                if metrics.columnOffset(inLine: line, column: c) - startOffset <= wrapWidth {
+                    lastFitting = c
+                } else {
+                    break
+                }
+            }
+            c += 1
+        }
+        return lastFitting != -1 ? lastFitting : firstLegal
     }
 }
 
