@@ -12,19 +12,20 @@ brief's «Ограничения» and the initial brief it inherits by referenc
 |---|---|---|---|
 | 1 | Layout-width change (device rotation, browser resize) does not recompute the document: frame cost stays viewport-bounded, in the spirit of the existing O(log N) + O(buffer) | open | — |
 | 2 | Core memory not linear in document size with wrap on; wrap data lives behind the provider abstraction; `--memory-shape` extended to the wrap path | open | — |
-| 3 | Wrap-aware equivalents of existing queries (compute over visual rows, y→row, point→(row, cell)); no-wrap path preserved; wrap at infinite width equals no-wrap (equivalence oracle) | open | — |
+| 3 | Wrap-aware equivalents of existing queries (compute over visual rows, y→row, point→(row, cell)); no-wrap path preserved; wrap at infinite width equals no-wrap (equivalence oracle) | partial | Per-line equivalence oracle proven (wrap at ∞/≥total width = one whole-line row = no-wrap column model, over irregular advances+breaks) + no-wrap path untouched — [PR #114](https://github.com/maldrakar/swift-text-engine/pull/114) (`8e91f52`), post-merge run `29990966569`, `VisualRowEquivalenceTests`. Remaining: the query analogs (compute/y→row/point) and the whole-document equivalence half |
 | 4 | 100k+ lines / >10 MB scroll with wrap on holds p95/p99 budgets and the absolute 60 FPS ceiling; new wrap modes become blocking CI gates via the existing harvest → derive recipe | open | — |
 | 5 | Incremental edits with wrap on (in-line edit, structural insert/delete) stay within frame-hot-path budgets | open | — |
 | 6 | Thin verification hosts: iOS feeding CoreText-measured advances, browser feeding canvas `measureText` over the WASM build; both observably smooth-scroll a large wrapped document | open | — |
 
 ## Slice map (working hypothesis — rewrite freely at every map pass)
 
-1. `pending` — Visual-row model + row-packing math over a wrap-metrics
+1. `done` (Slice 49) — Visual-row model + row-packing math over a wrap-metrics
    provider contract (break opportunities + advances), with the
-   infinite-width equivalence oracle from day one. Advances criterion 3.
-2. `pending` — Wrap-aware viewport compute over visual rows, plus the
-   width-change cost demonstration (change the wrap width; recompute stays
-   viewport-bounded). Advances criteria 1 and 3. **Retires the top risk.**
+   infinite-width equivalence oracle from day one. Advanced criterion 3
+   (per-line half). Per-line packing only; cross-line aggregation is node 2.
+2. `pending` — **← next (lean).** Wrap-aware viewport compute over visual rows,
+   plus the width-change cost demonstration (change the wrap width; recompute
+   stays viewport-bounded). Advances criteria 1 and 3. **Retires the top risk.**
 3. `pending` — y→row inverse query (wrap-aware `lineAt` analog). Criterion 3.
 4. `pending` — point→(row, cell) wrap-aware composite. Criterion 3.
 5. `pending` — `--memory-shape` extension to the wrap path. Criterion 2.
@@ -52,6 +53,19 @@ fork: node 1 (visual-row model) is the forced prerequisite for everything
 downstream, and the first genuine fork is node 8 (host-platform order).
 Node 1 is the lean.
 
+Map pass 2026-07-23 (Slice 49 review): node 1 shipped as specified — the
+per-line packing model, the streaming `VisualRowCursor`, and the per-line
+infinite-width equivalence oracle. What it taught: the per-line packer is
+purely local (advances + break opportunities + width), holds O(1) core
+memory, and provably reduces to the no-wrap column model at width ≥ total —
+so the row-partition *math* is settled and is NOT where criterion-1 risk
+lives. The open question the arc rests on is untouched: **who owns row data
+at a given wrap width, and what recomputes when that width changes** — that
+is node 2, and it is exactly the top risk. Nodes 2–9 stand unrevised; the
+next step is still **topological** (node 2 is the forced prerequisite for the
+query analogs and front-loads criterion 1). Node 2 is the lean. First genuine
+fork remains node 8.
+
 ## Decision log
 
 - 2026-07-20 — User chose the soft-wrap arc over `pointOf(line:column:)`
@@ -74,3 +88,11 @@ Node 1 is the lean.
   D-7 latent under the current trusted-CI model with no fork-PR exploit path;
   D-8 cannot be scheduled without a product-target decision; D-9 is a
   self-healing watch-item as pre-slice-45 rows age out of the N=20 window).
+- 2026-07-23 — **Slice 49 merged** (PR #114, merge `8e91f52`; post-merge push
+  run `29990966569` green at step level). Node 1 done; criterion 3 → partial
+  (per-line equivalence half proven). Its post-slice review recommends
+  **Slice 50 = node 2** (wrap-aware compute + width-change cost demo) as the
+  topological, top-risk-retiring lean. New debt: D-12 (P3, interior
+  exact-equal width-boundary test gap — fold-in for node 2, which touches the
+  cursor). D-1/D-2 (open P2s, slice 47) are at 2 completed slices and hit the
+  ≥3 escalation threshold at the Slice 50 review.
