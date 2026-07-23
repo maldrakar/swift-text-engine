@@ -62,3 +62,11 @@ struct RiggedVisualRowLayout: VisualRowLayoutSource {
     func visualRowCount(inLine line: Int) -> Int { firstRow[line + 1] - firstRow[line] }
     func firstVisualRow(ofLine line: Int) -> Int { firstRow[line] }
 }
+
+/// Drain a `DocumentVisualRowCursor` into an array.
+func collectGeometry<L: VisualRowLayoutSource>(_ cursor: DocumentVisualRowCursor<L>) -> [VisualRowGeometry] {
+    var c = cursor
+    var out: [VisualRowGeometry] = []
+    while let g = c.next() { out.append(g) }
+    return out
+}

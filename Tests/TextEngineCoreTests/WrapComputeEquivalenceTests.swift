@@ -47,4 +47,20 @@ final class WrapComputeEquivalenceTests: XCTestCase {
         }
         XCTAssertTrue(range.isEmpty)
     }
+
+    func testInfiniteWidthStreamsOneRowPerLine() {
+        let rowHeight = 4.0
+        let layout = TestVisualRowLayout(lines: irregularLines(), rowHeight: rowHeight, wrapWidth: .infinity)
+        let input = VariableViewportInput(scrollOffsetY: 0, viewportHeight: 10_000, overscanLinesBefore: 0, overscanLinesAfter: 0)
+        guard case .success(let range) = ViewportVirtualizer.compute(input, layout: layout) else { return XCTFail() }
+        let rows = collectGeometry(ViewportVirtualizer.visualRowGeometry(for: range, layout: layout))
+        XCTAssertEqual(rows.count, layout.lineCount)
+        for (L, g) in rows.enumerated() {
+            XCTAssertEqual(g.row.logicalLine, L)
+            XCTAssertEqual(g.row.rowInLine, 0)
+            XCTAssertEqual(g.row.startColumn, 0)
+            XCTAssertEqual(g.row.endColumn, layout.columnCount(inLine: L))
+            XCTAssertEqual(g.y, Double(L) * rowHeight)
+        }
+    }
 }
