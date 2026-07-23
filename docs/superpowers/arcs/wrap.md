@@ -96,3 +96,11 @@ fork remains node 8.
   exact-equal width-boundary test gap — fold-in for node 2, which touches the
   cursor). D-1/D-2 (open P2s, slice 47) are at 2 completed slices and hit the
   ≥3 escalation threshold at the Slice 50 review.
+- 2026-07-23 — **User chose Option A: Slice 50 = node 2** (wrap-aware viewport
+  compute over visual rows + the width-change cost demonstration). The
+  topological forced next step; retires the arc's top feasibility risk
+  (criterion 1 — who owns row data at a given wrap width, what recomputes when
+  the width changes) and advances criterion 3 (whole-document equivalence
+  half). Folds in D-12 + the mandatory equivalence-oracle falsifiability
+  follow-up. D-1/D-2 ride to the Slice 50 review's escalation moment (not
+  pulled forward). Next inner-loop step: brainstorm node 2.
