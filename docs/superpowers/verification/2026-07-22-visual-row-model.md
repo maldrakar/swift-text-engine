@@ -266,7 +266,7 @@ this task's commit.
 
 ---
 
-## Hosted CI — placeholder (to be filled once the PR is open)
+## Hosted CI
 
 Per repo convention, hosted proof is read at **step** level, not job
 conclusion — a green job can hide a dead `continue-on-error` step (the Slice
@@ -274,16 +274,24 @@ conclusion — a green job can hide a dead `continue-on-error` step (the Slice
 not the PR-head run alone (the pattern used in every prior slice's
 verification record, e.g. Slice 44/45/47).
 
+PR #114 (`https://github.com/maldrakar/swift-text-engine/pull/114`).
+
 | | PR-head run | Post-merge push run |
 |---|---|---|
-| Run ID / commit | TBD | TBD |
+| Run ID / commit | `29958326817` @ `3e4f511` | TBD (fill after merge) |
 | Trigger | `pull_request` | `push` to `main` |
-| Three required jobs (step level) | TBD | TBD |
-| Twelve blocking gate steps | TBD (all expected `gate=pass`, unchanged budgets) | TBD |
-| Host tests | TBD (expect `Executed 333 tests, with 0 failures`, or the branch's baseline + any commits added after this record) | TBD |
-| iOS cross-target compile | TBD | TBD |
-| WASM cross-target compile (wasm + wasm-embedded) | TBD | TBD |
-| Checksum set | TBD (expect byte-identical to the pre-slice-49 baseline — this slice adds no new gated mode) | TBD |
+| Three required jobs (step level) | **all `success`** — Host tests and benchmark gate, iOS cross-target compile, WASM cross-target compile | TBD |
+| `Complete docs-only PR` step | **`[skipped]`** in all three jobs (correct — PR touches `Sources/`, so the heavy path ran, not the docs-only fast path) | TBD |
+| Twelve blocking gate steps | **all `[success]`** — synthetic, variable-height, variable-height-mutation, structural-mutation, bulk-structural-mutation, line-query, line-geometry-query, column-query, column-geometry-query, point-query, point-geometry-query, realistic-provider (`gate=pass`, unchanged budgets) | TBD |
+| Host tests (`Run host tests` step) | **`[success]`** (the 333/0 suite incl. `GateFloorTests.testEveryCommittedBudgetReproducesFromCorpus`, so budgets/checksums reproduce) | TBD |
+| Memory diagnostics | **`[success]`** — `Run memory shape diagnostic`, `Run RSS memory observation diagnostic` | TBD |
+| iOS cross-target compile (`Compile cross-target packages for iOS` step) | **`[success]`** (blocking) | TBD |
+| WASM cross-target compile (`Compile cross-target packages for WASM` step, wasm + wasm-embedded) | **`[success]`** (blocking) | TBD |
 
-Fill in once PR CI runs, and again after merge, per `AGENTS.md`'s
-step-level-not-job-conclusion verification rule.
+PR-head half verified at step level 2026-07-23 via
+`gh run view 29958326817 --json jobs` (every substantive step `success`; the
+only `[skipped]` is the docs-only fast-path step, which correctly did not
+apply). Post-merge column to be filled from the `push`-to-`main` run after
+merge, per `AGENTS.md`'s step-level-not-job-conclusion rule. Note: a docs
+commit adding this evidence retriggers PR CI; strict required-status-check
+policy binds the merge to the latest (also-green) run.
