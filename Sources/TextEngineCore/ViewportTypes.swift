@@ -74,6 +74,8 @@ public enum ViewportValidationError: Equatable {
     case negativeColumnCount
     case invalidColumnMetrics
     case nonPositiveWrapWidth
+    case nonPositiveRowHeight
+    case invalidVisualRowLayout
 }
 
 public enum ViewportComputation: Equatable {
@@ -218,6 +220,22 @@ public struct VisualRow: Equatable {
         self.startColumn = startColumn
         self.endColumn = endColumn
         self.width = width
+    }
+}
+
+/// One visual row of a soft-wrapped document, placed on the vertical axis: node 1's
+/// horizontal `VisualRow` span plus its top `y` and `height`. Mirrors `LineGeometry`
+/// but composes `VisualRow` rather than re-declaring its fields. `y == globalVisualRow *
+/// rowHeight`; `height == rowHeight` (uniform this slice).
+public struct VisualRowGeometry: Equatable {
+    public let row: VisualRow
+    public let y: Double
+    public let height: Double
+
+    public init(row: VisualRow, y: Double, height: Double) {
+        self.row = row
+        self.y = y
+        self.height = height
     }
 }
 
