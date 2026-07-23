@@ -278,20 +278,26 @@ PR #114 (`https://github.com/maldrakar/swift-text-engine/pull/114`).
 
 | | PR-head run | Post-merge push run |
 |---|---|---|
-| Run ID / commit | `29958326817` @ `3e4f511` | TBD (fill after merge) |
+| Run ID / commit | `29958326817` @ `3e4f511` | `29990966569` @ `8e91f52` (merge commit) |
 | Trigger | `pull_request` | `push` to `main` |
-| Three required jobs (step level) | **all `success`** — Host tests and benchmark gate, iOS cross-target compile, WASM cross-target compile | TBD |
-| `Complete docs-only PR` step | **`[skipped]`** in all three jobs (correct — PR touches `Sources/`, so the heavy path ran, not the docs-only fast path) | TBD |
-| Twelve blocking gate steps | **all `[success]`** — synthetic, variable-height, variable-height-mutation, structural-mutation, bulk-structural-mutation, line-query, line-geometry-query, column-query, column-geometry-query, point-query, point-geometry-query, realistic-provider (`gate=pass`, unchanged budgets) | TBD |
-| Host tests (`Run host tests` step) | **`[success]`** (the 333/0 suite incl. `GateFloorTests.testEveryCommittedBudgetReproducesFromCorpus`, so budgets/checksums reproduce) | TBD |
-| Memory diagnostics | **`[success]`** — `Run memory shape diagnostic`, `Run RSS memory observation diagnostic` | TBD |
-| iOS cross-target compile (`Compile cross-target packages for iOS` step) | **`[success]`** (blocking) | TBD |
-| WASM cross-target compile (`Compile cross-target packages for WASM` step, wasm + wasm-embedded) | **`[success]`** (blocking) | TBD |
+| Three required jobs (step level) | **all `success`** — Host tests and benchmark gate, iOS cross-target compile, WASM cross-target compile | **all `success`** — same three jobs |
+| `Complete docs-only PR` step | **`[skipped]`** in all three jobs (correct — PR touches `Sources/`, so the heavy path ran, not the docs-only fast path) | **`[skipped]`** in all three jobs (correct — the merge push touches `Sources/`, so `paths-ignore` did not skip and the heavy path ran) |
+| Twelve blocking gate steps | **all `[success]`** — synthetic, variable-height, variable-height-mutation, structural-mutation, bulk-structural-mutation, line-query, line-geometry-query, column-query, column-geometry-query, point-query, point-geometry-query, realistic-provider (`gate=pass`, unchanged budgets) | **all `[success]`** — same twelve gates |
+| Host tests (`Run host tests` step) | **`[success]`** (the 333/0 suite incl. `GateFloorTests.testEveryCommittedBudgetReproducesFromCorpus`, so budgets/checksums reproduce) | **`[success]`** |
+| Memory diagnostics | **`[success]`** — `Run memory shape diagnostic`, `Run RSS memory observation diagnostic` | **`[success]`** — both |
+| iOS cross-target compile (`Compile cross-target packages for iOS` step) | **`[success]`** (blocking) | **`[success]`** (blocking) |
+| WASM cross-target compile (`Compile cross-target packages for WASM` step, wasm + wasm-embedded) | **`[success]`** (blocking) | **`[success]`** (blocking) |
 
 PR-head half verified at step level 2026-07-23 via
 `gh run view 29958326817 --json jobs` (every substantive step `success`; the
 only `[skipped]` is the docs-only fast-path step, which correctly did not
-apply). Post-merge column to be filled from the `push`-to-`main` run after
-merge, per `AGENTS.md`'s step-level-not-job-conclusion rule. Note: a docs
-commit adding this evidence retriggers PR CI; strict required-status-check
+apply). **Merged proof: the post-merge `push`-to-`main` run `29990966569` @
+`8e91f52` (the PR #114 merge commit) is `success` at step level** — verified
+2026-07-23 via `gh run view 29990966569 --json jobs`, whose
+`select(.conclusion != "success" and .conclusion != "skipped")` filter over
+every step returned empty (zero failed/cancelled steps; the only `[skipped]`
+is the docs-only fast-path step). The strict required-status-check binds the
+merge to the latest green PR run (`29989902561` @ the rebased evidence commit,
+also `success`). Recording follows `AGENTS.md`'s step-level-not-job-conclusion
+rule. Note: a docs commit adding this evidence retriggers PR CI; strict required-status-check
 policy binds the merge to the latest (also-green) run.
