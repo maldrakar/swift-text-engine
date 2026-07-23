@@ -73,6 +73,7 @@ public enum ViewportValidationError: Equatable {
     case invalidLineMetrics
     case negativeColumnCount
     case invalidColumnMetrics
+    case nonPositiveWrapWidth
 }
 
 public enum ViewportComputation: Equatable {
@@ -199,6 +200,34 @@ public struct ColumnGeometryLocation: Equatable {
         self.fractionInColumn = fractionInColumn
         self.clamp = clamp
     }
+}
+
+/// One visual row of a soft-wrapped logical line: a half-open cell span
+/// `[startColumn, endColumn)` with its advance-sum width, in visual order.
+/// Horizontal only — vertical stacking (y/height) is a later node.
+public struct VisualRow: Equatable {
+    public let logicalLine: Int   // the logical line this row belongs to
+    public let rowInLine: Int     // 0-based index of this row within logicalLine
+    public let startColumn: Int   // inclusive
+    public let endColumn: Int     // exclusive — half-open [startColumn, endColumn)
+    public let width: Double      // columnOffset(endColumn) − columnOffset(startColumn)
+
+    public init(logicalLine: Int, rowInLine: Int, startColumn: Int, endColumn: Int, width: Double) {
+        self.logicalLine = logicalLine
+        self.rowInLine = rowInLine
+        self.startColumn = startColumn
+        self.endColumn = endColumn
+        self.width = width
+    }
+}
+
+/// Result of `ViewportVirtualizer.visualRows`. Generic — its `.rows` payload is the
+/// provider-holding `VisualRowCursor<Metrics>`, so this is the project's first
+/// generic query enum. NOT `Equatable` (the cursor is mutable, non-`Equatable`);
+/// tests pattern-match and compare the drained `[VisualRow]`.
+public enum VisualRowQuery<Metrics: WrapMetricsSource> {
+    case rows(VisualRowCursor<Metrics>)      // one or more rows (a blank line ⇒ one)
+    case failure(ViewportValidationError)    // invalid wrapWidth or malformed metrics
 }
 
 public enum PointQuery: Equatable {

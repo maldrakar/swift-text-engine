@@ -102,6 +102,24 @@ a located cell, fewer on a blank line or a failure path), so its cost class equa
 `pointAt`'s. Caret snapping stays a caller concern.
 `--point-geometry-query --gate` is its blocking host-job CI gate (the eleventh).
 
+The **soft-wrap layer** (node 1) adds `WrapMetricsSource` (refines
+`LineHorizontalMetricsSource` with one `canBreak(beforeColumn:inLine:)`
+predicate — the provider owns break opportunities; the core owns no Unicode
+tables) and `ViewportVirtualizer.visualRows(inLine:wrapWidth:metrics:)`, which
+validates `wrapWidth` (`> 0`, `+∞` allowed — the equivalence case) and runs the
+same O(1) metrics ladder as `columnAt`, then hands back a generic streaming
+`VisualRowCursor<Metrics>` (wrapped in `VisualRowQuery<Metrics>` — the first
+generic query enum). The cursor greedily packs one logical line into `VisualRow`s
+in **visual order**: each row ends at the largest legal break-opportunity that
+fits `wrapWidth`, and an unbreakable run wider than `wrapWidth` **overflows**
+(a row wider than the width) rather than force-breaking. Every logical line yields
+≥ 1 row (a blank line one `[0,0)` row); rows tile the line; row width is the
+advance sum. At `wrapWidth ≥ the line's total advance` (∞ included) a line packs
+to exactly one row equal to the no-wrap column model (per-line equivalence
+oracle). This is per-logical-line packing only — cross-line aggregation, vertical
+stacking, and wrap-aware `compute` are later nodes. O(1) core memory,
+O(cells-in-row) per `next()`.
+
 ## Package layout
 
 - `Sources/TextEngineCore` — the library. Pure, headless, Foundation-free.
