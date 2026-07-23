@@ -54,8 +54,21 @@ extent, viewport-bounded-on-width-change today, approximate scrollbar) was
 **rejected**: it forgoes exactness and a bit-identical equivalence oracle, and
 diverges from the engine's exact-O(log N)/provider-owned-prefix-search DNA. Under
 A, criterion 1 moves `open → partial` this slice (the per-frame scroll cost is
-proven width-independent; making the reindex *itself* incremental is a later
-node).
+proven viewport-bounded — no document re-walk on a width change, only a mild
+O(log totalRows) term; see Decision 5).
+
+**What `partial → done` actually requires (and what it does *not*).** The
+Ω(N)-width-change fact above is a theorem: a *full* width change reindexes every
+multi-row line, so the exact reindex **cannot** be made sublinear — no later node
+"incrementalizes" it. Sublinearity is available only for **incremental edits**
+(one edit → O(log N) in a balanced tree), which is a *different* operation, not a
+width change. Closing criterion 1 to `done` (a bounded frame on rotation/resize)
+therefore requires an **estimated/async veneer over the exact index space A** —
+i.e. a deliberate re-entry into the A/B fork as a *layer* (exact index underneath;
+an estimated total extent and/or off-frame reindex on top), **not** an
+"incremental exact reindex," which is impossible. This slice's `partial` is honest
+and final for A's core half; the veneer is the open work, and it is a fork
+decision, not a mechanical optimization.
 
 **Fork — within-line random access (decided: accept the O(rowInLine) walk).**
 Greedy packing is inherently sequential, so reaching the k-th visual row of one
@@ -95,11 +108,14 @@ exactly, and reducing to the existing logical-line `compute` at infinite width
 - the D-12 interior exact-equal wrap-width boundary test (folded in — node 2
   re-drives node 1's cursor);
 - an **observational** `--wrap-compute` benchmark that demonstrates the
-  width-change cost (compute latency flat across widths; provider reindex cost
-  measured), recorded in the verification doc.
+  width-change cost (compute stays viewport-bounded — it grows only as
+  O(log totalRows), a couple of binary-search steps, not linearly with width;
+  provider reindex cost measured), recorded in the verification doc.
 
-**Out (later nodes, restated as non-goals below):** making the width-change
-reindex incremental / within-line random access (later provider node); variable
+**Out (later nodes, restated as non-goals below):** the estimated/async
+width-change veneer that would close criterion 1 to `done` (a later **fork**, not
+an "incremental exact reindex" — Ω(N) forbids that; see the fork section) /
+within-line random access (later provider node); variable
 visual-row height (later); `--memory-shape` extension to the wrap path (node 5);
 wrap benchmark modes promoted to **blocking gates** (node 6); y→row and
 point→(row, cell) wrap queries (nodes 3–4); incremental edits under wrap
@@ -119,20 +135,26 @@ point→(row, cell) wrap queries (nodes 3–4); incremental edits under wrap
    advances + irregular breaks + variable per-line column counts, wrap `compute`
    equals the logical-line `compute` bit-for-bit and the streamed rows are
    one-per-line.
-5. The width baked entirely into the provider, so the core is provably
-   width-independent — the demonstration that retires the top risk's core half.
+5. The width baked entirely into the provider, so the core takes no `wrapWidth` and
+   never re-walks the document on a width change (only a mild O(log totalRows)
+   term) — the demonstration that retires the top risk's core half.
 6. Zero change to the no-wrap path; all existing tests still green.
 
 ## Non-Goals
 
-- **No incremental width-change reindex.** A width change constructs a new
-  provider; its O(N) reindex is a measured setup cost. Making it sublinear is a
-  later provider node.
+- **No incremental *exact* width-change reindex — Ω(N) forbids it.** A width
+  change constructs a new provider; its O(N) reindex is a measured setup cost, and
+  because every multi-row line changes, the *exact* reindex **cannot** be made
+  sublinear by any later node. Closing criterion 1 to `done` needs an
+  estimated/async veneer over the exact index (a later **fork**), not an
+  "incremental exact reindex" (see the fork section).
 - **No within-line random access.** The O(rowInLine) walk to the first buffered
   row is accepted and documented (see the fork above).
-- **No variable visual-row height.** `rowHeight` is uniform this slice (YAGNI;
-  the `UniformLineMetrics` precedent). Variable row heights are a later
-  refinement; the contract does not preclude them.
+- **No variable visual-row height.** `rowHeight` is a uniform scalar this slice
+  (YAGNI; uniform is the real case). Adding variable heights is **not additive** —
+  it is a re-architecture of the vertical axis (Risks): the *protocol* survives,
+  but Decision 2's `y = globalRow * rowHeight` reuse does not; the migration path
+  is recorded so a later reader does not mistake it for a small refinement.
 - **No `--memory-shape` extension, no blocking gate, no host.** Node 5 / node 6 /
   nodes 8–9. The `--wrap-compute` mode is **observational only** and is **not**
   `isGateable` this slice.
@@ -153,8 +175,9 @@ public protocol VisualRowLayoutSource: WrapMetricsSource {
     var lineCount: Int { get }
 
     /// Uniform height of one visual row, in layout units. Precondition: finite,
-    /// `> 0`. (Variable row height is a later node; the contract does not preclude
-    /// it, but node 2 assumes uniform.)
+    /// `> 0`. Node 2 assumes uniform; variable row height is not an additive method
+    /// on this protocol but a re-architecture of the vertical axis (see Risks) —
+    /// `rowHeight` would retire in favour of a cumulative-y-per-row source.
     var rowHeight: Double { get }
 
     /// The layout width these row counts are computed at. `> 0`, `+∞` allowed (the
@@ -312,9 +335,12 @@ Neither `compute(_:layout:)` nor `visualRowGeometry(for:layout:)` takes a wrap
 width — it is `layout.wrapWidth`. A width change is modelled as constructing a new
 `VisualRowLayoutSource` at the new width (its O(N) reindex is the provider's setup
 cost) and calling `compute` again. This is the exact analog of `LineMetricsSource`
-baking in line heights, and it is what makes the core provably width-independent:
-the core's per-call work (`compute` O(1) queries; cursor O(log N) + O(buffer)) does
-not mention the width at all. This is the crux of retiring criterion 1's core half.
+baking in line heights. The core's per-call work — `compute` O(log N), cursor
+O(log N) + O(buffer) — takes **no `wrapWidth` parameter** and **never re-walks the
+document** on a width change; its only width-sensitivity is the mild O(log totalRows)
+term (a couple of binary-search steps, not a linear re-layout). That is the crux of
+retiring criterion 1's core half: the O(N) lives in the provider's reindex (a setup
+cost), never in a core per-frame call.
 
 ### Decision 6 — Validation ladder for `compute(_:layout:)`
 
@@ -336,7 +362,13 @@ existing `compute` overloads, which validate before their empty short-circuit):
 9. `totalRows = layout.firstVisualRow(ofLine: lineCount)`; `totalRows <= 0` →
    `.failure(.invalidVisualRowLayout)` (a non-empty document has `≥ lineCount ≥ 1`
    rows; `≤ 0` is a malformed prefix sum).
-10. Otherwise delegate the range math (Decision 2) and return `.success`.
+10. `totalHeight = Double(totalRows) * rowHeight`; `!totalHeight.isFinite` →
+    `.failure(.invalidVisualRowLayout)`. A pathologically large `totalRows ×
+    rowHeight` product overflows to `+∞`; catching it here keeps the error surface
+    wrap-coherent — otherwise the reused `LineMetricsSource` overload would surface
+    its own `.invalidLineMetrics` **through** the wrap overload (an abstraction
+    leak). Marginal in practice, closed for coherence.
+11. Otherwise delegate the range math (Decision 2) and return `.success`.
 
 Interior `visualRowCount`/`firstVisualRow`/`columnOffset` values stay
 trusted-monotone (the same trust the existing binary searches place in interior
@@ -475,15 +507,22 @@ is unchanged; existing tests are untouched and must stay green.
   `VirtualRange`.
 - The streamed `VisualRowGeometry`s at `∞` are one-per-line with the expected
   span/`y`/height.
-- **Recorded red** (Decision 7): the stub `compute(_:layout:)` (ignoring
-  `totalRows`) reddens this suite before the aggregation lands.
+- **Falsifiability** (Decision 7): the `∞` *range* equality is tautology-prone
+  (`totalRows == lineCount` there), so this suite's discriminating red is its
+  **row-streaming** half — the `greedyEnd` `<`-vs-`<=` mutation produces wrong `∞`
+  spans and reddens it. The aggregation's genuine recorded red lives in the
+  **finite-width** `WrapComputeTests` below, where `totalRows > lineCount`.
 
 ### Wrap compute + cursor invariants — `WrapComputeTests`
 
-- **Row-range correctness:** for a document whose lines wrap into known row counts,
+- **Row-range correctness (carries the aggregation's recorded red):** for a
+  document whose lines wrap into known row counts (`totalRows > lineCount`),
   `compute` returns the visual-row range covering the viewport; a scroll offset
   landing inside a multi-row line resolves to the right global row; `isAtTop`/
-  `isAtBottom` at the extremes.
+  `isAtBottom` at the extremes. The TDD stub — a `compute(_:layout:)` returning the
+  un-inflated logical-line range — is **red** here; this is the recorded red that
+  discharges the Slice-49 mandatory falsifiability candidate (at a finite width the
+  `∞` coincidence breaks).
 - **Cursor tiling:** the drained `VisualRowGeometry`s over the buffer range are
   contiguous in `globalRow`, `y` strictly increases by `rowHeight`, each `row`
   matches node 1's packing of its logical line, and consecutive rows reconstruct
@@ -502,8 +541,10 @@ Each Decision 6 breach returns its case: `negativeLineCount`, `nonFiniteValue`,
 `negativeViewportHeight`, `negativeOverscan`, `nonPositiveRowHeight` (`0`, `−1`,
 `−∞`, `NaN` heights), `nonPositiveWrapWidth` (`0`, `−1`, `−∞`, `NaN`; `.infinity`
 does **not** fail), `invalidVisualRowLayout` (`firstVisualRow(0) != 0`;
-non-positive `totalRows`). Plus an **ordering** test pinning the ladder (a layout
-tripping two probes returns the earlier one).
+non-positive `totalRows`; **non-finite `totalRows × rowHeight`** — the overflow
+guard of ladder step 10, e.g. a huge `totalRows` with a huge finite `rowHeight`).
+Plus an **ordering** test pinning the ladder (a layout tripping two probes returns
+the earlier one).
 
 ### Not tested here
 
@@ -517,10 +558,21 @@ nodes.
 
 - builds a benchmark-local aggregation provider over ~100k lines at several wrap
   widths and prints `compute(_:layout:)` + buffer-drain latency per width,
-  demonstrating the core cost is **flat across widths** (width-independent); and
+  demonstrating the core cost stays **viewport-bounded** — it grows only as
+  O(log totalRows) (a narrower width has more rows, so a couple more binary-search
+  steps: ~17 vs ~20 iterations at 100k lines — flat within noise, **not** literally
+  width-independent; the verification doc must phrase it this way so a slightly
+  slower narrow measurement is not misread as a width-dependent regression); and
 - prints the provider's **reindex** cost (rebuild at a new width) separately, so
   the O(N) setup cost is a measured number, not a hand-wave — the honest
   width-change demonstration.
+
+The O(log totalRows) term is inherent to reusing the binary-search compute over a
+uniform proxy; its clean elimination is **not** wrap's job — arithmetic native
+overrides of `lineIndex(containingOffset:)` / `firstLineIndex(withOffsetAtOrAbove:)`
+on `UniformLineMetrics` itself would make every uniform consumer O(1). That is a
+separate slice (it speeds up already-gated modes like `--line-query`, forcing a
+budget re-derivation), flagged as a candidate here, not done in Slice 50.
 
 `--wrap-compute` is **not** `isGateable` this slice and **`--wrap-compute --gate`
 is rejected** (like `--range-only`/`--memory-observation`). No new blocking gate,
@@ -604,27 +656,55 @@ merged proof in the post-merge run.
   it. Cross-line virtualization (the main risk) is bounded; within-line random
   access is a later provider node. Recorded so node 3+/hosts don't assume O(1)
   within-line seeking.
-- **O(N) width-change reindex (measured, deferred).** The provider rebuilds its
-  prefix sum on a width change; node 2 measures it and treats it as a setup cost.
-  Making it incremental/sublinear (or estimated) is a later node; until then
-  criterion 1 is `partial`, not `done`.
+- **O(N) width-change reindex (measured; the exact reindex is irreducibly Ω(N)).**
+  The provider rebuilds its prefix sum on a width change; node 2 measures it and
+  treats it as a setup cost. The *exact* reindex **cannot** be made sublinear (every
+  multi-row line changes — Ω(N)); the only way to a bounded rotation/resize frame is
+  an **estimated/async veneer over the exact index** — a deliberate re-entry into
+  the A/B fork as a layer, decided later. Until that veneer exists, criterion 1 is
+  `partial`, not `done`. (Sublinearity exists only for *incremental edits* — a
+  different operation, node 7 — never for a full width change.)
 - **Provider trust (interior).** As with every existing source, interior
   `firstVisualRow`/`visualRowCount`/`columnOffset` values are trusted monotone; the
   `visualRowCount == packed row count at wrapWidth` invariant is cross-checked by a
   test on `TestVisualRowLayout` but not re-validated per query in the core.
-- **Uniform row height.** `rowHeight` is uniform this slice; a document mixing row
-  heights (e.g. inline images) is out of scope. The contract does not preclude a
-  later variable-height axis.
-- **`VirtualRange` reused across axes.** The same type now carries logical-line
-  indices (the `metrics:` overload) and visual-row indices (the `layout:`
-  overload). Mitigated by documenting the interpretation on each overload; a caller
-  mixing a range from one overload with the other's cursor is a precondition
-  violation.
+- **Uniform row height is a scalar, and variable height is a re-architecture (not
+  additive).** `rowHeight` is a first-class scalar this slice and `compute(_:layout:)`
+  synthesizes `UniformLineMetrics(totalRows, rowHeight)` internally — a mild
+  departure from the engine's "uniform = variable at uniform metrics" DNA, where
+  `uniform` is never a scalar special-case. It is a legitimate YAGNI (uniform is the
+  real case), but the consequence must be recorded: at variable row height Decision
+  2's `y = globalRow * rowHeight` arithmetic collapses. **Migration path:** promote
+  the vertical axis to a full cumulative-y-per-visual-row source (a
+  `LineMetricsSource` *over rows*); `firstVisualRow` stays the count prefix (still
+  needed to map global row → logical line), a **second** prefix sum carries the
+  cumulative y, `rowHeight` **retires**, and `compute` reuses the existing
+  *variable* path directly with no uniform proxy. This is a vertical-axis
+  re-architecture, not a new method — recorded so a later reader does not scope it as
+  a small refinement. (The more ambitious "expose the y-axis as a `LineMetricsSource`
+  sub-axis now" was considered and rejected for this slice: it inflates the provider
+  surface with a second O(N) prefix sum for no present benefit; the scalar is the
+  right minimum today.)
+- **`VirtualRange` reused across axes (P3, later).** The same type now carries
+  logical-line indices (the `metrics:` overload) and visual-row indices (the
+  `layout:` overload). Mitigated by documenting the interpretation on each overload;
+  a caller mixing a range from one overload with the other's cursor is a
+  precondition violation. If this ever bites, a phantom-typed `VirtualRange<Axis>`
+  gives compile-time separation — but that is a broad refactor of every existing
+  overload, so P3/later, not a Slice-50 change.
 
 ## Future Slices (arc map, for reference)
 
 Node 3 — y→row (wrap-aware `lineAt` analog). Node 4 — point→(row, cell). Node 5 —
 `--memory-shape` extension to the wrap path. Node 6 — wrap benchmark modes promoted
-to blocking gates. Node 7 — incremental edits under wrap (and, alongside, the
-incremental width-change reindex / within-line random-access provider work this
-node deferred). Nodes 8–9 — iOS and browser/WASM verification hosts.
+to blocking gates. Node 7 — incremental edits under wrap (a *different* operation
+from a width change: one edit → O(log N), genuinely sublinear) plus the within-line
+random-access provider work this node deferred. **A distinct later fork** (not a
+numbered node yet) — the estimated/async width-change veneer over the exact index
+that closes criterion 1 to `done`; it is a fork decision, since Ω(N) forbids an
+exact sublinear reindex. Nodes 8–9 — iOS and browser/WASM verification hosts.
+
+Candidate (surfaced in this slice's review, not scheduled): arithmetic native
+`lineIndex(containingOffset:)` / `firstLineIndex(withOffsetAtOrAbove:)` overrides on
+`UniformLineMetrics` (O(1) for all uniform consumers) — its own slice, since it
+touches already-gated modes and forces a budget re-derivation.
