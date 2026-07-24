@@ -11,6 +11,14 @@ load-bearing forks were decided with the user during brainstorming (recorded in
 Decisions 1 and the honesty boundary of Decision 4). The next step after user
 sign-off is the TDD implementation plan (`writing-plans`).
 
+**Amended 2026-07-24 during slice-50 implementation (post whole-branch review):**
+Decision 7 (and the Testing Strategy Falsifiability bullet and AC6) previously
+claimed the `∞` oracle's row-streaming half is reddened by the D-12 `<`-vs-`<=`
+mutation. That is false — at `∞` the fit test compares a finite advance against
+`+∞`, so both `<` and `<=` accept and the packing is unchanged. Corrected to credit
+the dedicated **finite-width** `testInteriorExactEqualWidthBoundary` fixture as the
+real boundary discriminator (coverage was always genuine; only the prose over-claimed).
+
 ## Source Context
 
 Node 1 (Slice 49) shipped **layer (i)**: per-logical-line greedy row-packing —
@@ -410,17 +418,22 @@ discriminating red comes from two places the plan records:
    logical-line range) is **red** there before the real aggregation lands. This is
    the aggregation's honest recorded red — at the width where the coincidence
    breaks.
-2. **The `∞` oracle's row-streaming half + the D-12 mutation.** At `∞` the streamed
-   rows must be one-per-line with `row == [0, columnCount(inLine: L))`; a
-   `<`-vs-`<=` mutation in node 1's `greedyEnd` (the **D-12** interior exact-equal
-   wrap-width edge, folded in here since node 2 re-drives that cursor) produces a
-   wrong span and **reddens the streaming half of the `∞` oracle** as well as its
-   dedicated finite-width fixture (a break whose `columnOffset(c) − startOffset ==
-   wrapWidth` exactly must land inclusively on the row).
+2. **The dedicated finite-width D-12 boundary fixture + the mutation.** A break
+   whose `columnOffset(c) − startOffset == wrapWidth` exactly must land inclusively
+   on the row; a `<`-vs-`<=` mutation in node 1's `greedyEnd` (the **D-12** interior
+   exact-equal wrap-width edge, folded in here since node 2 re-drives that cursor)
+   produces a wrong span and **reddens that finite-width fixture**
+   (`testInteriorExactEqualWidthBoundary`, width 20). Note the mutation does **not**
+   redden the `∞` oracle's row-streaming half: at `∞` the fit test compares a finite
+   advance against `+∞`, so both `<` and `<=` accept and the one-per-line packing is
+   unchanged (`testInfiniteWidthStreamsOneRowPerLine` stays green under the flip).
+   The discriminating boundary red is the finite-width fixture, not the `∞` streaming
+   half.
 
 So the mandatory candidate is discharged honestly — not by pretending the `∞` range
-equality can fail, but by carrying the discriminating red at a finite width and by a
-recorded mutation on the streaming/boundary edge.
+equality can fail, but by carrying the discriminating red at a **finite** width: the
+aggregation red (`totalRows > lineCount`) and the recorded D-12 boundary mutation,
+both where wrapping actually happens.
 
 ### Decision 8 — Test-only conformer + benchmark-local provider; no shipped provider
 
@@ -508,10 +521,12 @@ is unchanged; existing tests are untouched and must stay green.
 - The streamed `VisualRowGeometry`s at `∞` are one-per-line with the expected
   span/`y`/height.
 - **Falsifiability** (Decision 7): the `∞` *range* equality is tautology-prone
-  (`totalRows == lineCount` there), so this suite's discriminating red is its
-  **row-streaming** half — the `greedyEnd` `<`-vs-`<=` mutation produces wrong `∞`
-  spans and reddens it. The aggregation's genuine recorded red lives in the
-  **finite-width** `WrapComputeTests` below, where `totalRows > lineCount`.
+  (`totalRows == lineCount` there), and — since at `∞` both `<` and `<=` accept a
+  finite advance against `+∞` — the `∞` **row-streaming** half is **not** reddened by
+  the `greedyEnd` `<`-vs-`<=` mutation either. This suite's discriminating red
+  therefore lives at **finite** width: the aggregation red in `WrapComputeTests`
+  below (`totalRows > lineCount`) and the dedicated D-12 interior exact-equal
+  boundary fixture, which the mutation does redden.
 
 ### Wrap compute + cursor invariants — `WrapComputeTests`
 
@@ -641,8 +656,10 @@ merged proof in the post-merge run.
    correctness case holds the aggregation's **recorded red** (a stub returning the
    un-inflated range is red where `totalRows > lineCount`), not the `∞` range half.
 6. The D-12 interior exact-equal wrap-width boundary test exists and its
-   `<`-vs-`<=` mutation reddens it (and the `∞` oracle's row-streaming half); all
-   validation, invariant, and existing tests pass; the full suite stays green.
+   `<`-vs-`<=` mutation reddens **that finite-width fixture** (the `∞` oracle's
+   row-streaming half is *not* reddened by the mutation — at `∞` both comparisons
+   accept a finite advance against `+∞`); all validation, invariant, and existing
+   tests pass; the full suite stays green.
 7. Foundation-free scan empty; release build + `--gate` pass; `--wrap-compute`
    prints the width-sweep + reindex numbers; iOS + WASM cross-compile pass.
 8. Hosted CI green at **step** level (read step logs, not the job conclusion),
