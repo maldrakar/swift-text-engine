@@ -35,7 +35,12 @@ public struct DocumentVisualRowCursor<Layout: VisualRowLayoutSource> {
         if case .rows(let cursor) = ViewportVirtualizer.visualRows(inLine: line, wrapWidth: wrapWidth, metrics: layout) {
             return cursor
         }
-        return nil   // malformed line is a precondition violation (compute already validated)
+        // A `.failure` here means the provider violated the trusted per-line metrics
+        // precondition: Decision 6 re-reads interior columnOffset/canBreak without
+        // re-validating them, so a malformed line is undefined-behavior input, not a
+        // handled case. Streaming has no failure channel — stop this line (GIGO) rather
+        // than fabricate a row.
+        return nil
     }
 
     public mutating func next() -> VisualRowGeometry? {
