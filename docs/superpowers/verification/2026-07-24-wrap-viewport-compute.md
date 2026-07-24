@@ -355,31 +355,37 @@ this task's commit.
 
 ---
 
-## Hosted CI — TBD / process-pending
+## Hosted CI
 
-**This section is a placeholder and is intentionally incomplete at the time
-this document was first committed.** Per repo convention, hosted proof is
-read at **step** level, not job conclusion (a green job can hide a dead
-`continue-on-error` step — the Slice 16 dead-step trap), and merged proof
+**PR: [#117](https://github.com/maldrakar/swift-text-engine/pull/117)** (base
+`main`, head `slice-50-wrap-viewport-compute`). Per repo convention, hosted
+proof is read at **step** level, not job conclusion (a green job can hide a
+dead `continue-on-error` step — the Slice 16 dead-step trap), and merged proof
 must be anchored in the **post-merge push run**, not just the PR-head run.
-Neither run exists yet: this slice's PR has not been opened. This section
-must be filled in — honestly, from `gh run view <id> --json jobs` step-level
-output, not assumed from a green job conclusion — once both runs are
-available, following the pattern of every prior slice's verification record
-(e.g. `docs/superpowers/verification/2026-07-22-visual-row-model.md` Section
-"Hosted CI").
+
+**PR-head run is DISCHARGED at step level. Post-merge push run is pending the
+merge** (to be filled from the post-merge `push`-to-`main` run, following the
+pattern of every prior slice's verification record).
+
+The PR-head evidence below was read from `gh run view 30084403436 --json jobs`:
+the query `.jobs[].steps[] | select(.conclusion != "success" and .conclusion
+!= "skipped")` returned **empty** — every step in all three required jobs is
+`success` or `skipped`, so no step was swallowed by `continue-on-error`.
 
 | | PR-head run | Post-merge push run |
 |---|---|---|
-| Run ID / commit | **TBD** | **TBD** |
+| Run ID / commit | **`30084403436`** @ `e1d8df9` | **TBD** (after merge) |
 | Trigger | `pull_request` | `push` to `main` |
-| Three required jobs (step level) | **TBD** — Host tests and benchmark gate, iOS cross-target compile, WASM cross-target compile | **TBD** — same three jobs |
-| `Complete docs-only PR` step | **TBD** (expect `[skipped]` in all three jobs — this PR touches `Sources/`, so the heavy path should run) | **TBD** |
-| Twelve blocking gate steps | **TBD** — synthetic, variable-height, variable-height-mutation, structural-mutation, bulk-structural-mutation, line-query, line-geometry-query, column-query, column-geometry-query, point-query, point-geometry-query, realistic-provider (expect all `gate=pass`, unchanged budgets — this slice adds no new gated mode) | **TBD** |
-| Host tests (`Run host tests` step) | **TBD** (expect the 359/0 suite) | **TBD** |
-| iOS cross-target compile step | **TBD** (blocking; expect `pass`, confirmed locally in Section 3a) | **TBD** |
-| WASM cross-target compile step | **TBD** (blocking; expect `pass` on the hosted pinned-6.2.1 SDK — local attempt deferred per Section 3b) | **TBD** |
+| Three required jobs (step level) | **PASS** — Host tests and benchmark gate, iOS cross-target compile, WASM cross-target compile all `success` at step level (no non-success/non-skipped step in any job) | **TBD** — same three jobs |
+| `Complete docs-only PR` step | **`[skipped]`** in all three jobs (correct — this PR touches `Sources/`, so the heavy path ran) | **TBD** |
+| Twelve blocking gate steps | **all `success` (`gate=pass`)** — synthetic, variable-height, variable-height-mutation, structural-mutation, bulk-structural-mutation, line-query, line-geometry-query, column-query, column-geometry-query, point-query, point-geometry-query, realistic-provider (unchanged budgets — this slice adds no new gated mode) | **TBD** |
+| Host tests (`Run host tests` step) | **`success`** (the 359/0 suite) | **TBD** |
+| iOS cross-target compile step | **`success`** (blocking; both packages, device+simulator) | **TBD** |
+| WASM cross-target compile step | **`success`** (blocking; hosted pinned-6.2.1 SDK — local attempt deferred per Section 3b) | **TBD** |
 
-**PR number: TBD.** Fill in once the PR is opened and both the PR-head run
-and the post-merge push run have completed, following AGENTS.md's
-step-level-not-job-conclusion rule.
+Note: committing this evidence to the PR branch retriggers a second PR-head
+run on the docs commit (expected — strict required-status-checks bind the merge
+to the latest commit); that run is the one the merge gates on and is expected
+green for the same reasons. The **post-merge push run** column is filled after
+the user merges, anchoring the merged proof (its creation can lag ~13 min after
+the merge — do not mistake the lag for a skip).
