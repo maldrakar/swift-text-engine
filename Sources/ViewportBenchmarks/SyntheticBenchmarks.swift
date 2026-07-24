@@ -148,6 +148,8 @@ func runScenario(
                 preconditionFailure("memory shape mode uses runMemoryShapeDiagnostics")
             case .memoryObservation:
                 preconditionFailure("memory observation mode uses runMemoryObservationDiagnostics")
+            case .wrapCompute:
+                preconditionFailure("wrap compute mode uses runWrapComputeBenchmarks")
             }
 
             checksum &+= operationResult.checksum
