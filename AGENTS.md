@@ -120,7 +120,7 @@ oracle). This is per-logical-line packing only — cross-line aggregation, verti
 stacking, and wrap-aware `compute` are later nodes. O(1) core memory,
 O(cells-in-row) per `next()`.
 
-**Node 2** adds cross-line aggregation: `VisualRowLayoutSource` (refines
+The **visual-row layer** (node 2) adds cross-line aggregation: `VisualRowLayoutSource` (refines
 `WrapMetricsSource`) is the visual-row axis, mirroring `LineMetricsSource` —
 `lineCount` + a uniform `rowHeight` + the width-baked-in `wrapWidth` +
 `visualRowCount(inLine:)` + the provider-owned prefix sum

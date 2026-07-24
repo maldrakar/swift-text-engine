@@ -288,9 +288,16 @@ $ grep -n "<=" Sources/TextEngineCore/VisualRowCursor.swift
 
 `VisualRowCursor.swift` is byte-identical to base in this branch's committed
 history; the D-12 mutation was a throwaway local edit, reverted before
-committing Task 3. This is the oracle/boundary falsifiability evidence for
-AC6 (the `∞` oracle's row-streaming half is reddened by the same mutation,
-per the spec).
+committing Task 3. This is the oracle/boundary falsifiability evidence for AC6: the dedicated
+finite-width fixture `testInteriorExactEqualWidthBoundary` (a break landing
+exactly at `wrapWidth`) reddens under the mutation, as recorded above. Note
+that the `∞`/large-width equivalence oracle's row-streaming half does **not**
+catch this mutation: at `wrapWidth = ∞` the fit test compares a finite advance
+against `+∞`, so both `<` and `<=` accept and the one-row-per-line packing is
+unchanged — `testInfiniteWidthStreamsOneRowPerLine` stays green under the flip.
+The finite-width D-12 fixture is the real discriminator. (The spec's Decision 7
+point 2 makes the same over-claim about the `∞` streaming half; that ratified
+design doc is left as-is here, flagged for a separate correction.)
 
 ## 5. Diff scope vs `main`
 
