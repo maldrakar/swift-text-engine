@@ -29,6 +29,8 @@ func runBenchmarks(options: BenchmarkOptions) -> Bool {
         return runMemoryShapeDiagnostics()
     case .memoryObservation:
         return runMemoryObservationDiagnostics()
+    case .wrapCompute:
+        return runWrapComputeBenchmarks()
     }
 }
 

@@ -24,8 +24,12 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    infinite-width equivalence oracle from day one. Advanced criterion 3
    (per-line half). Per-line packing only; cross-line aggregation is node 2.
 2. `pending` — **← next (lean).** Wrap-aware viewport compute over visual rows,
-   plus the width-change cost demonstration (change the wrap width; recompute
-   stays viewport-bounded). Advances criteria 1 and 3. **Retires the top risk.**
+   plus the width-change cost demonstration (change the wrap width; the *core*
+   per-frame compute stays viewport-bounded — O(log N), width-independent).
+   Advances criteria 1 and 3. **Retires the top risk's core half.** Criterion 1
+   reaches only `partial`: the *exact* width-change reindex is Ω(N) (see the
+   risk-first note) and closing criterion 1 to `done` needs the veneer fork below,
+   not this node.
 3. `pending` — y→row inverse query (wrap-aware `lineAt` analog). Criterion 3.
 4. `pending` — point→(row, cell) wrap-aware composite. Criterion 3.
 5. `pending` — `--memory-shape` extension to the wrap path. Criterion 2.
@@ -38,12 +42,27 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    gate work (node 6) must land before hosts` — iOS thin host (CoreText
    advances). Criterion 6.
 9. `pending` — Browser/WASM thin host (canvas `measureText`). Criterion 6.
+V. `pending` — **fork (not yet a numbered node): the estimated/async width-change
+   veneer** over the exact index space that closes criterion 1 from `partial` to
+   `done`. Required because a *full* width change is Ω(N) (every multi-row line's
+   count changes — no structure makes the *exact* reindex sublinear); a bounded
+   rotation/resize frame therefore needs an estimated total extent and/or off-frame
+   reindex layered on top of node 2's exact index — a deliberate re-entry into the
+   A/B fork as a *layer*, not an "incremental exact reindex" (which is impossible).
+   Criterion 6's smooth-scroll hosts may force this fork's timing.
 
 Risk-first note: the highest feasibility uncertainty is criterion 1 —
-nothing shipped so far answers who owns row data at a given wrap width and
-what recomputes when that width changes; if that cost is not
-viewport-bounded, the arc's architecture is wrong. Nodes 1–2 front-load it;
-geometry conveniences (nodes 3–4) wait behind it.
+who owns row data at a given wrap width and what recomputes when that width
+changes. Node 2 answers the ownership half (the provider owns the visual-row
+prefix sum) and proves the *core* per-frame compute is viewport-bounded and
+width-independent. But the width-change *event* itself is irreducibly **Ω(N)**
+for an exact total extent (every multi-row line changes) — so criterion 1 cannot
+reach `done` by "incrementalizing" the reindex; no node can make Ω(N) sublinear.
+`done` requires the estimated/async **veneer** (fork V above) over node 2's exact
+index. Until then criterion 1 is `partial`, and that is honest, not a gap a later
+node quietly closes. Nodes 1–2 front-load the ownership/core-cost half; geometry
+conveniences (nodes 3–4) wait behind node 2; the veneer fork is sequenced by when
+a host needs a bounded resize frame.
 
 Map pass 2026-07-22 (Slice 48 review, first live Mode 2): Slice 48 was a
 process slice and consumed no map node; nodes 1–9 stand unchanged and are
@@ -96,3 +115,11 @@ fork remains node 8.
   exact-equal width-boundary test gap — fold-in for node 2, which touches the
   cursor). D-1/D-2 (open P2s, slice 47) are at 2 completed slices and hit the
   ≥3 escalation threshold at the Slice 50 review.
+- 2026-07-23 — **User chose Option A: Slice 50 = node 2** (wrap-aware viewport
+  compute over visual rows + the width-change cost demonstration). The
+  topological forced next step; retires the arc's top feasibility risk
+  (criterion 1 — who owns row data at a given wrap width, what recomputes when
+  the width changes) and advances criterion 3 (whole-document equivalence
+  half). Folds in D-12 + the mandatory equivalence-oracle falsifiability
+  follow-up. D-1/D-2 ride to the Slice 50 review's escalation moment (not
+  pulled forward). Next inner-loop step: brainstorm node 2.

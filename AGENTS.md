@@ -120,6 +120,36 @@ oracle). This is per-logical-line packing only — cross-line aggregation, verti
 stacking, and wrap-aware `compute` are later nodes. O(1) core memory,
 O(cells-in-row) per `next()`.
 
+The **visual-row layer** (node 2) adds cross-line aggregation: `VisualRowLayoutSource` (refines
+`WrapMetricsSource`) is the visual-row axis, mirroring `LineMetricsSource` —
+`lineCount` + a uniform `rowHeight` + the width-baked-in `wrapWidth` +
+`visualRowCount(inLine:)` + the provider-owned prefix sum
+`firstVisualRow(ofLine:)` + a `logicalLine(containingVisualRow:)` inverse
+(binary-search default, provider-overridable). `ViewportVirtualizer.compute(_:layout:)`
+is the **third** `compute` overload: after its own validation ladder (two new
+`ViewportValidationError` cases, `.nonPositiveRowHeight` and
+`.invalidVisualRowLayout`), it reads `totalRows = layout.firstVisualRow(ofLine:
+lineCount)` with one prefix query and **reuses** the proven variable compute over
+`UniformLineMetrics(lineCount: totalRows, lineHeight: rowHeight)` rather than
+re-deriving the range/clamp/edge-flag math, returning a `VirtualRange` whose
+indices are **visual rows**, not logical lines. `visualRowGeometry(for:layout:)`
+hands back a `DocumentVisualRowCursor<Layout>` that streams `VisualRowGeometry`
+(node 1's `VisualRow` span + `y` + `height`) over the buffer range in visual
+order by re-driving node 1's per-line `VisualRowCursor` across logical lines,
+O(1) core memory. The wrap width is **baked into the provider**, never a
+`compute`/cursor parameter: the core makes no per-frame document walk on a width
+change, only the mild O(log totalRows) term already inherent to the reused
+binary-search compute; a width change is instead a *new* provider whose O(N)
+reindex of the prefix sum is a measured **setup cost** (Ω(N) is irreducible — no
+data structure makes an exact full-width reindex sublinear), demonstrated by the
+observational `--wrap-compute` benchmark. The whole-document infinite-width
+equivalence oracle holds `compute(_:layout:)` at `wrapWidth = ∞` (or any width `>=`
+every line's total advance) bit-identical to the logical-line `compute` over a
+uniform axis, with the streamed rows one-per-line — the vertical-axis mirror of
+node 1's per-line oracle. Reaching the first buffered row of a multi-row line
+costs the documented O(rowInLine) within-line walk (greedy packing is
+sequential); random access inside one line is a later, separate provider node.
+
 ## Package layout
 
 - `Sources/TextEngineCore` — the library. Pure, headless, Foundation-free.
@@ -212,6 +242,7 @@ swift run -c release ViewportBenchmarks -- --point-geometry-query --gate   # (x,
 swift run -c release ViewportBenchmarks -- --realistic-provider --gate   # realistic 100k/10MB scroll compute blocking CI gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
+swift run -c release ViewportBenchmarks -- --wrap-compute   # observational wrap compute width-change demo (not gateable)
 swift run -c release ViewportBenchmarks -- --help            # all flags
 ./.github/scripts/harvest-gate-corpus.sh --limit 40 --corpus <corpus.tsv>   # hosted CI logs -> NEW corpus rows (append half)
 ./.github/scripts/harvest-gate-corpus.sh --self-test         # harvest selection-logic self-test (no network)
@@ -228,7 +259,7 @@ Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
 `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
 `--column-query`, `--column-geometry-query`, `--point-query`,
 `--point-geometry-query`, `--memory-shape`,
-`--memory-observation`, `--gate`. Only one mode
+`--memory-observation`, `--wrap-compute`, `--gate`. Only one mode
 flag at a time. `--gate` is valid with the default pipeline, `--realistic-provider`,
 `--variable-height`, `--variable-height-mutation`, `--structural-mutation`,
 `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
@@ -236,7 +267,7 @@ flag at a time. `--gate` is valid with the default pipeline, `--realistic-provid
 `--point-geometry-query` modes; it is
 **rejected** with
 `--range-only`, `--memory-shape`,
-`--memory-observation`.
+`--memory-observation`, `--wrap-compute`.
 
 Local WASM build (needs a matching Swift SDK installed):
 `swift build --swift-sdk <id> --target TextEngineCore` for both `wasm` and

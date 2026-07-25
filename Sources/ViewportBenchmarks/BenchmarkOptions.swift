@@ -14,6 +14,7 @@ enum BenchmarkMode: CaseIterable {
     case pointGeometryQuery
     case memoryShape
     case memoryObservation
+    case wrapCompute
 
     var outputName: String {
         switch self {
@@ -47,6 +48,8 @@ enum BenchmarkMode: CaseIterable {
             return "memory_shape"
         case .memoryObservation:
             return "memory_observation"
+        case .wrapCompute:
+            return "wrap_compute"
         }
     }
 
@@ -79,7 +82,8 @@ enum BenchmarkMode: CaseIterable {
             return true
         case .rangeOnly,
              .memoryShape,
-             .memoryObservation:
+             .memoryObservation,
+             .wrapCompute:
             return false
         }
     }
@@ -114,7 +118,8 @@ enum BenchmarkMode: CaseIterable {
              .pointQuery,
              .pointGeometryQuery,
              .memoryShape,
-             .memoryObservation:
+             .memoryObservation,
+             .wrapCompute:
             return true
         }
     }
@@ -131,7 +136,7 @@ struct BenchmarkOptions {
     let enforceGate: Bool
 
     static let usage = """
-    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--bulk-structural-mutation] [--line-query] [--line-geometry-query] [--column-query] [--column-geometry-query] [--point-query] [--point-geometry-query] [--memory-shape] [--memory-observation] [--help]
+    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--bulk-structural-mutation] [--line-query] [--line-geometry-query] [--column-query] [--column-geometry-query] [--point-query] [--point-geometry-query] [--memory-shape] [--memory-observation] [--wrap-compute] [--help]
 
     Options:
       --range-only          Run only viewport range recompute benchmark.
@@ -149,6 +154,7 @@ struct BenchmarkOptions {
       --point-geometry-query  Run (x,y)->(line+box+fraction, cell+box+fraction) 2D geometry query benchmark. Combine with --gate to enforce budgets.
       --memory-shape        Run deterministic core-owned memory-shape diagnostics.
       --memory-observation  Run host RSS observation diagnostics.
+      --wrap-compute        Run the observational wrap-aware compute width-change demonstration (not gateable).
       --help                Print this help.
     """
 
@@ -234,6 +240,11 @@ struct BenchmarkOptions {
                     return .failure("--memory-observation cannot be combined with another mode")
                 }
                 mode = .memoryObservation
+            case "--wrap-compute":
+                if mode != .pipeline {
+                    return .failure("--wrap-compute cannot be combined with another mode")
+                }
+                mode = .wrapCompute
             default:
                 return .failure("unknown argument \(argument)")
             }
