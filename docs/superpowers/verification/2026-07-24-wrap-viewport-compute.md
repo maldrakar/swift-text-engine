@@ -363,29 +363,31 @@ proof is read at **step** level, not job conclusion (a green job can hide a
 dead `continue-on-error` step — the Slice 16 dead-step trap), and merged proof
 must be anchored in the **post-merge push run**, not just the PR-head run.
 
-**PR-head run is DISCHARGED at step level. Post-merge push run is pending the
-merge** (to be filled from the post-merge `push`-to-`main` run, following the
-pattern of every prior slice's verification record).
+**Both the PR-head run and the post-merge push run are DISCHARGED at step
+level.** PR #117 merged 2026-07-25 via a merge commit (`fdc66d2`; child SHAs
+preserved — no rebase-rewrite this time), and the post-merge `push`-to-`main`
+run `30169643578` @ `fdc66d2` is green at step level, ran the **heavy path**
+(the merge brings `Sources/` into `main`), and anchors the merged proof.
 
-The PR-head evidence below was read from `gh run view 30084403436 --json jobs`:
-the query `.jobs[].steps[] | select(.conclusion != "success" and .conclusion
-!= "skipped")` returned **empty** — every step in all three required jobs is
-`success` or `skipped`, so no step was swallowed by `continue-on-error`.
+Both columns' evidence was read from `gh run view <id> --json jobs`: the query
+`.jobs[].steps[] | select(.conclusion != "success" and .conclusion !=
+"skipped")` returned **empty** for each run — every step in all three required
+jobs is `success` or `skipped`, so no step was swallowed by `continue-on-error`.
 
 | | PR-head run | Post-merge push run |
 |---|---|---|
-| Run ID / commit | **`30084403436`** @ `e1d8df9` | **TBD** (after merge) |
+| Run ID / commit | **`30084403436`** @ `e1d8df9` (merge-gating run `30119186946` @ `ce25d29` also green) | **`30169643578`** @ `fdc66d2` (merge commit) |
 | Trigger | `pull_request` | `push` to `main` |
-| Three required jobs (step level) | **PASS** — Host tests and benchmark gate, iOS cross-target compile, WASM cross-target compile all `success` at step level (no non-success/non-skipped step in any job) | **TBD** — same three jobs |
-| `Complete docs-only PR` step | **`[skipped]`** in all three jobs (correct — this PR touches `Sources/`, so the heavy path ran) | **TBD** |
-| Twelve blocking gate steps | **all `success` (`gate=pass`)** — synthetic, variable-height, variable-height-mutation, structural-mutation, bulk-structural-mutation, line-query, line-geometry-query, column-query, column-geometry-query, point-query, point-geometry-query, realistic-provider (unchanged budgets — this slice adds no new gated mode) | **TBD** |
-| Host tests (`Run host tests` step) | **`success`** (the 359/0 suite) | **TBD** |
-| iOS cross-target compile step | **`success`** (blocking; both packages, device+simulator) | **TBD** |
-| WASM cross-target compile step | **`success`** (blocking; hosted pinned-6.2.1 SDK — local attempt deferred per Section 3b) | **TBD** |
+| Three required jobs (step level) | **PASS** — Host tests and benchmark gate, iOS cross-target compile, WASM cross-target compile all `success` at step level (no non-success/non-skipped step in any job) | **PASS** — same three jobs, all `success` at step level (empty non-success/non-skipped set) |
+| `Complete docs-only PR` step | **`[skipped]`** in all three jobs (correct — this PR touches `Sources/`, so the heavy path ran) | **`[skipped]`** in all three jobs (heavy path ran — the merge commit carries `Sources/`) |
+| Twelve blocking gate steps | **all `success` (`gate=pass`)** — synthetic, variable-height, variable-height-mutation, structural-mutation, bulk-structural-mutation, line-query, line-geometry-query, column-query, column-geometry-query, point-query, point-geometry-query, realistic-provider (unchanged budgets — this slice adds no new gated mode) | **all `success` (`gate=pass`)** — the same twelve gate steps |
+| Host tests (`Run host tests` step) | **`success`** (the 359/0 suite) | **`success`** |
+| iOS cross-target compile step | **`success`** (blocking; both packages, device+simulator) | **`success`** (blocking; both packages) |
+| WASM cross-target compile step | **`success`** (blocking; hosted pinned-6.2.1 SDK — local attempt deferred per Section 3b) | **`success`** (blocking; hosted pinned-6.2.1 SDK) |
 
-Note: committing this evidence to the PR branch retriggers a second PR-head
-run on the docs commit (expected — strict required-status-checks bind the merge
-to the latest commit); that run is the one the merge gates on and is expected
-green for the same reasons. The **post-merge push run** column is filled after
-the user merges, anchoring the merged proof (its creation can lag ~13 min after
-the merge — do not mistake the lag for a skip).
+**AC8 is fully discharged.** Three PR-head runs (`30084403436` @ `e1d8df9`,
+`30084964150` @ `a55a377`, `30119186946` @ `ce25d29`) and the post-merge push
+run (`30169643578` @ `fdc66d2`) are all green at step level. Each PR-branch docs
+commit retriggered a PR-head run under strict required-status-checks; the last,
+`30119186946`, was the merge-gating run. The post-merge run confirms the merged
+code on `main` still passes all twelve gates and both cross-target compiles.
