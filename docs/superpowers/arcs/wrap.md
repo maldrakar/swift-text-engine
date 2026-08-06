@@ -10,9 +10,9 @@ brief's «Ограничения» and the initial brief it inherits by referenc
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
-| 1 | Layout-width change (device rotation, browser resize) does not recompute the document: frame cost stays viewport-bounded, in the spirit of the existing O(log N) + O(buffer) | open | — |
+| 1 | Layout-width change (device rotation, browser resize) does not recompute the document: frame cost stays viewport-bounded, in the spirit of the existing O(log N) + O(buffer) | partial | Core half retired (Slice 50): per-frame `compute(_:layout:)` is O(log totalRows) and never re-walks the document on a width change — width baked into the provider; only its O(N) reindex (a setup cost) is linear. [PR #117](https://github.com/maldrakar/swift-text-engine/pull/117) (`fdc66d2`), post-merge run `30169643578`, `--wrap-compute` numbers. `done` needs the estimated/async veneer (fork V) — the *exact* reindex is Ω(N) |
 | 2 | Core memory not linear in document size with wrap on; wrap data lives behind the provider abstraction; `--memory-shape` extended to the wrap path | open | — |
-| 3 | Wrap-aware equivalents of existing queries (compute over visual rows, y→row, point→(row, cell)); no-wrap path preserved; wrap at infinite width equals no-wrap (equivalence oracle) | partial | Per-line equivalence oracle proven (wrap at ∞/≥total width = one whole-line row = no-wrap column model, over irregular advances+breaks) + no-wrap path untouched — [PR #114](https://github.com/maldrakar/swift-text-engine/pull/114) (`8e91f52`), post-merge run `29990966569`, `VisualRowEquivalenceTests`. Remaining: the query analogs (compute/y→row/point) and the whole-document equivalence half |
+| 3 | Wrap-aware equivalents of existing queries (compute over visual rows, y→row, point→(row, cell)); no-wrap path preserved; wrap at infinite width equals no-wrap (equivalence oracle) | partial | Per-line (Slice 49, [PR #114](https://github.com/maldrakar/swift-text-engine/pull/114) `8e91f52`, `VisualRowEquivalenceTests`) **and whole-document** (Slice 50, [PR #117](https://github.com/maldrakar/swift-text-engine/pull/117) `fdc66d2`, `WrapComputeEquivalenceTests`) equivalence proven (wrap at ∞ = no-wrap, bit-identical over irregular inputs); the **compute** query analog shipped; no-wrap path untouched. Remaining: the **y→row** (node 3) and **point→(row,cell)** (node 4) analogs |
 | 4 | 100k+ lines / >10 MB scroll with wrap on holds p95/p99 budgets and the absolute 60 FPS ceiling; new wrap modes become blocking CI gates via the existing harvest → derive recipe | open | — |
 | 5 | Incremental edits with wrap on (in-line edit, structural insert/delete) stay within frame-hot-path budgets | open | — |
 | 6 | Thin verification hosts: iOS feeding CoreText-measured advances, browser feeding canvas `measureText` over the WASM build; both observably smooth-scroll a large wrapped document | open | — |
@@ -23,14 +23,17 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    provider contract (break opportunities + advances), with the
    infinite-width equivalence oracle from day one. Advanced criterion 3
    (per-line half). Per-line packing only; cross-line aggregation is node 2.
-2. `pending` — **← next (lean).** Wrap-aware viewport compute over visual rows,
-   plus the width-change cost demonstration (change the wrap width; the *core*
-   per-frame compute stays viewport-bounded — O(log N), width-independent).
-   Advances criteria 1 and 3. **Retires the top risk's core half.** Criterion 1
-   reaches only `partial`: the *exact* width-change reindex is Ω(N) (see the
-   risk-first note) and closing criterion 1 to `done` needs the veneer fork below,
-   not this node.
-3. `pending` — y→row inverse query (wrap-aware `lineAt` analog). Criterion 3.
+2. `done` (Slice 50) — Wrap-aware viewport compute over visual rows +
+   `DocumentVisualRowCursor` + the width-change cost demonstration. Advanced
+   criteria 1 (→ partial) and 3 (whole-document equivalence half). **Retired the
+   top risk's core half.** Correction the slice taught: the core per-frame compute
+   is **O(log totalRows), viewport-bounded — NOT literally width-independent** (a
+   narrower width has more rows → a couple more binary-search steps; flat within
+   noise, not constant). Criterion 1 is `partial`, not `done`: the *exact*
+   width-change reindex is Ω(N), so `done` needs the veneer fork V, not this node.
+3. `pending` — **← next (lean, topological).** y→row inverse query (wrap-aware
+   `lineAt` analog over the visual-row axis). Criterion 3 (next query analog behind
+   node 2).
 4. `pending` — point→(row, cell) wrap-aware composite. Criterion 3.
 5. `pending` — `--memory-shape` extension to the wrap path. Criterion 2.
 6. `pending` — Wrap benchmark modes promoted to blocking gates
@@ -85,6 +88,20 @@ next step is still **topological** (node 2 is the forced prerequisite for the
 query analogs and front-loads criterion 1). Node 2 is the lean. First genuine
 fork remains node 8.
 
+Map pass 2026-07-25 (Slice 50 review): node 2 shipped as specified — the
+visual-row axis (`VisualRowLayoutSource`), the reused-uniform `compute(_:layout:)`,
+the streaming `DocumentVisualRowCursor`, and the whole-document equivalence oracle.
+What it taught, and what the map now absorbs: (a) the core per-frame compute is
+**O(log totalRows), viewport-bounded — not literally width-independent** (the node-2
+map wording above is corrected accordingly); (b) reuse-over-a-uniform-row-axis makes
+the ∞ oracle bit-identical *by construction*; (c) criterion 1's *core* half is
+retired and `done` is gated on the Ω(N) veneer fork V, exactly as front-loaded.
+Nodes 3–9 + fork V stand unrevised. Next step is **topological** (node 3 = y→row,
+the next criterion-3 analog behind node 2); first genuine fork remains node 8 (host
+order) / fork V. Lean is node 3 — **but** the D-1/D-2 escalation (open P2s now ≥ 3
+completed slices old) forces a user schedule-or-defer product call this review, so
+the review routes the A/B/C choice to the user rather than auto-selecting node 3.
+
 ## Decision log
 
 - 2026-07-20 — User chose the soft-wrap arc over `pointOf(line:column:)`
@@ -123,3 +140,16 @@ fork remains node 8.
   half). Folds in D-12 + the mandatory equivalence-oracle falsifiability
   follow-up. D-1/D-2 ride to the Slice 50 review's escalation moment (not
   pulled forward). Next inner-loop step: brainstorm node 2.
+- 2026-07-25 — **Slice 50 merged** (PR #117, merge `fdc66d2`; post-merge push
+  run `30169643578` green at step level; post-merge proof PR #118). Node 2 done;
+  criterion 1 → partial (core half retired), criterion 3 whole-document
+  equivalence half proven; D-12 discharged. In-slice falsifiability fix: the
+  whole-branch review caught the ∞-oracle streaming-half over-claim (spec
+  Decision 7 / Testing Strategy / AC6 + verification doc) and it was corrected
+  (`ce25d29` / `e1d8df9`). New debt: D-13 (P3, per-axis binary-search triplication).
+- 2026-07-25 — Slice 50 post-slice review recommends **Slice 51 = node 3 (y→row
+  wrap analog)** as the topological lean, and — per the escalation rule —
+  **surfaces the escalated P2s D-1/D-2** (born slice 47, now ≥ 3 completed slices)
+  for a user **schedule-or-defer** product call (feature route A/C vs infra route
+  B). See the [review](../reviews/2026-07-25-slice-50-post-slice-review.md)
+  Candidate options. Awaiting the user's call.
