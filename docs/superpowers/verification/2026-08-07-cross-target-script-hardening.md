@@ -352,13 +352,22 @@ $ git status --short
 
 ## 4. Hosted CI
 
-**Not run in this task by design.** Step 6 of the task-6 brief (push the
-branch, open the PR, and harvest hosted CI evidence — step-level job
-conclusions, the twelve `gate=pass` lines, and the WASM job's
-`cross_target_sdk_install_seconds=... attempts=1` + four
-`result=pass ... blocking=true` lines) is an outward-facing action reserved
-for the human partner to authorize after a final whole-branch review. This
-verification record covers only the local Step 4 block above.
+**Superseded by §6 below.** At the time this section was first written, Step 6
+of the task-6 brief (push the branch, open the PR, and harvest hosted CI
+evidence) had not been run, and the paragraph below said so. That is no longer
+true: the branch has since been pushed, PR #120 opened, and the PR-head
+hosted CI run has completed and been verified at step level. See §6 for the
+collected evidence. The original paragraph is kept immediately below,
+unedited, as the historical record of that earlier decision — it describes a
+state that no longer holds and must not be read as current.
+
+> Not run in this task by design. Step 6 of the task-6 brief (push the
+> branch, open the PR, and harvest hosted CI evidence — step-level job
+> conclusions, the twelve `gate=pass` lines, and the WASM job's
+> `cross_target_sdk_install_seconds=... attempts=1` + four
+> `result=pass ... blocking=true` lines) is an outward-facing action reserved
+> for the human partner to authorize after a final whole-branch review. This
+> verification record covers only the local Step 4 block above.
 
 ---
 
@@ -587,3 +596,61 @@ All four scripts' `--self-test` pass on both the real CI image (bash 5.2.15,
 GNU grep 3.8, GNU sed 4.9, mawk 1.3.4) and the macOS host's bash 3.2.57 —
 independently reproducing the review's two portability claims rather than
 merely restating them.
+
+---
+
+## 6. PR-head hosted CI evidence (Step 6)
+
+Step 6 has now run. PR
+[#120](https://github.com/maldrakar/swift-text-engine/pull/120) is open on
+branch `slice-51-cross-target-script-hardening`, head commit `e6d32ad`. All
+facts below were verified at **step level** by the controller from the
+downloaded run log — nothing here is re-derived or inferred from job-level
+conclusions alone.
+
+- **PR-head run**: `31207266117` (`event=pull_request`), conclusion
+  **success**.
+- All three required job contexts succeeded: `Host tests and benchmark gate`,
+  `iOS cross-target compile`, `WASM cross-target compile`.
+- `swift test` on hosted Linux: **361 tests, 0 failures** — matching the local
+  count from §1a and §5d.
+- Gate lines: **46 `gate=pass`, 0 `gate=fail`**, across the twelve distinct
+  gated modes: `pipeline`, `variable_height`, `variable_height_mutation`,
+  `structural_mutation`, `bulk_structural_mutation`, `line_query`,
+  `line_geometry_query`, `column_query`, `column_geometry_query`,
+  `point_query`, `point_geometry_query`, `realistic_provider`.
+- **AC8's decisive line**: exactly one
+  `cross_target_sdk_install_seconds=5 attempts=1` in the whole run. This is
+  what proves the happy path survived the Task 3 ladder rewrite — one
+  install, first attempt, no retry.
+- Four WASM blocking lines, `result=pass reason=none blocking=true` — two
+  kinds x two packages: `target=wasm package=core`,
+  `target=wasm package=providers`, `target=wasm_embedded package=core`,
+  `target=wasm_embedded package=providers`.
+- Four iOS blocking lines, `result=pass reason=none blocking=true`:
+  `target=ios_device package=core`, `target=ios_device package=providers`,
+  `target=ios_simulator package=core`, `target=ios_simulator package=providers`.
+- Both cross-target jobs ended `blocking_failures=0 exit=0`.
+- **The new tests ran on hosted Linux and passed**:
+  `Test Suite 'ScriptSelfTestTests' passed`, with both
+  `ScriptSelfTestTests.testEveryScriptSelfTestPasses` and
+  `ScriptSelfTestTests.testTableCoversEveryScriptWithASelfTest`. Worth
+  stating explicitly, because this is the first hosted run in which any
+  script `--self-test` assertion was capable of failing the build.
+
+**An observation worth recording so a future reader is not misled**: the four
+scripts' `self_test=pass` lines do **not** appear in the hosted job log,
+because `ScriptSelfTestTests` captures each script's stdout through a pipe and
+asserts on it rather than echoing it. Absence of `self_test=pass` in the CI
+log is therefore expected and is not evidence the self-tests did not run —
+the passing test-suite lines above are the evidence.
+
+### 6a. Still outstanding
+
+This record does not claim the slice is fully closed out:
+
+- The **post-merge `push` run** has not happened. This repo's convention
+  anchors proof of merged code in the post-merge run, not the PR-head run
+  (see AGENTS.md's "Verification is evidence, not assertion" note) — that
+  proof is still pending PR #120's merge.
+- The **post-slice review** has not been written.
