@@ -45,8 +45,57 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Pure helpers (covered by --self-test, no toolchain required)
+# Function classification (enforced by --self-test, see the partition and coverage
+# checks in run_self_test). Every function in this file is either COVERED (named in
+# the self-test's own source), EXEMPT (named here with a reason), or harness
+# (assert_* / run_self_test, derived). "Covered" means REFERENCED by the self-test,
+# not "executed": print_log_tail really runs during the ladder scenarios yet is exempt,
+# because only swift_sdk_install_retry names it.
 # ---------------------------------------------------------------------------
+
+SELF_TEST_COVERED=(
+  usage
+  swift_version_key
+  emit_target_line
+  scheme_for_package
+  scheme_in_list
+  count_blocking_failures
+  build_package_summary
+  build_overall_summary
+  parse_target_selection
+  target_requested
+  mark_not_requested
+  resolve_wasm_sdk_id_from_list
+  sdk_install_display
+  wasm_kind_blocking
+  wasm_skip_result
+  wasm_install_precheck
+  attempt_logfile
+  run_scenario
+  defined_functions
+  is_harness_function
+  self_test_body
+  body_references_function
+  swift_sdk_install_retry
+  prepare_wasm_sdk
+  scenario_ladder_recovers_after_two_failures
+  scenario_ladder_exhausts_and_prints_every_tail
+  scenario_asymmetric_drift_reports_truth
+)
+
+# name<TAB>justification. Parallel-array-free and bash 3.2-safe: no declare -A.
+SELF_TEST_EXEMPT=(
+  "print_log_tail	prints a file tail; runs via the ladder but is never named by the self-test"
+  "print_ios_toolchain_metadata	shells out to xcode-select/xcrun"
+  "resolve_ios_scheme_list	runs xcodebuild -list"
+  "ios_scheme_status	reads the xcodebuild -list log captured by resolve_ios_scheme_list"
+  "compile_ios_target	runs xcodebuild"
+  "resolve_wasm_sdk_id	runs swift sdk list; the drift scenario's stub target"
+  "run_swift_sdk_install	the toolchain call itself; the ladder's stub target"
+  "compile_wasm_package_for_kind	runs swift build against an installed SDK"
+  "process_package	orchestration over the compile steps"
+  "main	top-level orchestration and exit code"
+)
 
 # Extract the X.Y.Z version from a `swift --version` first line.
 swift_version_key() {
@@ -248,6 +297,49 @@ wasm_install_precheck() {
 # the retry loop.
 attempt_logfile() {
   printf '%s.attempt-%s' "$1" "$2"
+}
+
+# Every function defined in a script file, one name per line. Pure.
+defined_functions() {
+  grep -oE '^[a-z_]+\(\) \{' "$1" | sed 's/() {//'
+}
+
+# The harness set is DERIVED, never hand-listed, so it cannot go stale.
+is_harness_function() {
+  case "$1" in
+    assert_*|run_self_test) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The self-test's own source: run_self_test plus every scenario_* function (they ARE
+# the self-test -- they drive the ladder and the drift path). Three subtractions keep
+# the coverage check from becoming a tautology:
+#   * the classification arrays are top-level, hence outside this extraction, so a
+#     name cannot satisfy the check by appearing in the list it is checked against;
+#   * comments are stripped -- run_self_test's prose names helpers it does not call;
+#   * definition lines are stripped -- defining a stub named X is not evidence that
+#     the self-test exercises X.
+self_test_body() {
+  awk '
+    /^(run_self_test|scenario_[a-z_]*)\(\) \{/ { inside = 1 }
+    inside { print }
+    inside && /^}/ { inside = 0 }
+  ' "$1" | sed -e 's/#.*$//' -e '/^[[:space:]]*[a-z_][a-z0-9_]*() {$/d'
+}
+
+# Token match, never substring: resolve_wasm_sdk_id must not be satisfied by
+# resolve_wasm_sdk_id_from_list (the repo's --variable-height lesson).
+body_references_function() {
+  printf '%s\n' "$2" | grep -qE "(^|[^A-Za-z0-9_])$1([^A-Za-z0-9_]|\$)"
+}
+
+assert_function_defined() {
+  local fn="$1" defined="$2" label="$3"
+  if ! printf '%s\n' "$defined" | grep -qx -- "$fn"; then
+    echo "self_test=fail label=$label expected=defined actual=missing fn=$fn"
+    exit 1
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -570,6 +662,53 @@ some descriptive header with spaces"
   run_scenario scenario_ladder_recovers_after_two_failures
   run_scenario scenario_ladder_exhausts_and_prints_every_tail
   run_scenario scenario_asymmetric_drift_reports_truth
+
+  # --- classification (D-6) ---
+  local script_path defined body fn entry name classified
+  script_path="${BASH_SOURCE[0]}"
+  defined="$(defined_functions "$script_path")"
+  body="$(self_test_body "$script_path")"
+
+  # Direction 1: every defined function is classified.
+  for fn in $defined; do
+    if is_harness_function "$fn"; then continue; fi
+    classified=0
+    for name in "${SELF_TEST_COVERED[@]}"; do
+      [[ "$name" == "$fn" ]] && classified=1
+    done
+    for entry in "${SELF_TEST_EXEMPT[@]}"; do
+      [[ "${entry%%$'\t'*}" == "$fn" ]] && classified=1
+    done
+    assert_equal "1" "$classified" "classified_${fn}"
+  done
+
+  # Direction 2: no phantom names, and every exempt entry carries a justification.
+  for name in "${SELF_TEST_COVERED[@]}"; do
+    assert_function_defined "$name" "$defined" "covered_defined_${name}"
+  done
+  for entry in "${SELF_TEST_EXEMPT[@]}"; do
+    assert_function_defined "${entry%%$'\t'*}" "$defined" "exempt_defined_${entry%%$'\t'*}"
+    if [[ "$entry" != *$'\t'* || -z "${entry#*$'\t'}" ]]; then
+      echo "self_test=fail label=exempt_justified_${entry} expected=justification actual=none"
+      exit 1
+    fi
+  done
+
+  # Coverage: every covered function is really referenced by the self-test's source.
+  for name in "${SELF_TEST_COVERED[@]}"; do
+    if ! body_references_function "$name" "$body"; then
+      echo "self_test=fail label=covered_but_unreferenced fn=$name"
+      exit 1
+    fi
+  done
+
+  # usage must keep documenting the flag this whole mechanism hangs on. The check is
+  # the RIGHT side of the pipe, so the pipeline's status is the check's status.
+  if ! usage | grep -q -- '--self-test'; then
+    echo "self_test=fail label=usage_documents_self_test expected=documented actual=missing"
+    exit 1
+  fi
+
   echo "self_test=pass"
 }
 
