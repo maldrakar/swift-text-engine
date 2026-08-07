@@ -164,9 +164,12 @@ the review routes the A/B/C choice to the user rather than auto-selecting node 3
   escalation is cleared by scheduling, not by silence. D-1 was **re-verified live
   on the tree at selection time**: slice 47 closed only the sibling half
   (`sdk_unresolved_after_install` is now recorded, `cross-target-compile.sh:569`),
-  while `WASM_BUNDLE_FAILED_REASON` still stores failures only — so the
-  asymmetric-drift path still burns a second bounded-retry ladder against an
-  already-installed bundle and reports `sdk_install_failed`. **D-7** stays
+  while the WASM bundle-state global still stored failures only — so the
+  asymmetric-drift path still burned a second bounded-retry ladder against an
+  already-installed bundle and reported `sdk_install_failed`. Slice 51
+  discharged this remaining half: the global is renamed `WASM_BUNDLE_STATE` and
+  gains a `bundle_installed_ok` state recorded on successful shared install.
+  **D-7** stays
   deferred (re-affirmed): `harvest-gate-corpus.sh` + corpus policy is a different
   surface deserving its own spec. Out of scope by the concern-separation rule:
   **D-13** (core) and **D-10/D-11** (repo-policy pins). Slice 51 advances **no
