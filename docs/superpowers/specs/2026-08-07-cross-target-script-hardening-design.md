@@ -603,11 +603,14 @@ names the observables to read out of that log rather than settling for "green".
   the failure message names the path so a missing file is not read as a logic
   failure. The `git` dependency is new and arrives with the fourth table row:
   `detect-docs-only-pr.sh`'s self-test builds a real throwaway repository
-  (`git init` / `git commit`, `:41-75`). It is self-contained — it sets its own
-  `user.name` / `user.email` locally (`:45-46`), so no global identity is
+  (`git init` / `git commit`, `:167-219`). It is self-contained — it sets its own
+  `user.name` / `user.email` locally (`:171-172`), so no global identity is
   required, and `git` is present in `swift:6.2.1-bookworm` (SwiftPM needs it).
-  All four self-tests pass today on the macOS host (measured: exit 0,
-  `self_test=pass`), so adoption reddens nothing.
+  It also cleans up after itself (`rm -rf` `:233`, `rm -f` `:58/:251`; measured:
+  zero temp directories before and after a run), so driving it from `swift test`
+  does not make the test suite leak another script's debris. All four self-tests
+  pass today on the macOS host (measured: exit 0, `self_test=pass`), so adoption
+  reddens nothing.
 - **D-14 (new):** three scripts gain enforcement but no classification pin. Named
   in the ledger so the half-measure is visible.
 - **This slice advances no brief criterion.** Debt paydown chosen over the
