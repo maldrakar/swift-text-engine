@@ -612,7 +612,9 @@ run_swift_sdk_install() {
 # Install a Swift SDK with a bounded retry. download.swift.org is now in the
 # merge path, so a transient network error gets a few attempts before failing
 # red. Echoes the measured install seconds (feeds the caching decision) on
-# success. Not pure -- exercised by the hosted spike, not --self-test.
+# success. Not pure -- the toolchain call itself is stubbed via
+# run_swift_sdk_install; the retry/backoff/logging logic IS exercised by
+# --self-test.
 swift_sdk_install_retry() {
   local url="$1" checksum="$2" logfile="$3" label="$4"
   local attempts="${CROSS_TARGET_SDK_INSTALL_ATTEMPTS:-3}"
