@@ -15,6 +15,12 @@ set -uo pipefail
 TAIL_LINES="${CROSS_TARGET_LOG_TAIL:-40}"
 SELECTED_TARGETS="all"
 
+# Created once at the top of run_self_test; removed by an EXIT trap in the MAIN
+# shell. Scenario subshells read it but must never create or delete it: a bash 3.2
+# EXIT trap does not fire when a `( ... )` subshell exits, which is exactly what
+# keeps the first scenario from deleting the directory the next two still need.
+SELF_TEST_TMP_ROOT=""
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -264,7 +270,19 @@ assert_resolver_missing() {
   fi
 }
 
+# Run a scenario function in a SUBSHELL so a stub override cannot leak into
+# neighbouring cases -- and propagate its status, because the script runs under
+# `set -uo pipefail` with no `set -e`: an `exit 1` from assert_* inside `( ... )`
+# ends only the subshell. Never call a scenario bare.
+run_scenario() {
+  local name="$1"
+  ( "$name" ) || exit 1
+}
+
 run_self_test() {
+  SELF_TEST_TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/cross-target-self-test.XXXXXX")"
+  trap 'rm -rf "$SELF_TEST_TMP_ROOT"' EXIT
+
   local clean_list="swift-6.1.2-RELEASE_wasm
 swift-6.1.2-RELEASE_wasm-embedded"
   local noisy_list="Installed Swift SDKs:
@@ -702,7 +720,7 @@ main() {
 }
 
 if [[ "${1:-}" == "--self-test" ]]; then
-  run_self_test
+  run_self_test || exit 1
   exit 0
 fi
 if [[ "${1:-}" == "--help" ]]; then
