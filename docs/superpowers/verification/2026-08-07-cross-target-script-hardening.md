@@ -359,3 +359,231 @@ conclusions, the twelve `gate=pass` lines, and the WASM job's
 `result=pass ... blocking=true` lines) is an outward-facing action reserved
 for the human partner to authorize after a final whole-branch review. This
 verification record covers only the local Step 4 block above.
+
+---
+
+## 5. Final whole-branch review — findings and disposition
+
+A final whole-branch code review ran over this branch before merge and
+produced three findings, all now closed out. This section records what each
+finding was, what was done, and the real command output, without restating
+the review itself.
+
+### 5a. Finding 1 (Important, FIXED in-branch) — unchecked `mktemp -d` fails OPEN as root
+
+`run_self_test` created `SELF_TEST_TMP_ROOT` via a bare
+`SELF_TEST_TMP_ROOT="$(mktemp -d ...)"` with no failure check. Under this
+script's `set -uo pipefail` (no `set -e`), a failing `mktemp -d` silently
+leaves `SELF_TEST_TMP_ROOT=""`. On macOS that still fails closed (writes to
+`/` are denied), but in a root-run container — the hosted CI image is exactly
+this — an empty root resolves to the filesystem root: the reviewer forced the
+empty value and observed `exit=0 self_test=pass` plus ten stray files written
+under `/` (`/recover.count`, `/exhaust.log.attempt-1`, …). All three ladder/
+drift scenarios degrade silently while the build-blocking guard reports
+green.
+
+Fixed exactly per the review's prescribed shape in `run_self_test`
+(`.github/scripts/cross-target-compile.sh`):
+
+```bash
+SELF_TEST_TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/cross-target-self-test.XXXXXX")" || SELF_TEST_TMP_ROOT=""
+[[ -d "$SELF_TEST_TMP_ROOT" ]] || { echo "self_test=fail label=tmp_root_unavailable"; exit 1; }
+trap 'rm -rf "$SELF_TEST_TMP_ROOT"' EXIT
+```
+
+The explanatory comment directly above these lines was extended to describe
+the failure mode and why the `|| SELF_TEST_TMP_ROOT=""` is load-bearing.
+
+**Verified it bites**, by temporarily pointing the `mktemp -d` template at a
+nonexistent parent directory (`/nonexistent-dir-for-finding1-drill/...`),
+confirming the exact expected failure, then reverting the forcing (never
+committed):
+
+```
+$ bash -c '
+out="$(bash .github/scripts/cross-target-compile.sh --self-test 2>&1)"; rc=$?
+printf "%s\n" "$out"
+echo "exit=$rc"
+'
+mktemp: mkdtemp failed on /nonexistent-dir-for-finding1-drill/cross-target-self-test.Wzag36: No such file or directory
+self_test=fail label=tmp_root_unavailable
+exit=1
+```
+
+Reverted immediately after capture; `git diff` against the forcing edit was
+confirmed empty before proceeding, and the real fix (the three-line shape
+above) was re-verified passing (`self_test=pass exit=0`, see 5d below).
+
+### 5b. Finding 2 (Minor, FIXED in-branch) — two ambient env vars the self-test never pinned
+
+`CROSS_TARGET_SDK_INSTALL_ATTEMPTS=2` in the caller's shell made
+`--self-test` fail at `label=ladder_recover_status` (the recover scenario
+needs 3 attempts to succeed); `CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false` made
+it fail at `label=embedded_blocks_by_default`. No live risk (CI sets neither),
+but a developer's shell export could redden a required check.
+
+Fixed by pinning both hermetically at their point of use:
+
+- `CROSS_TARGET_SDK_INSTALL_ATTEMPTS=3` added beside the existing
+  `CROSS_TARGET_SDK_INSTALL_BACKOFF=0` line in both
+  `scenario_ladder_recovers_after_two_failures` and
+  `scenario_ladder_exhausts_and_prints_every_tail`, each with a comment
+  explaining that a scenario inheriting an ambient value is not hermetic.
+- The `embedded_blocks_by_default` assertion in `run_self_test` now pins
+  `CROSS_TARGET_WASM_EMBEDDED_BLOCKING=true` inline on the same command
+  substitution the neighbouring `embedded_ladder_demotes_to_observational`
+  assertion already uses for its own `=false` pin, with the same rationale
+  comment.
+
+**Verified both now pass** with the previously-reddening exports set:
+
+```
+$ bash -c '
+out="$(CROSS_TARGET_SDK_INSTALL_ATTEMPTS=2 bash .github/scripts/cross-target-compile.sh --self-test)"; rc=$?
+printf "%s\n" "$out"; echo "exit=$rc"
+'
+warn=sdk_install_attempt_failed attempt=1/3
+warn=sdk_install_attempt_failed attempt=2/3
+self_test=pass
+exit=0
+
+$ bash -c '
+out="$(CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false bash .github/scripts/cross-target-compile.sh --self-test)"; rc=$?
+printf "%s\n" "$out"; echo "exit=$rc"
+'
+warn=sdk_install_attempt_failed attempt=1/3
+warn=sdk_install_attempt_failed attempt=2/3
+self_test=pass
+exit=0
+```
+
+Both scenarios are now hermetic: neither ambient var can move their result.
+
+### 5c. Finding 3 (Minor, RECORDED as ledger debt, not fixed) — dispatcher asymmetry across the four scripts
+
+`derive-gate-budgets.sh:77` and `harvest-gate-corpus.sh:117` still carry the
+bare `run_self_test; exit 0` dispatcher shape that Task 1 of this slice
+replaced in `cross-target-compile.sh` with `run_self_test || exit 1`.
+Confirmed by direct inspection:
+
+```
+$ grep -n "run_self_test" .github/scripts/derive-gate-budgets.sh .github/scripts/harvest-gate-corpus.sh .github/scripts/cross-target-compile.sh
+.github/scripts/derive-gate-budgets.sh:47:run_self_test() {
+.github/scripts/derive-gate-budgets.sh:77:  run_self_test
+.github/scripts/harvest-gate-corpus.sh:73:run_self_test() {
+.github/scripts/harvest-gate-corpus.sh:117:  run_self_test
+.github/scripts/cross-target-compile.sh:509:run_self_test() {
+.github/scripts/cross-target-compile.sh:1032:  run_self_test || exit 1
+```
+
+This is currently harmless (every `assert_*` in the other two scripts `exit
+1`s from function scope and prints `self_test=fail`, which
+`ScriptSelfTestTests`' third assertion — `self_test=fail` absent — catches
+independently of the dispatcher's own exit status) but undocumented, and out
+of this slice's scope to fix (touching those two scripts' dispatchers or
+self-test classification was not part of this slice's task list). Per
+instruction, this was **not fixed** — instead recorded as new ledger row
+**D-15** in `docs/superpowers/debt-ledger.md`, citing this slice's spec, P3,
+status `open`, stating the asymmetry, why it is currently harmless, and the
+trigger (a future `return`-based failure path in either script) that would
+make it bite.
+
+### 5d. Full verification block re-run after all fixes
+
+```
+$ bash .github/scripts/cross-target-compile.sh --self-test
+warn=sdk_install_attempt_failed attempt=1/3
+warn=sdk_install_attempt_failed attempt=2/3
+self_test=pass
+```
+(exit 0; `self_test=pass` present; `self_test=fail` absent.)
+
+```
+$ swift test --filter ScriptSelfTestTests
+...
+Test Suite 'ScriptSelfTestTests' passed at 2026-08-07 21:21:41.648.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 1.099 (1.099) seconds
+```
+
+```
+$ swift test
+...
+Test Suite 'SwiftTextEnginePackageTests.xctest' passed at 2026-08-07 21:21:54.655.
+	 Executed 361 tests, with 0 failures (0 unexpected) in 5.273 (5.295) seconds
+```
+
+361 tests, 0 failures — unchanged count from section 1a (this fix wave adds
+no new test, only hardens existing script logic + docs).
+
+### 5e. New portability evidence: real CI image + macOS host bash 3.2
+
+This document did not previously carry direct evidence of the self-tests
+running inside the actual hosted CI container image, only on the macOS
+development host. As part of this final review's disposition, all four
+scripts' `--self-test` were run inside `swift:6.2.1-bookworm` (the exact
+image `swift-ci.yml`'s host-tests job and WASM job use) via Docker, and
+separately confirmed again on the macOS host's bash 3.2.57 (the same
+constraint this script's bash-3.2-compatibility requirement targets):
+
+```
+$ docker run --rm -v "$PWD/.github/scripts:/scripts:ro" swift:6.2.1-bookworm bash -c '
+echo "bash: $BASH_VERSION"
+grep --version | head -1
+sed --version | head -1
+mawk -W version 2>&1 | head -1
+echo "---"
+for s in cross-target-compile.sh derive-gate-budgets.sh harvest-gate-corpus.sh detect-docs-only-pr.sh; do
+  echo "== $s =="
+  bash /scripts/$s --self-test
+  echo "exit=$?"
+done
+'
+bash: 5.2.15(1)-release
+grep (GNU grep) 3.8
+sed (GNU sed) 4.9
+mawk 1.3.4 20200120
+---
+== cross-target-compile.sh ==
+warn=sdk_install_attempt_failed attempt=1/3
+warn=sdk_install_attempt_failed attempt=2/3
+self_test=pass
+exit=0
+== derive-gate-budgets.sh ==
+self_test=pass
+exit=0
+== harvest-gate-corpus.sh ==
+self_test=pass
+exit=0
+== detect-docs-only-pr.sh ==
+self_test=pass
+exit=0
+```
+
+```
+$ /bin/bash --version | head -1
+GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)
+$ for s in cross-target-compile.sh derive-gate-budgets.sh harvest-gate-corpus.sh detect-docs-only-pr.sh; do
+  echo "== $s =="
+  /bin/bash ".github/scripts/$s" --self-test
+  echo "exit=$?"
+done
+== cross-target-compile.sh ==
+warn=sdk_install_attempt_failed attempt=1/3
+warn=sdk_install_attempt_failed attempt=2/3
+self_test=pass
+exit=0
+== derive-gate-budgets.sh ==
+self_test=pass
+exit=0
+== harvest-gate-corpus.sh ==
+self_test=pass
+exit=0
+== detect-docs-only-pr.sh ==
+self_test=pass
+exit=0
+```
+
+All four scripts' `--self-test` pass on both the real CI image (bash 5.2.15,
+GNU grep 3.8, GNU sed 4.9, mawk 1.3.4) and the macOS host's bash 3.2.57 —
+independently reproducing the review's two portability claims rather than
+merely restating them.

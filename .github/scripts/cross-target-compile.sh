@@ -413,6 +413,12 @@ scenario_ladder_recovers_after_two_failures() {
   local counter="${SELF_TEST_TMP_ROOT}/recover.count"
   local status
   CROSS_TARGET_SDK_INSTALL_BACKOFF=0
+  # Pinned, not inherited: this scenario's stub recovers on attempt 3, so an
+  # ambient CROSS_TARGET_SDK_INSTALL_ATTEMPTS (e.g. a developer's shell export set
+  # to 2) would exhaust the ladder before recovery and fail this scenario for a
+  # reason that has nothing to do with the code under test. A hermetic scenario
+  # must not read values it does not set itself.
+  CROSS_TARGET_SDK_INSTALL_ATTEMPTS=3
   printf '0' > "$counter"
   run_swift_sdk_install() {
     local n
@@ -440,6 +446,11 @@ scenario_ladder_exhausts_and_prints_every_tail() {
   local counter="${SELF_TEST_TMP_ROOT}/exhaust.count"
   local out status
   CROSS_TARGET_SDK_INSTALL_BACKOFF=0
+  # Pinned, not inherited: this scenario asserts exactly 3 exhausted attempts, so
+  # an ambient CROSS_TARGET_SDK_INSTALL_ATTEMPTS must not be allowed to change that
+  # count out from under the assertion. A hermetic scenario must not read values
+  # it does not set itself.
+  CROSS_TARGET_SDK_INSTALL_ATTEMPTS=3
   printf '0' > "$counter"
   run_swift_sdk_install() {
     local n
@@ -507,7 +518,17 @@ scenario_asymmetric_drift_reports_truth() {
 }
 
 run_self_test() {
-  SELF_TEST_TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/cross-target-self-test.XXXXXX")"
+  # Fail CLOSED if mktemp itself fails: under `set -uo pipefail` (no `set -e`) an
+  # unchecked `mktemp -d` failure leaves SELF_TEST_TMP_ROOT="". On macOS that still
+  # fails safely later (writes to "/" are denied), but in a root-run container (e.g.
+  # hosted CI) an empty root resolves to the filesystem root and every scenario
+  # silently writes stray files there while still reporting self_test=pass -- a
+  # check that cannot fail is not a check. The `|| SELF_TEST_TMP_ROOT=""` is
+  # load-bearing: without it, `set -u`-adjacent strictness aside, a failing command
+  # substitution's own exit status would otherwise not gate anything, since this
+  # script runs without `set -e`.
+  SELF_TEST_TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/cross-target-self-test.XXXXXX")" || SELF_TEST_TMP_ROOT=""
+  [[ -d "$SELF_TEST_TMP_ROOT" ]] || { echo "self_test=fail label=tmp_root_unavailable"; exit 1; }
   trap 'rm -rf "$SELF_TEST_TMP_ROOT"' EXIT
 
   local clean_list="swift-6.1.2-RELEASE_wasm
@@ -608,7 +629,13 @@ some descriptive header with spaces"
 
   # Task 2 — per-kind blocking flag (the fallback ladder is a config flip)
   assert_equal "true" "$(wasm_kind_blocking wasm)" "wasm_blocks"
-  assert_equal "true" "$(wasm_kind_blocking wasm_embedded)" "embedded_blocks_by_default"
+  # Pinned to the default explicitly, not inherited: an ambient
+  # CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false in the caller's shell would otherwise
+  # flip this assertion's expected outcome for a reason unrelated to the code
+  # under test. A hermetic scenario must not read values it does not set itself.
+  assert_equal "true" \
+    "$(CROSS_TARGET_WASM_EMBEDDED_BLOCKING=true wasm_kind_blocking wasm_embedded)" \
+    "embedded_blocks_by_default"
   assert_equal "false" \
     "$(CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false wasm_kind_blocking wasm_embedded)" \
     "embedded_ladder_demotes_to_observational"
