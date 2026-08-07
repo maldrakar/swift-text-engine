@@ -43,6 +43,21 @@ The review's P2s and polish items are folded in as Decisions 3, 6 (four-script
 table), 8 (bash 3.2), 9 (temp files), 10 (`$SCRATCH` rule, D-2 home), the AC8
 observable facts, and new debt row D-14.
 
+**Second review round, same day.** It re-checked the revision mechanically and
+found no surviving P1. One P2: the **Verification block violated Decision 10
+rule 2 in the document that introduces it** — three of its commands were
+inverted or inert at exactly the point where the invariant lives (measured; see
+Verification). Folded in there and in AC8. The remaining items are absorbed
+above: Goal 3's "genuinely exercised" overclaim (now "referenced"), Decision 7's
+"three declared sets" wording, the self-test's own scenario functions landing
+inside the partition, the Testing Strategy row mislabelled D-3 instead of D-1,
+the `git` dependency the fourth table row adds to `swift test`, and the
+`--self-test` dispatcher's masking `exit 0`. The round also independently
+reproduced three measured claims (all four self-tests green, the four scripts'
+identical `self_test=` tokens, the 11 surviving occurrences of the old global
+name) and resolved a latent hazard in Decision 9's favour — the bash 3.2 EXIT
+trap does not fire on subshell exit, now recorded there.
+
 The next step after sign-off is the TDD implementation plan (`writing-plans`),
 which is itself the first artifact written under the Decision 10 conventions.
 
@@ -137,7 +152,9 @@ Three recorded defects in one file, and one process gap:
    line, and performs no second install against a bundle this script installed.
 2. An install failure leaves one log per attempt, all of them printed.
 3. A function added to `cross-target-compile.sh` without being classified — or
-   classified as covered without being genuinely exercised — fails the build.
+   classified as covered without being **referenced in `run_self_test`** — fails
+   the build. "Referenced", not "exercised": the stronger word would overclaim
+   what the check proves (Decision 7, Risks).
 4. Those guarantees, and the other three scripts' self-tests, run on every
    `swift test`, locally and hosted, without a workflow edit.
 5. The four plan-assertion conventions are written down and demonstrably applied
@@ -281,13 +298,15 @@ instead.
 
 ### Decision 7 — The D-6 pin classifies by *coverage*, not by "purity"
 
-Three sets, declared at the **top level** of the script:
+**Two declared sets plus a derived one.** Only two arrays are hand-maintained,
+both at the **top level** of the script; the third set is computed, so it cannot
+drift:
 
-- `SELF_TEST_COVERED` — must be referenced in `run_self_test`'s body.
-- `SELF_TEST_HARNESS` — derived mechanically (`assert_*` plus `run_self_test`),
-  not hand-listed, so it needs no maintenance.
-- `SELF_TEST_EXEMPT` — one justification line per entry (toolchain call, network,
-  filesystem, orchestration).
+- `SELF_TEST_COVERED` — declared; must be referenced in `run_self_test`'s body.
+- `SELF_TEST_EXEMPT` — declared; one justification line per entry (toolchain
+  call, network, filesystem, orchestration).
+- the harness set — **derived** (`assert_*` plus `run_self_test`), never
+  hand-listed, so it needs no maintenance and cannot go stale.
 
 `--self-test` asserts:
 
@@ -304,9 +323,19 @@ first two drivable); `run_swift_sdk_install` and `resolve_wasm_sdk_id` are exemp
 becomes covered by one assertion (`usage | grep -q -- '--self-test'`), which also
 pins that the flag stays documented; the pipeline's status is the right side's,
 which is what the assertion wants. So the exemption set shrinks while the
-boundary moves down to the process calls themselves, where it belongs. The
-`# Pure helpers (covered by --self-test …)` header at `:42` is superseded by the
-arrays and reworded to point at them, so the file states the fact once.
+boundary moves down to the process calls themselves, where it belongs.
+
+**The self-test's own new functions are inside the partition, and that is
+intended.** `assert_command_success` runs `"$@"` and therefore cannot take a
+pipeline, so the `usage` check needs a named wrapper; the three Decision 5
+scenarios are named functions too. All of them are top-level definitions that the
+partition check sees, the derived harness set (`assert_*` + `run_self_test`) does
+not cover, and that therefore land in `SELF_TEST_COVERED` — correctly, since
+`run_self_test` invokes each by name. Stated here so the plan does not have to
+rediscover it while the partition is failing closed on names it just introduced.
+
+The `# Pure helpers (covered by --self-test …)` header at `:42` is superseded by
+the arrays and reworded to point at them, so the file states the fact once.
 
 ### Decision 8 — Four anti-tautology rules, and bash 3.2
 
@@ -353,6 +382,13 @@ the main shell, following `derive-gate-budgets.sh:49-53` rather than
 `harvest-gate-corpus.sh:75,106`, which leaks. Because `assert_*` failures exit
 the shell, cleanup must be trap-based, not a trailing `rm` — a failing self-test
 must not leave debris either.
+
+The one interaction worth stating, because it is not obvious and the whole
+scheme depends on it: **an EXIT trap set in the main shell does not fire when a
+`( … )` scenario subshell exits.** Verified on bash 3.2.57 — a scenario that
+ends in `exit 1` leaves the root intact, and the root is removed once, when the
+script itself exits. Had the trap been inherited, the first scenario would have
+deleted the directory the next two still need.
 
 ### Decision 10 — D-2 ships as **four** conventions in `AGENTS.md`
 
@@ -410,6 +446,7 @@ The verification record states the checksum baseline and suite count so
 | `usage` | unchanged; becomes covered by the `--self-test` documentation assertion |
 | `SELF_TEST_COVERED` / `SELF_TEST_EXEMPT` | **new** top-level, bash 3.2-compatible, justification per exempt entry |
 | `run_self_test` | new cases: precheck row 5, printed short-circuit line, `attempt_logfile`, three subshell scenarios (each `( … ) || exit 1`), partition check, coverage check, `usage` documentation check; one `mktemp -d` root with `trap … EXIT` |
+| `--self-test` dispatcher (`:704-707`) | `run_self_test; exit 0` → `run_self_test \|\| exit 1`. The trailing `exit 0` masks any path that *returns* non-zero rather than exiting — a scenario written with `return 1` would pass silently, which is the same defect class as the subshell P1 one level up |
 | `:42` section header | reworded to point at the arrays |
 
 `Tests/ViewportBenchmarksTests/`
@@ -433,7 +470,7 @@ orders each red before its fix.
 |---|---|
 | D-1 precheck row 5 | The new assertion fails before the fix (returns `""`, expected `sdk_unresolved_after_install`) |
 | D-1 wiring (the real bug) | The end-to-end drift scenario asserts **exactly one** install invocation across both kinds and `sdk_unresolved_after_install` for the second; before the fix the counter reads 2 and the reason reads `sdk_install_failed` |
-| D-3 truthful message | The scenario asserts the printed `reason=bundle_installed_id_unresolved` line; before the fix the line reads `reason=bundle_already_failed` |
+| D-1 truthful message | The scenario asserts the printed `reason=bundle_installed_id_unresolved` line; before the fix the line reads `reason=bundle_already_failed` |
 | D-3 per-attempt logs | The ladder scenario asserts `.attempt-1`/`.attempt-2` exist with per-attempt content; fails before the fix (one file, last attempt only) |
 | D-3 tails on exhaustion | The three-fail scenario asserts one labelled tail per attempt |
 | **Subshell construct (meta-mutation)** | Deliberately fail an assertion **inside** a scenario subshell and confirm the script exits non-zero, prints `self_test=fail`, and reddens the XCTest. Without this the whole stub design rests on an untested assumption — it is the first draft's P1 |
@@ -464,15 +501,36 @@ core.
 Local, recorded verbatim:
 
 ```bash
-swift test                                                   # full suite, count recorded
-./.github/scripts/cross-target-compile.sh --self-test         # self_test=pass, exit 0
+# Exit status is already discriminating here: each fails non-zero on its own fault.
+swift test                                                    # suite count recorded
 swift build -c release
 swift run -c release ViewportBenchmarks -- --gate             # gate=pass, unchanged
-rg -n "Foundation" Sources/TextEngineCore                     # empty
 ./.github/scripts/cross-target-compile.sh --targets ios       # macOS host, real path
-git diff --stat main -- Sources/                              # empty
-grep -rn "WASM_BUNDLE_FAILED_REASON" .github/scripts/         # empty (scoped, see below)
+
+# Self-test, asserted the same three ways the XCTest asserts it (Decision 6), so the
+# local and enforced checks cannot disagree about what "passing" means.
+out="$(./.github/scripts/cross-target-compile.sh --self-test)"; rc=$?
+[ "$rc" -eq 0 ] \
+  && printf '%s\n' "$out" | grep -q 'self_test=pass' \
+  && ! printf '%s\n' "$out" | grep -q 'self_test=fail' \
+  && echo OK
+
+# Negative assertions — written under Decision 10 rule 2; see the exit semantics below.
+[ -z "$(rg -n 'Foundation' Sources/TextEngineCore)" ] && echo OK
+git diff --quiet main -- Sources/ && echo OK
+! grep -rq 'WASM_BUNDLE_FAILED_REASON' .github/scripts/ && echo OK
 ```
+
+**Why the last three are not written as bare commands with an "expect empty"
+comment.** Measured on this tree: `git diff --stat` exits **0** whether or not
+there is a diff, so the eyeballed form cannot discriminate at all — it is rule
+2's own example. `rg` and `grep -r` exit **1** on no match, so the *desired*
+outcome looks like a failure to any literal executor or `set -e` block, and the
+*undesired* outcome (a match) exits 0. All three are inverted or inert exactly
+where the invariant lives, which is what rule 2 exists to prevent. This block
+feeds the plan and the verification record nearly verbatim, and D-2's discharge
+evidence is that this slice's own artifacts obey the conventions — so the rule
+binds here first.
 
 The rename assertion is **scoped to `.github/scripts/`** deliberately: the old
 name legitimately survives in 11 places under `docs/` — the slice 47 plan (8),
@@ -514,8 +572,10 @@ names the observables to read out of that log rather than settling for "green".
    run, with these observables read out of the WASM job's log and quoted in the
    verification record: exactly one `cross_target_sdk_install_seconds=… attempts=1`
    line, and four `result=pass … blocking=true` WASM lines (two kinds × two
-   packages). Local: `git diff main -- Sources/` empty, gate output and budget
-   checksums unchanged.
+   packages). Local: `git diff --quiet main -- Sources/` exits 0, gate output and
+   budget checksums unchanged. Every assertion in the verification record carries
+   discriminating exit semantics (Decision 10 rule 2), not an "expect empty"
+   comment.
 
 ## Risks And Gaps
 
@@ -538,10 +598,16 @@ names the observables to read out of that log rather than settling for "green".
 - **A leaked stub override** would silently weaken later cases. Contained by the
   subshell; the coverage check cannot detect such a leak, so scenarios are
   ordered last and each is self-contained.
-- **`swift test` now depends on `bash` and on four script paths.** Already true
-  for one script via `GateFloorTests`; the failure message names the path so a
-  missing file is not read as a logic failure. All four pass today (measured), so
-  adoption reddens nothing.
+- **`swift test` now depends on `bash`, on four script paths, and — new — on
+  `git`.** The first two were already true for one script via `GateFloorTests`;
+  the failure message names the path so a missing file is not read as a logic
+  failure. The `git` dependency is new and arrives with the fourth table row:
+  `detect-docs-only-pr.sh`'s self-test builds a real throwaway repository
+  (`git init` / `git commit`, `:41-75`). It is self-contained — it sets its own
+  `user.name` / `user.email` locally (`:45-46`), so no global identity is
+  required, and `git` is present in `swift:6.2.1-bookworm` (SwiftPM needs it).
+  All four self-tests pass today on the macOS host (measured: exit 0,
+  `self_test=pass`), so adoption reddens nothing.
 - **D-14 (new):** three scripts gain enforcement but no classification pin. Named
   in the ledger so the half-measure is visible.
 - **This slice advances no brief criterion.** Debt paydown chosen over the
