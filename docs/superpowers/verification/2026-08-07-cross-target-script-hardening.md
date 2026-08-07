@@ -654,3 +654,96 @@ This record does not claim the slice is fully closed out:
   (see AGENTS.md's "Verification is evidence, not assertion" note) — that
   proof is still pending PR #120's merge.
 - The **post-slice review** has not been written.
+
+---
+
+## 7. Post-PR spec-conformance validation — one defect found and fixed
+
+A conformance pass over this branch against the design re-ran every recorded
+mutation independently (all reproduced) and found one real gap, fixed here
+test-first.
+
+### 7a. The defect: `defined_functions` saw one of six declaration forms
+
+Decision 7's partition check is only as strong as the detector under it, and
+`defined_functions` matched `^[a-z_]+\(\) \{` — so a top-level function
+declared any other way escaped classification **silently, with
+`self_test=pass`**. Measured against a fixture carrying every form bash
+accepts, before the fix:
+
+```
+self_test=fail label=defined_functions_sees_every_declaration_form
+  expected=plain_form nospace_form spaced_form digit_form2 Upper_Form keyword_form keyword_paren_form outer_form
+  actual=plain_form outer_form
+```
+
+Six of eight names invisible: a digit or a capital in the name
+(`digit_form2`, `Upper_Form`), no space before the brace (`nospace_form(){`),
+a space before the parens (`spaced_form ()  {`), and both `function` keyword
+spellings. Goal 3 ("a function added without being classified fails the
+build") was therefore true only for the file's existing house style. Confirmed
+end-to-end before the fix: appending an unclassified `parse_wasm2_thing() {},`
+`function sneaky_helper {}`, or `nospace_helper(){}` each left the self-test
+at **exit 0, `self_test=pass`**.
+
+### 7b. RED first, then the fix
+
+The assertion above was added **before** the detector changed, and its red is
+the output quoted in 7a. `defined_functions` then became:
+
+```bash
+grep -oE '^(function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*([[:space:]]*\(\))?|[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\))[[:space:]]*\{' "$1" \
+  | sed -E -e 's/^function[[:space:]]+//' -e 's/[[:space:]]*(\(\))?[[:space:]]*\{$//'
+```
+
+ERE (`-E`) rather than BRE because BSD `sed` has no `\?`. The fixture is built
+with `printf`, not a heredoc: a column-0 `}` inside `run_self_test` would
+terminate `self_test_body`'s awk extraction early and silently truncate the
+coverage check — the same class of hazard Decision 8 exists to prevent.
+
+### 7c. All six forms now redden; nested definitions stay invisible
+
+Each mutation appends one unclassified top-level function to a copy of the
+script and runs `--self-test`:
+
+```
+[digit_in_name]                RED  self_test=fail label=classified_parse_wasm2_thing expected=1 actual=0
+[function_keyword]             RED  self_test=fail label=classified_sneaky_helper expected=1 actual=0
+[no_space_brace]               RED  self_test=fail label=classified_nospace_helper expected=1 actual=0
+[uppercase_name]               RED  self_test=fail label=classified_Upper_Helper expected=1 actual=0
+[space_before_parens]          RED  self_test=fail label=classified_spacey_helper expected=1 actual=0
+[function_keyword_with_parens] RED  self_test=fail label=classified_paren_keyword_helper expected=1 actual=0
+[nested_definition]           PASS  (indented stubs still excluded, as the scenarios require)
+```
+
+The last row is the load-bearing negative: the three `--self-test` scenarios
+define stubs **inside** their own bodies, and those must not enter the
+partition. The `^` anchor is what keeps them out, and the fixture pins it.
+
+### 7d. Nothing else moved
+
+```
+$ swift test
+	 Executed 361 tests, with 0 failures (0 unexpected) in 5.304 (5.329) seconds
+
+$ bash .github/scripts/cross-target-compile.sh --self-test   # bash 3.2.57, BSD grep/sed
+self_test=pass
+
+partition on the real file: defined=45 harness=8 covered=27 exempt=10
+```
+
+The detector's output over `cross-target-compile.sh` itself is **set-identical
+to the old regex's** — no name gained, none lost — so the committed
+classification arrays are unchanged and the 45 = 8 + 27 + 10 partition from §
+above still holds. The earlier mutation battery (token-not-substring,
+comment-stripping, D-1 state, D-3 per-attempt logs, the subshell
+meta-mutation) was re-run after the fix and every one still reddens. The
+self-test leaves no temp debris on either the passing or the failing path.
+
+**Not verified locally:** the GNU `grep`/`sed` half. The Docker daemon was
+down on this host, so the CI-image run recorded in §5e could not be repeated.
+The constructs are POSIX ERE and were cross-checked against an independent
+regex engine, but the authority is the hosted run — `ScriptSelfTestTests`
+executes this script inside `swift:6.2.1-bookworm`, so a GNU/BSD divergence
+here fails the required `Host tests and benchmark gate` job. That run is
+pending along with the post-merge proof in §6a.

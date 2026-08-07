@@ -299,9 +299,18 @@ attempt_logfile() {
   printf '%s.attempt-%s' "$1" "$2"
 }
 
-# Every function defined in a script file, one name per line. Pure.
+# Every TOP-LEVEL function defined in a script file, one name per line. Pure.
+#
+# Anchored at column 0 on purpose: an INDENTED definition is a nested one (the
+# --self-test scenarios below define stubs inside their own bodies) and must stay
+# out of the partition. Everything else bash accepts must be seen, or the function
+# escapes classification silently -- so all four spellings are matched: `name() {`,
+# `name(){`, `name () {`, and both `function name {` forms. Names take the full
+# identifier alphabet, not [a-z_]: a digit or a capital is not an escape hatch.
+# ERE (grep -oE / sed -E) rather than BRE because BSD sed has no `\?`.
 defined_functions() {
-  grep -oE '^[a-z_]+\(\) \{' "$1" | sed 's/() {//'
+  grep -oE '^(function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*([[:space:]]*\(\))?|[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\))[[:space:]]*\{' "$1" \
+    | sed -E -e 's/^function[[:space:]]+//' -e 's/[[:space:]]*(\(\))?[[:space:]]*\{$//'
 }
 
 # The harness set is DERIVED, never hand-listed, so it cannot go stale.
@@ -691,6 +700,29 @@ some descriptive header with spaces"
   run_scenario scenario_asymmetric_drift_reports_truth
 
   # --- classification (D-6) ---
+  # The partition is only as strong as the detector underneath it: a declaration form
+  # defined_functions cannot see is a function that escapes classification silently,
+  # with self_test=pass. Pin every form bash accepts at top level, and pin the
+  # exclusion of INDENTED definitions -- the scenario stubs above are nested function
+  # definitions that must stay invisible to the partition. Built with printf, not a
+  # heredoc, because a column-0 `}` inside run_self_test would terminate
+  # self_test_body's extraction early and silently truncate the coverage check.
+  local fixture="${SELF_TEST_TMP_ROOT}/decl-forms.sh"
+  printf '%s\n' \
+    'plain_form() {' '  :' '}' \
+    'nospace_form(){' '  :' '}' \
+    'spaced_form ()  {' '  :' '}' \
+    'digit_form2() {' '  :' '}' \
+    'Upper_Form() {' '  :' '}' \
+    'function keyword_form {' '  :' '}' \
+    'function keyword_paren_form() {' '  :' '}' \
+    'outer_form() {' '  indented_stub_form() {' '    :' '  }' '}' \
+    > "$fixture"
+  assert_equal \
+    "plain_form nospace_form spaced_form digit_form2 Upper_Form keyword_form keyword_paren_form outer_form" \
+    "$(defined_functions "$fixture" | tr '\n' ' ' | sed 's/ *$//')" \
+    "defined_functions_sees_every_declaration_form"
+
   local script_path defined body fn entry name classified
   script_path="${BASH_SOURCE[0]}"
   defined="$(defined_functions "$script_path")"
