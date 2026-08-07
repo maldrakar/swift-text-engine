@@ -232,6 +232,12 @@ wasm_install_precheck() {
   fi
 }
 
+# Per-attempt install log path. Pure: naming is self-tested rather than inlined in
+# the retry loop.
+attempt_logfile() {
+  printf '%s.attempt-%s' "$1" "$2"
+}
+
 # ---------------------------------------------------------------------------
 # Self-test
 # ---------------------------------------------------------------------------
@@ -270,6 +276,14 @@ assert_resolver_missing() {
   fi
 }
 
+assert_file_exists() {
+  local path="$1" label="$2"
+  if [[ ! -f "$path" ]]; then
+    echo "self_test=fail label=$label expected=file_exists actual=missing path=$path"
+    exit 1
+  fi
+}
+
 # Run a scenario function in a SUBSHELL so a stub override cannot leak into
 # neighbouring cases -- and propagate its status, because the script runs under
 # `set -uo pipefail` with no `set -e`: an `exit 1` from assert_* inside `( ... )`
@@ -277,6 +291,63 @@ assert_resolver_missing() {
 run_scenario() {
   local name="$1"
   ( "$name" ) || exit 1
+}
+
+# The ladder recovers on the third attempt. Each attempt must leave its OWN log:
+# with one shared logfile the first two attempts' output is overwritten and lost.
+scenario_ladder_recovers_after_two_failures() {
+  local logfile="${SELF_TEST_TMP_ROOT}/recover.log"
+  local counter="${SELF_TEST_TMP_ROOT}/recover.count"
+  local status
+  CROSS_TARGET_SDK_INSTALL_BACKOFF=0
+  printf '0' > "$counter"
+  run_swift_sdk_install() {
+    local n
+    n=$(( $(cat "$counter") + 1 ))
+    printf '%s' "$n" > "$counter"
+    echo "stub attempt ${n}"
+    [[ "$n" -ge 3 ]]
+  }
+  swift_sdk_install_retry http://example.invalid/b.artifactbundle "" "$logfile" recover >/dev/null
+  status=$?
+  assert_equal "0" "$status" "ladder_recover_status"
+  assert_equal "3" "$(cat "$counter")" "ladder_recover_attempts"
+  assert_file_exists "$(attempt_logfile "$logfile" 1)" "ladder_recover_attempt1_log"
+  assert_file_exists "$(attempt_logfile "$logfile" 2)" "ladder_recover_attempt2_log"
+  assert_equal "stub attempt 1" "$(cat "$(attempt_logfile "$logfile" 1)")" \
+    "ladder_recover_attempt1_content"
+  assert_equal "stub attempt 3" "$(cat "$(attempt_logfile "$logfile" 3)")" \
+    "ladder_recover_attempt3_content"
+}
+
+# Every attempt fails: the ladder returns 1 and prints one labelled tail PER ATTEMPT,
+# so a hosted failure shows all three, not just the last.
+scenario_ladder_exhausts_and_prints_every_tail() {
+  local logfile="${SELF_TEST_TMP_ROOT}/exhaust.log"
+  local counter="${SELF_TEST_TMP_ROOT}/exhaust.count"
+  local out status
+  CROSS_TARGET_SDK_INSTALL_BACKOFF=0
+  printf '0' > "$counter"
+  run_swift_sdk_install() {
+    local n
+    n=$(( $(cat "$counter") + 1 ))
+    printf '%s' "$n" > "$counter"
+    echo "stub failure ${n}"
+    return 1
+  }
+  out="$(swift_sdk_install_retry http://example.invalid/b.artifactbundle "" "$logfile" exhaust 2>/dev/null)"
+  status=$?
+  assert_equal "1" "$status" "ladder_exhaust_status"
+  assert_equal "3" "$(cat "$counter")" "ladder_exhaust_attempts"
+  assert_equal "3" "$(printf '%s\n' "$out" | grep -c 'log tail (last')" \
+    "ladder_exhaust_tail_count"
+  # NOTE (brief deviation, see task-3-report.md): print_log_tail emits a MATCHING
+  # pair of banner lines -- "<label> log tail (last N lines)" and "end <label> log
+  # tail" -- so an un-anchored 'exhaust-attempt-2 log tail' matches BOTH lines
+  # (actual=2), never 1. Anchored on the same '(last' suffix the sibling
+  # assertion above already uses, so it counts the start banner only.
+  assert_equal "1" "$(printf '%s\n' "$out" | grep -c 'exhaust-attempt-2 log tail (last')" \
+    "ladder_exhaust_attempt2_label"
 }
 
 run_self_test() {
@@ -417,6 +488,8 @@ some descriptive header with spaces"
   # actionable reason is the missing configuration.
   assert_equal "sdk_unavailable" \
     "$(wasm_install_precheck "" sdk_install_failed)" "precheck_no_url_precedence"
+  # Task 3 — per-attempt install log naming
+  assert_equal "/tmp/x.log.attempt-2" "$(attempt_logfile /tmp/x.log 2)" "attempt_logfile_path"
   # Task 2 — WASM pairs now count toward blocking failures (a fail counts; a
   # demoted/observational embedded skip does not). Pair order is 2 packages x
   # {ios_device, ios_simulator, wasm, wasm_embedded}.
@@ -426,6 +499,9 @@ some descriptive header with spaces"
   assert_equal "0" \
     "$(count_blocking_failures pass:true pass:true pass:true skipped:false pass:true pass:true pass:true skipped:false)" \
     "wasm_embedded_demoted_not_counted"
+
+  run_scenario scenario_ladder_recovers_after_two_failures
+  run_scenario scenario_ladder_exhausts_and_prints_every_tail
   echo "self_test=pass"
 }
 
@@ -526,20 +602,28 @@ resolve_wasm_sdk_id() {
   printf '%s\n' "$list" | resolve_wasm_sdk_id_from_list "$version" "$kind"
 }
 
+# The one toolchain call the ladder makes. Its ONLY purpose is to be replaceable:
+# --self-test overrides it inside a scenario subshell. Exempt from coverage by
+# construction -- it IS the process call.
+run_swift_sdk_install() {
+  swift "$@"
+}
+
 # Install a Swift SDK with a bounded retry. download.swift.org is now in the
 # merge path, so a transient network error gets a few attempts before failing
 # red. Echoes the measured install seconds (feeds the caching decision) on
 # success. Not pure -- exercised by the hosted spike, not --self-test.
 swift_sdk_install_retry() {
-  local url="$1" checksum="$2" logfile="$3"
+  local url="$1" checksum="$2" logfile="$3" label="$4"
   local attempts="${CROSS_TARGET_SDK_INSTALL_ATTEMPTS:-3}"
   local backoff="${CROSS_TARGET_SDK_INSTALL_BACKOFF:-3}"
-  local i=1 start end
+  local i=1 j=1 start end attempt_log
   local -a args=(sdk install "$url")
   [[ -n "$checksum" ]] && args+=(--checksum "$checksum")
   start=$(date +%s)
   while (( i <= attempts )); do
-    if swift "${args[@]}" >"$logfile" 2>&1; then
+    attempt_log="$(attempt_logfile "$logfile" "$i")"
+    if run_swift_sdk_install "${args[@]}" >"$attempt_log" 2>&1; then
       end=$(date +%s)
       echo "cross_target_sdk_install_seconds=$((end - start)) attempts=${i}"
       return 0
@@ -547,6 +631,11 @@ swift_sdk_install_retry() {
     echo "warn=sdk_install_attempt_failed attempt=${i}/${attempts}" >&2
     (( i < attempts )) && sleep "$backoff"
     i=$((i + 1))
+  done
+  # The ladder owns its own diagnostics: the caller cannot know how many attempts ran.
+  while (( j < i )); do
+    print_log_tail "${label}-attempt-${j}" "$(attempt_logfile "$logfile" "$j")"
+    j=$((j + 1))
   done
   return 1
 }
@@ -580,10 +669,9 @@ prepare_wasm_sdk() {
       fi
     else
       echo "cross_target_command target=${kind} cmd=\"swift $(sdk_install_display "$url" "$checksum")\""
-      if ! swift_sdk_install_retry "$url" "$checksum" "${logfile}.install"; then
+      if ! swift_sdk_install_retry "$url" "$checksum" "${logfile}.install" "${kind}-sdk-install"; then
         skip="sdk_install_failed"
         WASM_BUNDLE_FAILED_REASON="sdk_install_failed"
-        print_log_tail "${kind}-sdk-install" "${logfile}.install"
       elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
         skip="sdk_unresolved_after_install"
         # Slice 47 (P3 #2): record THIS reason too. Slice 46 recorded only the
