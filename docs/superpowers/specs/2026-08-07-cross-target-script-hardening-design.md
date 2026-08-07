@@ -326,6 +326,13 @@ two, and the review demonstrated both remaining leaks are live in this file:
    occurrences — the repo's own `--variable-height` /
    `--variable-height-mutation` lesson, recurring.
 
+**Known residual, stated rather than discovered later:** string literals are
+*not* stripped, so a function name inside a quoted assertion label would count as
+a reference. No label in the file equals a function name today, and a
+shell-grade string parser costs more than the leak is worth — while the partition
+check still forces every function to be classified either way. If a label ever
+collides with a function name, that is the moment to revisit.
+
 **Everything added must be bash 3.2-compatible**, because `/usr/bin/env bash` is
 3.2.57 on the macOS development host and 5.x in the hosted container, and a
 version-dependent construct splits red-locally/green-hosted — the exact class of
