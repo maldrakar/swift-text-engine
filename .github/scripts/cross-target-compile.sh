@@ -214,21 +214,33 @@ wasm_skip_result() {
 
 # Decide what prepare_wasm_sdk should do for a kind BEFORE touching the network.
 # Prints one of:
-#   ""                    -> proceed to a real install attempt
-#   "sdk_unavailable"     -> no URL configured; nothing to install
-#   "<recorded reason>"   -> the shared bundle already failed definitively; short-
-#                            circuit with the SAME reason the first kind reported
+#   ""                              -> proceed to a real install attempt
+#   "sdk_unavailable"                -> no URL configured; nothing to install
+#   "sdk_unresolved_after_install"   -> the bundle IS installed (recorded_state ==
+#                                       bundle_installed_ok) but this kind's id still
+#                                       did not resolve; reinstalling cannot help
+#   "<recorded state>"               -> the shared bundle already failed definitively;
+#                                       short-circuit with the SAME reason the first
+#                                       kind reported
 #
 # Both WASM kinds come from ONE swift.org bundle and prepare_wasm_sdk runs per kind.
 # Once that bundle has definitively failed -- whether the install failed or it installed
 # but yielded no resolvable id -- the second kind must not burn a second bounded-retry
-# ladder against it, and must report the same reason, so the log reads as one fault.
+# ladder against it, and must report the same reason, so the log reads as one fault. A
+# bundle that installed SUCCESSFULLY is also recorded (WASM_BUNDLE_STATE=bundle_installed_ok)
+# so an asymmetric-drift second kind reports the truth instead of re-running the ladder
+# and claiming a fabricated install failure.
 wasm_install_precheck() {
-  local url="$1" recorded_reason="$2"
+  local url="$1" recorded_state="$2"
   if [[ -z "$url" ]]; then
     printf 'sdk_unavailable'
-  elif [[ -n "$recorded_reason" ]]; then
-    printf '%s' "$recorded_reason"
+  elif [[ "$recorded_state" == "bundle_installed_ok" ]]; then
+    # The bundle IS installed and this kind's id still did not resolve. Reinstalling
+    # cannot help and would report the wrong reason: the state describes the BUNDLE,
+    # this return value describes the KIND.
+    printf 'sdk_unresolved_after_install'
+  elif [[ -n "$recorded_state" ]]; then
+    printf '%s' "$recorded_state"
   fi
 }
 
@@ -272,6 +284,15 @@ assert_resolver_missing() {
   local list="$1" version="$2" kind="$3" label="$4"
   if printf '%s\n' "$list" | resolve_wasm_sdk_id_from_list "$version" "$kind" >/dev/null; then
     echo "self_test=fail label=$label expected=missing actual=found"
+    exit 1
+  fi
+}
+
+assert_contains() {
+  local needle="$1" haystack="$2" label="$3"
+  if ! printf '%s\n' "$haystack" | grep -qF -- "$needle"; then
+    echo "self_test=fail label=$label expected_substring=$needle"
+    printf '%s\n' "$haystack"
     exit 1
   fi
 }
@@ -348,6 +369,49 @@ scenario_ladder_exhausts_and_prints_every_tail() {
   # assertion above already uses, so it counts the start banner only.
   assert_equal "1" "$(printf '%s\n' "$out" | grep -c 'exhaust-attempt-2 log tail (last')" \
     "ladder_exhaust_attempt2_label"
+}
+
+# The D-1 defect, end to end. The bundle installs for kind `wasm` and then provides
+# only that kind's id; `wasm_embedded` must report the truth WITHOUT a second install.
+# The install stub fails on any call after the first, exactly as a real
+# `swift sdk install` does against an already-installed bundle.
+scenario_asymmetric_drift_reports_truth() {
+  local counter="${SELF_TEST_TMP_ROOT}/drift.count"
+  local out
+  CROSS_TARGET_SDK_INSTALL_BACKOFF=0
+  CROSS_TARGET_WASM_SDK_URL="http://example.invalid/b.artifactbundle"
+  CROSS_TARGET_WASM_SDK_CHECKSUM="deadbeef"
+  SWIFT_VERSION="6.2.1"
+  WASM_BUNDLE_STATE=""
+  printf '0' > "$counter"
+  resolve_wasm_sdk_id() {
+    # Nothing resolves before an install; afterwards the bundle yields the
+    # non-embedded id only -- asymmetric drift.
+    [[ "$(cat "$counter")" -ge 1 ]] || return 1
+    [[ "$2" == "wasm" ]] || return 1
+    printf 'swift-6.2.1-RELEASE_wasm'
+  }
+  run_swift_sdk_install() {
+    local n
+    n=$(( $(cat "$counter") + 1 ))
+    printf '%s' "$n" > "$counter"
+    echo "stub install ${n}"
+    [[ "$n" -eq 1 ]]
+  }
+  prepare_wasm_sdk wasm "${SELF_TEST_TMP_ROOT}/drift-wasm.log" >/dev/null 2>&1
+  assert_equal "" "$WASM_SKIP_WASM" "drift_first_kind_succeeds"
+  assert_equal "bundle_installed_ok" "$WASM_BUNDLE_STATE" "drift_state_recorded"
+  # NOTE (Task 4 deviation from the brief's literal `out="$(prepare_wasm_sdk ... 2>&1)"`):
+  # command substitution forks a subshell, so prepare_wasm_sdk's global-variable side
+  # effect (WASM_SKIP_WASM_EMBEDDED, set below) would never reach this scope and the
+  # very next assertion could never pass. Capture via a temp file instead so the call
+  # runs in THIS shell and both the global var and the printed diagnostic survive.
+  prepare_wasm_sdk wasm_embedded "${SELF_TEST_TMP_ROOT}/drift-embedded.log" \
+    > "${SELF_TEST_TMP_ROOT}/drift-embedded.out" 2>&1
+  out="$(cat "${SELF_TEST_TMP_ROOT}/drift-embedded.out")"
+  assert_equal "sdk_unresolved_after_install" "$WASM_SKIP_WASM_EMBEDDED" "drift_second_kind_reason"
+  assert_equal "1" "$(cat "$counter")" "drift_single_install"
+  assert_contains "reason=bundle_installed_id_unresolved" "$out" "drift_message_truthful"
 }
 
 run_self_test() {
@@ -488,6 +552,9 @@ some descriptive header with spaces"
   # actionable reason is the missing configuration.
   assert_equal "sdk_unavailable" \
     "$(wasm_install_precheck "" sdk_install_failed)" "precheck_no_url_precedence"
+  assert_equal "sdk_unresolved_after_install" \
+    "$(wasm_install_precheck http://b bundle_installed_ok)" \
+    "precheck_installed_bundle_reports_unresolved"
   # Task 3 — per-attempt install log naming
   assert_equal "/tmp/x.log.attempt-2" "$(attempt_logfile /tmp/x.log 2)" "attempt_logfile_path"
   # Task 2 — WASM pairs now count toward blocking failures (a fail counts; a
@@ -502,6 +569,7 @@ some descriptive header with spaces"
 
   run_scenario scenario_ladder_recovers_after_two_failures
   run_scenario scenario_ladder_exhausts_and_prints_every_tail
+  run_scenario scenario_asymmetric_drift_reports_truth
   echo "self_test=pass"
 }
 
@@ -518,7 +586,7 @@ WASM_SDK_ID_WASM=""
 WASM_SKIP_WASM=""
 WASM_SDK_ID_WASM_EMBEDDED=""
 WASM_SKIP_WASM_EMBEDDED=""
-WASM_BUNDLE_FAILED_REASON=""
+WASM_BUNDLE_STATE=""
 PAIRS=()
 
 # Print the tail of a log file with clear delimiters, so failures are visible in
@@ -655,17 +723,24 @@ prepare_wasm_sdk() {
     # Happy path: the first kind installs; the second kind's resolve above
     # already succeeds (the bundle now provides its id too), so this branch is
     # never entered for it and no second install happens.
+    # Drift path: the bundle installs successfully but yields only ONE kind's id.
+    # WASM_BUNDLE_STATE (set below) records bundle_installed_ok even on success, so
+    # the second kind's precheck reports the truth (sdk_unresolved_after_install)
+    # WITHOUT a second install attempt against an already-installed bundle.
     # Failure path: once the shared bundle fails definitively -- install failure OR
-    # installed-but-unresolvable -- WASM_BUNDLE_FAILED_REASON (set below) short-
+    # installed-but-unresolvable -- WASM_BUNDLE_STATE (set below) short-
     # circuits the second kind to the SAME reason via wasm_install_precheck, instead
     # of burning a second full bounded-retry ladder against a host that just failed
     # the first one.
     url="${CROSS_TARGET_WASM_SDK_URL:-}"
     checksum="${CROSS_TARGET_WASM_SDK_CHECKSUM:-}"
-    precheck="$(wasm_install_precheck "$url" "$WASM_BUNDLE_FAILED_REASON")"
+    precheck="$(wasm_install_precheck "$url" "$WASM_BUNDLE_STATE")"
     if [[ -n "$precheck" ]]; then
       skip="$precheck"
-      if [[ "$precheck" != "sdk_unavailable" ]]; then
+      if [[ "$WASM_BUNDLE_STATE" == "bundle_installed_ok" ]]; then
+        echo "cross_target_sdk_install_skipped target=${kind}" \
+          "reason=bundle_installed_id_unresolved prior_state=${WASM_BUNDLE_STATE}"
+      elif [[ "$precheck" != "sdk_unavailable" ]]; then
         echo "cross_target_sdk_install_skipped target=${kind}" \
           "reason=bundle_already_failed prior_reason=${precheck}"
       fi
@@ -673,13 +748,18 @@ prepare_wasm_sdk() {
       echo "cross_target_command target=${kind} cmd=\"swift $(sdk_install_display "$url" "$checksum")\""
       if ! swift_sdk_install_retry "$url" "$checksum" "${logfile}.install" "${kind}-sdk-install"; then
         skip="sdk_install_failed"
-        WASM_BUNDLE_FAILED_REASON="sdk_install_failed"
+        WASM_BUNDLE_STATE="sdk_install_failed"
       elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
         skip="sdk_unresolved_after_install"
         # Slice 47 (P3 #2): record THIS reason too. Slice 46 recorded only the
         # install failure, so the drift path let the second kind re-run a full
         # ladder against an already-installed SDK and report a different reason.
-        WASM_BUNDLE_FAILED_REASON="sdk_unresolved_after_install"
+        WASM_BUNDLE_STATE="sdk_unresolved_after_install"
+      else
+        # Slice 51 (D-1): record SUCCESS as well. Without this the second kind sees an
+        # empty state, reinstalls a bundle that is already present, and reports the
+        # install failure instead of the truth.
+        WASM_BUNDLE_STATE="bundle_installed_ok"
       fi
     fi
   fi
