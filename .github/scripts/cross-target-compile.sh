@@ -15,6 +15,12 @@ set -uo pipefail
 TAIL_LINES="${CROSS_TARGET_LOG_TAIL:-40}"
 SELECTED_TARGETS="all"
 
+# Created once at the top of run_self_test; removed by an EXIT trap in the MAIN
+# shell. Scenario subshells read it but must never create or delete it: a bash 3.2
+# EXIT trap does not fire when a `( ... )` subshell exits, which is exactly what
+# keeps the first scenario from deleting the directory the next two still need.
+SELF_TEST_TMP_ROOT=""
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -39,8 +45,57 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Pure helpers (covered by --self-test, no toolchain required)
+# Function classification (enforced by --self-test, see the partition and coverage
+# checks in run_self_test). Every function in this file is either COVERED (named in
+# the self-test's own source), EXEMPT (named here with a reason), or harness
+# (assert_* / run_self_test, derived). "Covered" means REFERENCED by the self-test,
+# not "executed": print_log_tail really runs during the ladder scenarios yet is exempt,
+# because only swift_sdk_install_retry names it.
 # ---------------------------------------------------------------------------
+
+SELF_TEST_COVERED=(
+  usage
+  swift_version_key
+  emit_target_line
+  scheme_for_package
+  scheme_in_list
+  count_blocking_failures
+  build_package_summary
+  build_overall_summary
+  parse_target_selection
+  target_requested
+  mark_not_requested
+  resolve_wasm_sdk_id_from_list
+  sdk_install_display
+  wasm_kind_blocking
+  wasm_skip_result
+  wasm_install_precheck
+  attempt_logfile
+  run_scenario
+  defined_functions
+  is_harness_function
+  self_test_body
+  body_references_function
+  swift_sdk_install_retry
+  prepare_wasm_sdk
+  scenario_ladder_recovers_after_two_failures
+  scenario_ladder_exhausts_and_prints_every_tail
+  scenario_asymmetric_drift_reports_truth
+)
+
+# name<TAB>justification. Parallel-array-free and bash 3.2-safe: no declare -A.
+SELF_TEST_EXEMPT=(
+  "print_log_tail	prints a file tail; runs via the ladder but is never named by the self-test"
+  "print_ios_toolchain_metadata	shells out to xcode-select/xcrun"
+  "resolve_ios_scheme_list	runs xcodebuild -list"
+  "ios_scheme_status	reads the xcodebuild -list log captured by resolve_ios_scheme_list"
+  "compile_ios_target	runs xcodebuild"
+  "resolve_wasm_sdk_id	runs swift sdk list; the drift scenario's stub target"
+  "run_swift_sdk_install	the toolchain call itself; the ladder's stub target"
+  "compile_wasm_package_for_kind	runs swift build against an installed SDK"
+  "process_package	orchestration over the compile steps"
+  "main	top-level orchestration and exit code"
+)
 
 # Extract the X.Y.Z version from a `swift --version` first line.
 swift_version_key() {
@@ -208,21 +263,91 @@ wasm_skip_result() {
 
 # Decide what prepare_wasm_sdk should do for a kind BEFORE touching the network.
 # Prints one of:
-#   ""                    -> proceed to a real install attempt
-#   "sdk_unavailable"     -> no URL configured; nothing to install
-#   "<recorded reason>"   -> the shared bundle already failed definitively; short-
-#                            circuit with the SAME reason the first kind reported
+#   ""                              -> proceed to a real install attempt
+#   "sdk_unavailable"                -> no URL configured; nothing to install
+#   "sdk_unresolved_after_install"   -> the bundle IS installed (recorded_state ==
+#                                       bundle_installed_ok) but this kind's id still
+#                                       did not resolve; reinstalling cannot help
+#   "<recorded state>"               -> the shared bundle already failed definitively;
+#                                       short-circuit with the SAME reason the first
+#                                       kind reported
 #
 # Both WASM kinds come from ONE swift.org bundle and prepare_wasm_sdk runs per kind.
 # Once that bundle has definitively failed -- whether the install failed or it installed
 # but yielded no resolvable id -- the second kind must not burn a second bounded-retry
-# ladder against it, and must report the same reason, so the log reads as one fault.
+# ladder against it, and must report the same reason, so the log reads as one fault. A
+# bundle that installed SUCCESSFULLY is also recorded (WASM_BUNDLE_STATE=bundle_installed_ok)
+# so an asymmetric-drift second kind reports the truth instead of re-running the ladder
+# and claiming a fabricated install failure.
 wasm_install_precheck() {
-  local url="$1" recorded_reason="$2"
+  local url="$1" recorded_state="$2"
   if [[ -z "$url" ]]; then
     printf 'sdk_unavailable'
-  elif [[ -n "$recorded_reason" ]]; then
-    printf '%s' "$recorded_reason"
+  elif [[ "$recorded_state" == "bundle_installed_ok" ]]; then
+    # The bundle IS installed and this kind's id still did not resolve. Reinstalling
+    # cannot help and would report the wrong reason: the state describes the BUNDLE,
+    # this return value describes the KIND.
+    printf 'sdk_unresolved_after_install'
+  elif [[ -n "$recorded_state" ]]; then
+    printf '%s' "$recorded_state"
+  fi
+}
+
+# Per-attempt install log path. Pure: naming is self-tested rather than inlined in
+# the retry loop.
+attempt_logfile() {
+  printf '%s.attempt-%s' "$1" "$2"
+}
+
+# Every TOP-LEVEL function defined in a script file, one name per line. Pure.
+#
+# Anchored at column 0 on purpose: an INDENTED definition is a nested one (the
+# --self-test scenarios below define stubs inside their own bodies) and must stay
+# out of the partition. Everything else bash accepts must be seen, or the function
+# escapes classification silently -- so all four spellings are matched: `name() {`,
+# `name(){`, `name () {`, and both `function name {` forms. Names take the full
+# identifier alphabet, not [a-z_]: a digit or a capital is not an escape hatch.
+# ERE (grep -oE / sed -E) rather than BRE because BSD sed has no `\?`.
+defined_functions() {
+  grep -oE '^(function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*([[:space:]]*\(\))?|[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\))[[:space:]]*\{' "$1" \
+    | sed -E -e 's/^function[[:space:]]+//' -e 's/[[:space:]]*(\(\))?[[:space:]]*\{$//'
+}
+
+# The harness set is DERIVED, never hand-listed, so it cannot go stale.
+is_harness_function() {
+  case "$1" in
+    assert_*|run_self_test) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The self-test's own source: run_self_test plus every scenario_* function (they ARE
+# the self-test -- they drive the ladder and the drift path). Three subtractions keep
+# the coverage check from becoming a tautology:
+#   * the classification arrays are top-level, hence outside this extraction, so a
+#     name cannot satisfy the check by appearing in the list it is checked against;
+#   * comments are stripped -- run_self_test's prose names helpers it does not call;
+#   * definition lines are stripped -- defining a stub named X is not evidence that
+#     the self-test exercises X.
+self_test_body() {
+  awk '
+    /^(run_self_test|scenario_[a-z_]*)\(\) \{/ { inside = 1 }
+    inside { print }
+    inside && /^}/ { inside = 0 }
+  ' "$1" | sed -e 's/#.*$//' -e '/^[[:space:]]*[a-z_][a-z0-9_]*() {$/d'
+}
+
+# Token match, never substring: resolve_wasm_sdk_id must not be satisfied by
+# resolve_wasm_sdk_id_from_list (the repo's --variable-height lesson).
+body_references_function() {
+  printf '%s\n' "$2" | grep -qE "(^|[^A-Za-z0-9_])$1([^A-Za-z0-9_]|\$)"
+}
+
+assert_function_defined() {
+  local fn="$1" defined="$2" label="$3"
+  if ! printf '%s\n' "$defined" | grep -qx -- "$fn"; then
+    echo "self_test=fail label=$label expected=defined actual=missing fn=$fn"
+    exit 1
   fi
 }
 
@@ -264,7 +389,157 @@ assert_resolver_missing() {
   fi
 }
 
+assert_contains() {
+  local needle="$1" haystack="$2" label="$3"
+  if ! printf '%s\n' "$haystack" | grep -qF -- "$needle"; then
+    echo "self_test=fail label=$label expected_substring=$needle"
+    printf '%s\n' "$haystack"
+    exit 1
+  fi
+}
+
+assert_file_exists() {
+  local path="$1" label="$2"
+  if [[ ! -f "$path" ]]; then
+    echo "self_test=fail label=$label expected=file_exists actual=missing path=$path"
+    exit 1
+  fi
+}
+
+# Run a scenario function in a SUBSHELL so a stub override cannot leak into
+# neighbouring cases -- and propagate its status, because the script runs under
+# `set -uo pipefail` with no `set -e`: an `exit 1` from assert_* inside `( ... )`
+# ends only the subshell. Never call a scenario bare.
+run_scenario() {
+  local name="$1"
+  ( "$name" ) || exit 1
+}
+
+# The ladder recovers on the third attempt. Each attempt must leave its OWN log:
+# with one shared logfile the first two attempts' output is overwritten and lost.
+scenario_ladder_recovers_after_two_failures() {
+  local logfile="${SELF_TEST_TMP_ROOT}/recover.log"
+  local counter="${SELF_TEST_TMP_ROOT}/recover.count"
+  local status
+  CROSS_TARGET_SDK_INSTALL_BACKOFF=0
+  # Pinned, not inherited: this scenario's stub recovers on attempt 3, so an
+  # ambient CROSS_TARGET_SDK_INSTALL_ATTEMPTS (e.g. a developer's shell export set
+  # to 2) would exhaust the ladder before recovery and fail this scenario for a
+  # reason that has nothing to do with the code under test. A hermetic scenario
+  # must not read values it does not set itself.
+  CROSS_TARGET_SDK_INSTALL_ATTEMPTS=3
+  printf '0' > "$counter"
+  run_swift_sdk_install() {
+    local n
+    n=$(( $(cat "$counter") + 1 ))
+    printf '%s' "$n" > "$counter"
+    echo "stub attempt ${n}"
+    [[ "$n" -ge 3 ]]
+  }
+  swift_sdk_install_retry http://example.invalid/b.artifactbundle "" "$logfile" recover >/dev/null
+  status=$?
+  assert_equal "0" "$status" "ladder_recover_status"
+  assert_equal "3" "$(cat "$counter")" "ladder_recover_attempts"
+  assert_file_exists "$(attempt_logfile "$logfile" 1)" "ladder_recover_attempt1_log"
+  assert_file_exists "$(attempt_logfile "$logfile" 2)" "ladder_recover_attempt2_log"
+  assert_equal "stub attempt 1" "$(cat "$(attempt_logfile "$logfile" 1)")" \
+    "ladder_recover_attempt1_content"
+  assert_equal "stub attempt 3" "$(cat "$(attempt_logfile "$logfile" 3)")" \
+    "ladder_recover_attempt3_content"
+}
+
+# Every attempt fails: the ladder returns 1 and prints one labelled tail PER ATTEMPT,
+# so a hosted failure shows all three, not just the last.
+scenario_ladder_exhausts_and_prints_every_tail() {
+  local logfile="${SELF_TEST_TMP_ROOT}/exhaust.log"
+  local counter="${SELF_TEST_TMP_ROOT}/exhaust.count"
+  local out status
+  CROSS_TARGET_SDK_INSTALL_BACKOFF=0
+  # Pinned, not inherited: this scenario asserts exactly 3 exhausted attempts, so
+  # an ambient CROSS_TARGET_SDK_INSTALL_ATTEMPTS must not be allowed to change that
+  # count out from under the assertion. A hermetic scenario must not read values
+  # it does not set itself.
+  CROSS_TARGET_SDK_INSTALL_ATTEMPTS=3
+  printf '0' > "$counter"
+  run_swift_sdk_install() {
+    local n
+    n=$(( $(cat "$counter") + 1 ))
+    printf '%s' "$n" > "$counter"
+    echo "stub failure ${n}"
+    return 1
+  }
+  out="$(swift_sdk_install_retry http://example.invalid/b.artifactbundle "" "$logfile" exhaust 2>/dev/null)"
+  status=$?
+  assert_equal "1" "$status" "ladder_exhaust_status"
+  assert_equal "3" "$(cat "$counter")" "ladder_exhaust_attempts"
+  assert_equal "3" "$(printf '%s\n' "$out" | grep -c 'log tail (last')" \
+    "ladder_exhaust_tail_count"
+  # NOTE (brief deviation, see task-3-report.md): print_log_tail emits a MATCHING
+  # pair of banner lines -- "<label> log tail (last N lines)" and "end <label> log
+  # tail" -- so an un-anchored 'exhaust-attempt-2 log tail' matches BOTH lines
+  # (actual=2), never 1. Anchored on the same '(last' suffix the sibling
+  # assertion above already uses, so it counts the start banner only.
+  assert_equal "1" "$(printf '%s\n' "$out" | grep -c 'exhaust-attempt-2 log tail (last')" \
+    "ladder_exhaust_attempt2_label"
+}
+
+# The D-1 defect, end to end. The bundle installs for kind `wasm` and then provides
+# only that kind's id; `wasm_embedded` must report the truth WITHOUT a second install.
+# The install stub fails on any call after the first, exactly as a real
+# `swift sdk install` does against an already-installed bundle.
+scenario_asymmetric_drift_reports_truth() {
+  local counter="${SELF_TEST_TMP_ROOT}/drift.count"
+  local out
+  CROSS_TARGET_SDK_INSTALL_BACKOFF=0
+  CROSS_TARGET_WASM_SDK_URL="http://example.invalid/b.artifactbundle"
+  CROSS_TARGET_WASM_SDK_CHECKSUM="deadbeef"
+  SWIFT_VERSION="6.2.1"
+  WASM_BUNDLE_STATE=""
+  printf '0' > "$counter"
+  resolve_wasm_sdk_id() {
+    # Nothing resolves before an install; afterwards the bundle yields the
+    # non-embedded id only -- asymmetric drift.
+    [[ "$(cat "$counter")" -ge 1 ]] || return 1
+    [[ "$2" == "wasm" ]] || return 1
+    printf 'swift-6.2.1-RELEASE_wasm'
+  }
+  run_swift_sdk_install() {
+    local n
+    n=$(( $(cat "$counter") + 1 ))
+    printf '%s' "$n" > "$counter"
+    echo "stub install ${n}"
+    [[ "$n" -eq 1 ]]
+  }
+  prepare_wasm_sdk wasm "${SELF_TEST_TMP_ROOT}/drift-wasm.log" >/dev/null 2>&1
+  assert_equal "" "$WASM_SKIP_WASM" "drift_first_kind_succeeds"
+  assert_equal "bundle_installed_ok" "$WASM_BUNDLE_STATE" "drift_state_recorded"
+  # NOTE (Task 4 deviation from the brief's literal `out="$(prepare_wasm_sdk ... 2>&1)"`):
+  # command substitution forks a subshell, so prepare_wasm_sdk's global-variable side
+  # effect (WASM_SKIP_WASM_EMBEDDED, set below) would never reach this scope and the
+  # very next assertion could never pass. Capture via a temp file instead so the call
+  # runs in THIS shell and both the global var and the printed diagnostic survive.
+  prepare_wasm_sdk wasm_embedded "${SELF_TEST_TMP_ROOT}/drift-embedded.log" \
+    > "${SELF_TEST_TMP_ROOT}/drift-embedded.out" 2>&1
+  out="$(cat "${SELF_TEST_TMP_ROOT}/drift-embedded.out")"
+  assert_equal "sdk_unresolved_after_install" "$WASM_SKIP_WASM_EMBEDDED" "drift_second_kind_reason"
+  assert_equal "1" "$(cat "$counter")" "drift_single_install"
+  assert_contains "reason=bundle_installed_id_unresolved" "$out" "drift_message_truthful"
+}
+
 run_self_test() {
+  # Fail CLOSED if mktemp itself fails: under `set -uo pipefail` (no `set -e`) an
+  # unchecked `mktemp -d` failure leaves SELF_TEST_TMP_ROOT="". On macOS that still
+  # fails safely later (writes to "/" are denied), but in a root-run container (e.g.
+  # hosted CI) an empty root resolves to the filesystem root and every scenario
+  # silently writes stray files there while still reporting self_test=pass -- a
+  # check that cannot fail is not a check. The `|| SELF_TEST_TMP_ROOT=""` is
+  # load-bearing: without it, `set -u`-adjacent strictness aside, a failing command
+  # substitution's own exit status would otherwise not gate anything, since this
+  # script runs without `set -e`.
+  SELF_TEST_TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/cross-target-self-test.XXXXXX")" || SELF_TEST_TMP_ROOT=""
+  [[ -d "$SELF_TEST_TMP_ROOT" ]] || { echo "self_test=fail label=tmp_root_unavailable"; exit 1; }
+  trap 'rm -rf "$SELF_TEST_TMP_ROOT"' EXIT
+
   local clean_list="swift-6.1.2-RELEASE_wasm
 swift-6.1.2-RELEASE_wasm-embedded"
   local noisy_list="Installed Swift SDKs:
@@ -363,7 +638,13 @@ some descriptive header with spaces"
 
   # Task 2 — per-kind blocking flag (the fallback ladder is a config flip)
   assert_equal "true" "$(wasm_kind_blocking wasm)" "wasm_blocks"
-  assert_equal "true" "$(wasm_kind_blocking wasm_embedded)" "embedded_blocks_by_default"
+  # Pinned to the default explicitly, not inherited: an ambient
+  # CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false in the caller's shell would otherwise
+  # flip this assertion's expected outcome for a reason unrelated to the code
+  # under test. A hermetic scenario must not read values it does not set itself.
+  assert_equal "true" \
+    "$(CROSS_TARGET_WASM_EMBEDDED_BLOCKING=true wasm_kind_blocking wasm_embedded)" \
+    "embedded_blocks_by_default"
   assert_equal "false" \
     "$(CROSS_TARGET_WASM_EMBEDDED_BLOCKING=false wasm_kind_blocking wasm_embedded)" \
     "embedded_ladder_demotes_to_observational"
@@ -399,6 +680,11 @@ some descriptive header with spaces"
   # actionable reason is the missing configuration.
   assert_equal "sdk_unavailable" \
     "$(wasm_install_precheck "" sdk_install_failed)" "precheck_no_url_precedence"
+  assert_equal "sdk_unresolved_after_install" \
+    "$(wasm_install_precheck http://b bundle_installed_ok)" \
+    "precheck_installed_bundle_reports_unresolved"
+  # Task 3 — per-attempt install log naming
+  assert_equal "/tmp/x.log.attempt-2" "$(attempt_logfile /tmp/x.log 2)" "attempt_logfile_path"
   # Task 2 — WASM pairs now count toward blocking failures (a fail counts; a
   # demoted/observational embedded skip does not). Pair order is 2 packages x
   # {ios_device, ios_simulator, wasm, wasm_embedded}.
@@ -408,6 +694,80 @@ some descriptive header with spaces"
   assert_equal "0" \
     "$(count_blocking_failures pass:true pass:true pass:true skipped:false pass:true pass:true pass:true skipped:false)" \
     "wasm_embedded_demoted_not_counted"
+
+  run_scenario scenario_ladder_recovers_after_two_failures
+  run_scenario scenario_ladder_exhausts_and_prints_every_tail
+  run_scenario scenario_asymmetric_drift_reports_truth
+
+  # --- classification (D-6) ---
+  # The partition is only as strong as the detector underneath it: a declaration form
+  # defined_functions cannot see is a function that escapes classification silently,
+  # with self_test=pass. Pin every form bash accepts at top level, and pin the
+  # exclusion of INDENTED definitions -- the scenario stubs above are nested function
+  # definitions that must stay invisible to the partition. Built with printf, not a
+  # heredoc, because a column-0 `}` inside run_self_test would terminate
+  # self_test_body's extraction early and silently truncate the coverage check.
+  local fixture="${SELF_TEST_TMP_ROOT}/decl-forms.sh"
+  printf '%s\n' \
+    'plain_form() {' '  :' '}' \
+    'nospace_form(){' '  :' '}' \
+    'spaced_form ()  {' '  :' '}' \
+    'digit_form2() {' '  :' '}' \
+    'Upper_Form() {' '  :' '}' \
+    'function keyword_form {' '  :' '}' \
+    'function keyword_paren_form() {' '  :' '}' \
+    'outer_form() {' '  indented_stub_form() {' '    :' '  }' '}' \
+    > "$fixture"
+  assert_equal \
+    "plain_form nospace_form spaced_form digit_form2 Upper_Form keyword_form keyword_paren_form outer_form" \
+    "$(defined_functions "$fixture" | tr '\n' ' ' | sed 's/ *$//')" \
+    "defined_functions_sees_every_declaration_form"
+
+  local script_path defined body fn entry name classified
+  script_path="${BASH_SOURCE[0]}"
+  defined="$(defined_functions "$script_path")"
+  body="$(self_test_body "$script_path")"
+
+  # Direction 1: every defined function is classified.
+  for fn in $defined; do
+    if is_harness_function "$fn"; then continue; fi
+    classified=0
+    for name in "${SELF_TEST_COVERED[@]}"; do
+      [[ "$name" == "$fn" ]] && classified=1
+    done
+    for entry in "${SELF_TEST_EXEMPT[@]}"; do
+      [[ "${entry%%$'\t'*}" == "$fn" ]] && classified=1
+    done
+    assert_equal "1" "$classified" "classified_${fn}"
+  done
+
+  # Direction 2: no phantom names, and every exempt entry carries a justification.
+  for name in "${SELF_TEST_COVERED[@]}"; do
+    assert_function_defined "$name" "$defined" "covered_defined_${name}"
+  done
+  for entry in "${SELF_TEST_EXEMPT[@]}"; do
+    assert_function_defined "${entry%%$'\t'*}" "$defined" "exempt_defined_${entry%%$'\t'*}"
+    if [[ "$entry" != *$'\t'* || -z "${entry#*$'\t'}" ]]; then
+      echo "self_test=fail label=exempt_justified_${entry} expected=justification actual=none"
+      exit 1
+    fi
+  done
+
+  # Coverage: every covered function is really referenced by the self-test's source.
+  for name in "${SELF_TEST_COVERED[@]}"; do
+    if ! body_references_function "$name" "$body"; then
+      echo "self_test=fail label=covered_but_unreferenced fn=$name"
+      exit 1
+    fi
+  done
+
+  # usage must keep documenting the flag this whole mechanism hangs on. The check is
+  # the RIGHT side of the pipe, so the pipeline's status is the check's status.
+  if ! usage | grep -q -- '--self-test'; then
+    echo "self_test=fail label=usage_documents_self_test expected=documented actual=missing"
+    exit 1
+  fi
+
   echo "self_test=pass"
 }
 
@@ -424,7 +784,7 @@ WASM_SDK_ID_WASM=""
 WASM_SKIP_WASM=""
 WASM_SDK_ID_WASM_EMBEDDED=""
 WASM_SKIP_WASM_EMBEDDED=""
-WASM_BUNDLE_FAILED_REASON=""
+WASM_BUNDLE_STATE=""
 PAIRS=()
 
 # Print the tail of a log file with clear delimiters, so failures are visible in
@@ -508,20 +868,30 @@ resolve_wasm_sdk_id() {
   printf '%s\n' "$list" | resolve_wasm_sdk_id_from_list "$version" "$kind"
 }
 
+# The one toolchain call the ladder makes. Its ONLY purpose is to be replaceable:
+# --self-test overrides it inside a scenario subshell. Exempt from coverage by
+# construction -- it IS the process call.
+run_swift_sdk_install() {
+  swift "$@"
+}
+
 # Install a Swift SDK with a bounded retry. download.swift.org is now in the
 # merge path, so a transient network error gets a few attempts before failing
 # red. Echoes the measured install seconds (feeds the caching decision) on
-# success. Not pure -- exercised by the hosted spike, not --self-test.
+# success. Not pure -- the toolchain call itself is stubbed via
+# run_swift_sdk_install; the retry/backoff/logging logic IS exercised by
+# --self-test.
 swift_sdk_install_retry() {
-  local url="$1" checksum="$2" logfile="$3"
+  local url="$1" checksum="$2" logfile="$3" label="$4"
   local attempts="${CROSS_TARGET_SDK_INSTALL_ATTEMPTS:-3}"
   local backoff="${CROSS_TARGET_SDK_INSTALL_BACKOFF:-3}"
-  local i=1 start end
+  local i=1 j=1 start end attempt_log
   local -a args=(sdk install "$url")
   [[ -n "$checksum" ]] && args+=(--checksum "$checksum")
   start=$(date +%s)
   while (( i <= attempts )); do
-    if swift "${args[@]}" >"$logfile" 2>&1; then
+    attempt_log="$(attempt_logfile "$logfile" "$i")"
+    if run_swift_sdk_install "${args[@]}" >"$attempt_log" 2>&1; then
       end=$(date +%s)
       echo "cross_target_sdk_install_seconds=$((end - start)) attempts=${i}"
       return 0
@@ -529,6 +899,11 @@ swift_sdk_install_retry() {
     echo "warn=sdk_install_attempt_failed attempt=${i}/${attempts}" >&2
     (( i < attempts )) && sleep "$backoff"
     i=$((i + 1))
+  done
+  # The ladder owns its own diagnostics: the caller cannot know how many attempts ran.
+  while (( j < i )); do
+    print_log_tail "${label}-attempt-${j}" "$(attempt_logfile "$logfile" "$j")"
+    j=$((j + 1))
   done
   return 1
 }
@@ -546,32 +921,43 @@ prepare_wasm_sdk() {
     # Happy path: the first kind installs; the second kind's resolve above
     # already succeeds (the bundle now provides its id too), so this branch is
     # never entered for it and no second install happens.
+    # Drift path: the bundle installs successfully but yields only ONE kind's id.
+    # WASM_BUNDLE_STATE (set below) records bundle_installed_ok even on success, so
+    # the second kind's precheck reports the truth (sdk_unresolved_after_install)
+    # WITHOUT a second install attempt against an already-installed bundle.
     # Failure path: once the shared bundle fails definitively -- install failure OR
-    # installed-but-unresolvable -- WASM_BUNDLE_FAILED_REASON (set below) short-
+    # installed-but-unresolvable -- WASM_BUNDLE_STATE (set below) short-
     # circuits the second kind to the SAME reason via wasm_install_precheck, instead
     # of burning a second full bounded-retry ladder against a host that just failed
     # the first one.
     url="${CROSS_TARGET_WASM_SDK_URL:-}"
     checksum="${CROSS_TARGET_WASM_SDK_CHECKSUM:-}"
-    precheck="$(wasm_install_precheck "$url" "$WASM_BUNDLE_FAILED_REASON")"
+    precheck="$(wasm_install_precheck "$url" "$WASM_BUNDLE_STATE")"
     if [[ -n "$precheck" ]]; then
       skip="$precheck"
-      if [[ "$precheck" != "sdk_unavailable" ]]; then
+      if [[ "$WASM_BUNDLE_STATE" == "bundle_installed_ok" ]]; then
+        echo "cross_target_sdk_install_skipped target=${kind}" \
+          "reason=bundle_installed_id_unresolved prior_state=${WASM_BUNDLE_STATE}"
+      elif [[ "$precheck" != "sdk_unavailable" ]]; then
         echo "cross_target_sdk_install_skipped target=${kind}" \
           "reason=bundle_already_failed prior_reason=${precheck}"
       fi
     else
       echo "cross_target_command target=${kind} cmd=\"swift $(sdk_install_display "$url" "$checksum")\""
-      if ! swift_sdk_install_retry "$url" "$checksum" "${logfile}.install"; then
+      if ! swift_sdk_install_retry "$url" "$checksum" "${logfile}.install" "${kind}-sdk-install"; then
         skip="sdk_install_failed"
-        WASM_BUNDLE_FAILED_REASON="sdk_install_failed"
-        print_log_tail "${kind}-sdk-install" "${logfile}.install"
+        WASM_BUNDLE_STATE="sdk_install_failed"
       elif ! sdk_id="$(resolve_wasm_sdk_id "$SWIFT_VERSION" "$kind")"; then
         skip="sdk_unresolved_after_install"
         # Slice 47 (P3 #2): record THIS reason too. Slice 46 recorded only the
         # install failure, so the drift path let the second kind re-run a full
         # ladder against an already-installed SDK and report a different reason.
-        WASM_BUNDLE_FAILED_REASON="sdk_unresolved_after_install"
+        WASM_BUNDLE_STATE="sdk_unresolved_after_install"
+      else
+        # Slice 51 (D-1): record SUCCESS as well. Without this the second kind sees an
+        # empty state, reinstalls a bundle that is already present, and reports the
+        # install failure instead of the truth.
+        WASM_BUNDLE_STATE="bundle_installed_ok"
       fi
     fi
   fi
@@ -702,7 +1088,7 @@ main() {
 }
 
 if [[ "${1:-}" == "--self-test" ]]; then
-  run_self_test
+  run_self_test || exit 1
   exit 0
 fi
 if [[ "${1:-}" == "--help" ]]; then

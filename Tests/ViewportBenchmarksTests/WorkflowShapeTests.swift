@@ -87,17 +87,6 @@ private let pinnedGateSteps: [GateStepSpec] = [
         beforeStepName: memoryShapeStepName),
 ]
 
-// Twin of `repositoryRoot()` in GateFloorTests.swift -- the same three-parent walk from
-// #filePath. Duplicated rather than shared because both are file-scope `private` helpers
-// in a target with no test-support file; if one moves, move the other.
-private func repositoryRoot() -> URL {
-    // .../Tests/ViewportBenchmarksTests/WorkflowShapeTests.swift -> repo root
-    URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-}
-
 private struct WorkflowStep {
     let name: String
     let index: Int          // position within the host job's step list

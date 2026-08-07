@@ -35,44 +35,6 @@ private struct CorpusExtremes {
     var sampleCount = 0
 }
 
-private func repositoryRoot() -> URL {
-    // .../Tests/ViewportBenchmarksTests/GateFloorTests.swift -> repo root
-    URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-}
-
-// The test target's first subprocess launch. Safe here: ViewportBenchmarksTests runs
-// only on the host (Linux CI + local macOS), never on iOS/WASM, which merely compile
-// TextEngineCore/ReferenceProviders. Foundation.Process is already available (this file
-// imports Foundation to read the corpus); nothing here reaches the Foundation-free core.
-// Feeds `stdin` to the process, reads stdout to EOF, then reaps. Output here is a handful
-// of run ids, so read-then-wait cannot deadlock on a full pipe buffer.
-private func runProcess(_ executableURL: URL, _ arguments: [String], stdin: String) throws
-    -> (stdout: String, stderr: String, exitCode: Int32) {
-    let process = Process()
-    process.executableURL = executableURL
-    process.arguments = arguments
-
-    let stdinPipe = Pipe(), stdoutPipe = Pipe(), stderrPipe = Pipe()
-    process.standardInput = stdinPipe
-    process.standardOutput = stdoutPipe
-    process.standardError = stderrPipe
-
-    try process.run()
-    try stdinPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
-    try stdinPipe.fileHandleForWriting.close()
-
-    let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-    let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-
-    return (String(decoding: outData, as: UTF8.self),
-            String(decoding: errData, as: UTF8.self),
-            process.terminationStatus)
-}
-
 // key -> "<mode>|<scenario>", matching the derivation script's grouping exactly.
 private func loadCorpus() throws -> [String: CorpusExtremes] {
     let url = repositoryRoot().appendingPathComponent(corpusPath)

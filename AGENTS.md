@@ -249,6 +249,9 @@ swift run -c release ViewportBenchmarks -- --help            # all flags
 ./.github/scripts/derive-gate-budgets.sh <corpus.tsv> <mode> # corpus -> budgets (re-derive half)
 ./.github/scripts/derive-gate-budgets.sh --window-run-ids <n> < <corpus.tsv> # windowed run ids (Swift-pin test seam)
 ./.github/scripts/cross-target-compile.sh --self-test        # shell logic self-test (no toolchain)
+# All four scripts' --self-test are also driven by `swift test`
+# (Tests/ViewportBenchmarksTests/ScriptSelfTestTests.swift), so an assertion in any
+# of them can fail the build. Enroll a new self-tested script in that table.
 ./.github/scripts/cross-target-compile.sh                    # local iOS/WASM cross-compile
 ./.github/scripts/cross-target-compile.sh --targets ios      # iOS-only compile path
 ./.github/scripts/cross-target-compile.sh --targets wasm     # WASM-only compile path (blocking; exits 1 without a pinned SDK — see below)
@@ -586,6 +589,28 @@ Conventions that matter:
   the PR run.
 - Keep concerns separate: functional core work vs. CI/portability vs.
   repo-policy work each get their own slice, design, and review.
+
+### Plan-assertion conventions (D-2)
+
+A plan's own checks must be able to fail. Slice 47's plan carried 16 of 29
+assertion sites that could not fail and 4 that could not pass; alertness is not
+a control, so the rules are written down:
+
+1. Never put a check on the left of a pipe whose right side is
+   `tail`/`tee`/`jq`/`wc`/`rg` — the pipeline's status is the right side's, and a
+   script's own `set -o pipefail` does not reach the invoking shell. Use
+   `${PIPESTATUS[0]}`, or do not pipe.
+2. Never write `echo "…=$?"` after a command whose exit status is insensitive to
+   the invariant. `git diff --name-only`, `git status`, `gh pr list`, `jq`,
+   `sed -i`, and every pipeline exit 0 regardless; `rg`/`grep` exit 1 on **no**
+   match, so the desired outcome reads as a failure. Assert with
+   `[ -z "$(…)" ]`, `git diff --quiet`, or an `if`/`else` that prints both branches.
+3. A plan must not assert its own HEAD commit (committing the plan changes it),
+   and must not both mandate inserting a string and assert zero occurrences of it.
+4. A variable used in a command block must be assigned in that same block, or the
+   block must open with `: "${VAR:?}"`. Each Bash invocation is a fresh shell:
+   slice 47's `$SCRATCH` was defined in prose and used at 23 command sites, where
+   `> "$SCRATCH/x.txt"` resolves to `/x.txt`.
 
 ## When you change the core
 

@@ -153,3 +153,26 @@ the review routes the A/B/C choice to the user rather than auto-selecting node 3
   for a user **schedule-or-defer** product call (feature route A/C vs infra route
   B). See the [review](../reviews/2026-07-25-slice-50-post-slice-review.md)
   Candidate options. Awaiting the user's call.
+- 2026-08-06 — **User chose Option B: Slice 51 = the debt route** (cross-target
+  script hardening), not the node-3 lean. Scope: **D-1** (P2 — record a third
+  precheck state on successful shared install), **D-3** (P3 — per-attempt retry
+  logfiles), **D-6** (P3 — pin the shell-purity exemption set, mirroring
+  `WorkflowShapeTests`'s `flagName` named-and-justified pattern), plus **D-2**
+  (P2) folded in as the plan-assertion-executability conventions in `AGENTS.md`,
+  applied to this slice's own plan. This **discharges both escalated P2s**
+  (D-1, D-2, born slice 47) rather than deferring them a fourth slice, so the
+  escalation is cleared by scheduling, not by silence. D-1 was **re-verified live
+  on the tree at selection time**: slice 47 closed only the sibling half
+  (`sdk_unresolved_after_install` is now recorded, `cross-target-compile.sh:569`),
+  while the WASM bundle-state global still stored failures only — so the
+  asymmetric-drift path still burned a second bounded-retry ladder against an
+  already-installed bundle and reported `sdk_install_failed`. Slice 51
+  discharged this remaining half: the global is renamed `WASM_BUNDLE_STATE` and
+  gains a `bundle_installed_ok` state recorded on successful shared install.
+  **D-7** stays
+  deferred (re-affirmed): `harvest-gate-corpus.sh` + corpus policy is a different
+  surface deserving its own spec. Out of scope by the concern-separation rule:
+  **D-13** (core) and **D-10/D-11** (repo-policy pins). Slice 51 advances **no
+  wrap criterion** and consumes **no map node** (like the process slice 48);
+  **node 3 (y→row) remains the lean** for the next feature slice. Next
+  inner-loop step: brainstorm slice 51.
