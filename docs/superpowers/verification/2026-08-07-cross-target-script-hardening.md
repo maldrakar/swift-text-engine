@@ -740,10 +740,33 @@ comment-stripping, D-1 state, D-3 per-attempt logs, the subshell
 meta-mutation) was re-run after the fix and every one still reddens. The
 self-test leaves no temp debris on either the passing or the failing path.
 
-**Not verified locally:** the GNU `grep`/`sed` half. The Docker daemon was
-down on this host, so the CI-image run recorded in §5e could not be repeated.
-The constructs are POSIX ERE and were cross-checked against an independent
-regex engine, but the authority is the hosted run — `ScriptSelfTestTests`
-executes this script inside `swift:6.2.1-bookworm`, so a GNU/BSD divergence
-here fails the required `Host tests and benchmark gate` job. That run is
-pending along with the post-merge proof in §6a.
+The GNU `grep`/`sed` half could not be verified on this host — the Docker
+daemon was down, so the CI-image run recorded in §5e could not be repeated,
+and the constructs were only cross-checked against an independent regex
+engine. **The hosted run settled it** (§7e): a GNU/BSD ERE divergence here
+would fail the required `Host tests and benchmark gate` job, because
+`ScriptSelfTestTests` executes this script inside `swift:6.2.1-bookworm`.
+
+### 7e. Hosted PR-head evidence for the fix
+
+Pushed as `2c71676`; run
+[`31213009464`](https://github.com/maldrakar/swift-text-engine/actions/runs/31213009464)
+(`event=pull_request`, head `2c71676`), conclusion **success**. Read at step
+level from the downloaded log, not inferred from job conclusions:
+
+- All three required contexts green: `Host tests and benchmark gate`,
+  `iOS cross-target compile`, `WASM cross-target compile`.
+- **`ScriptSelfTestTests.testEveryScriptSelfTestPasses` passed on hosted
+  Linux** — the decisive line for this fix, and the one that closes the
+  portability gap above: bash 5.2 / GNU grep 3.8 / GNU sed 4.9 accept the ERE
+  the macOS host's BSD tools accepted.
+- `swift test`: 361 tests, 0 failures — unchanged, as expected for a change
+  that adds one shell assertion and no Swift.
+- 46 `gate=pass`, 0 `gate=fail`.
+- Happy path intact: exactly one
+  `cross_target_sdk_install_seconds=6 attempts=1`; four WASM and four iOS
+  `result=pass reason=none blocking=true` lines; both cross-target jobs
+  `blocking_failures=0 exit=0`.
+
+The post-merge `push` run and the post-slice review remain outstanding per
+§6a.
