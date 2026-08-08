@@ -251,6 +251,23 @@ final class GateLogicTests: XCTestCase {
         XCTAssertNil(s.gateFailureReason)
     }
 
+    // D-8's substance: bulk gets an absolute ceiling of its own -- one whole 60 FPS
+    // frame -- and blowing it is reported even though the regression budget passes.
+    //
+    // The literal is deliberate and must NOT become
+    // `AbsoluteCeiling.discreteAction.p99Nanoseconds + 1`. Written symbolically the
+    // observation would track the ceiling, so raising the ceiling would raise the
+    // observation with it and this test could never fail. Its job in Decision 8's
+    // bracket is exactly to fail if the ceiling rises above 16_666_667 or disappears.
+    func testAbsoluteCeilingFiresForBulkModeAtItsOwnCeiling() {
+        let obsP99: Int64 = 16_666_667  // one ns over one whole 60 FPS frame
+        let s = summary(
+            mode: .bulkStructuralMutation,
+            p95: 100_000, p99: obsP99,
+            budgetP95: 300_000, budgetP99: obsP99 + 100_000)  // regression budget passes
+        XCTAssertEqual(s.gateFailureReason, .budgetAbsoluteExceeded)
+    }
+
     // budget_exceeded outranks the product reason: code that broke even the regression
     // budget reports the familiar regression failure, not the product one.
     func testBudgetExceededOutranksAbsoluteCeiling() {

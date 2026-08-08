@@ -123,6 +123,37 @@ enum BenchmarkMode: CaseIterable {
             return true
         }
     }
+
+    // Which absolute product ceiling this mode is held to. Exhaustive, never a
+    // deny-list -- the same discipline as isGateable.
+    //
+    // The four non-gateable modes (rangeOnly, memoryShape, memoryObservation,
+    // wrapCompute) must classify under a total function but never reach the gate, so
+    // their value is inert. Worth knowing: the class-membership pin filters on
+    // isGateable and therefore does NOT cover them. Their class is a compile-time
+    // obligation, not a pinned one -- do not expect a test to catch a wrong choice here.
+    var absoluteCeiling: AbsoluteCeiling {
+        switch self {
+        case .bulkStructuralMutation:
+            return .discreteAction
+        case .pipeline,
+             .rangeOnly,
+             .realisticProvider,
+             .variableHeight,
+             .variableHeightMutation,
+             .structuralMutation,
+             .lineQuery,
+             .lineGeometryQuery,
+             .columnQuery,
+             .columnGeometryQuery,
+             .pointQuery,
+             .pointGeometryQuery,
+             .memoryShape,
+             .memoryObservation,
+             .wrapCompute:
+            return .scrollFrame
+        }
+    }
 }
 
 enum BenchmarkOptionParse {

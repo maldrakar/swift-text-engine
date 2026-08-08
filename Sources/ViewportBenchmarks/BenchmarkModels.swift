@@ -77,6 +77,38 @@ enum GateLimits {
     static let absoluteP99Nanoseconds: Int64 = frameNanoseconds / 10 // 1_666_666 (10% of a frame)
 }
 
+// Which absolute PRODUCT ceiling a mode is held to. Two classes, total by
+// construction: an exhaustive switch on BenchmarkMode forces a newly added mode to
+// classify itself, so it can neither silently inherit a ceiling nor silently escape
+// one. There is no exempt case -- a branch with no inhabitants is the same defect as
+// a gate that cannot fail.
+//
+// FIXED, both of them: never recalibrated, never corpus-derived. On breach the
+// response is to fix the code/architecture, NEVER to loosen the ceiling (contrast
+// budget_stale, which says re-derive the budget).
+enum AbsoluteCeiling: Equatable {
+    // A scroll frame must not drop, so every participant is rationed and the headless
+    // core's ration is a tenth: the other 90% belongs to shaping, rasterization, and
+    // UI outside it.
+    case scrollFrame
+
+    // A discrete action -- a bulk multi-line paste or range delete -- is one the user
+    // has already accepted a perceptible pause for, so it MAY cost a dropped frame.
+    // The core's budget for the action it triggered is that whole frame's worth of
+    // work. Note this is NOT "the core may consume 100% of a live frame": the frame in
+    // question is one the product has agreed to drop.
+    case discreteAction
+
+    var p99Nanoseconds: Int64 {
+        switch self {
+        case .scrollFrame:
+            return GateLimits.frameNanoseconds / 10   // 1_666_666
+        case .discreteAction:
+            return GateLimits.frameNanoseconds        // 16_666_666
+        }
+    }
+}
+
 enum GateFailureReason: String {
     case operationFailures = "operation_failures"
     case budgetExceeded = "budget_exceeded"
@@ -121,7 +153,8 @@ struct BenchmarkSummary {
     // .infinity rather than trapping. Only meaningful for frame-hot-path modes; the output
     // layer emits it for those and marks the rest exempt.
     var headroomAbsoluteP99: Double {
-        BenchmarkSummary.headroom(budget: GateLimits.absoluteP99Nanoseconds, observed: p99Nanoseconds)
+        BenchmarkSummary.headroom(
+            budget: mode.absoluteCeiling.p99Nanoseconds, observed: p99Nanoseconds)
     }
 
     // A gate that cannot fail is not a gate. `budgetStale` is what makes an
@@ -150,7 +183,7 @@ struct BenchmarkSummary {
         // ONLY when the regression budget passes but the frame is blown -- the slow drift a
         // re-derived regression budget cannot catch. It never masks budget_stale, which
         // needs a tiny observed (huge headroom) where this check is silent.
-        if mode.isFrameHotPath, p99Nanoseconds > GateLimits.absoluteP99Nanoseconds {
+        if p99Nanoseconds > mode.absoluteCeiling.p99Nanoseconds {
             return .budgetAbsoluteExceeded
         }
 
