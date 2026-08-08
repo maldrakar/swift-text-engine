@@ -310,15 +310,16 @@ final class GateLogicTests: XCTestCase {
         XCTAssertTrue(absIndex < gateIndex, line)
     }
 
-    // Bulk is exempt: its gate line says so explicitly (a visible marker, not a silent
-    // omission -- the repo's "no silent caps" discipline) and carries no absolute headroom.
-    func testGateOutputMarksBulkExempt() {
+    // Bulk publishes its own ceiling like every other gated mode. Both assertions
+    // inverted from the exemption era: the line carries a NUMBER, and it carries the
+    // headroom token it previously omitted. 16_666_666 / 900_000 = 18.5x.
+    func testGateOutputCarriesDiscreteActionCeilingForBulk() {
         let line = formatSummary(
             summary(mode: .bulkStructuralMutation, p95: 400_000, p99: 900_000,
                     budgetP95: 2_900_000, budgetP99: 5_800_000),
             includeGate: true)
-        XCTAssertTrue(line.contains(" budget_absolute_p99_ns=exempt"), line)
-        XCTAssertFalse(line.contains("headroom_absolute_p99"), line)
+        XCTAssertTrue(line.contains(" budget_absolute_p99_ns=16666666"), line)
+        XCTAssertTrue(line.contains(" headroom_absolute_p99=18.5x"), line)
         XCTAssertTrue(line.contains(" gate=pass"), line)
     }
 
