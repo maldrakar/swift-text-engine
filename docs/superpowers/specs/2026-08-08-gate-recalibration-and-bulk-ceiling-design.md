@@ -23,13 +23,10 @@ The three that changed load-bearing parts of the design:
 
 1. **AC9 was unmeetable.** It compared this slice's checksums against
    `2026-08-07-cross-target-script-hardening.md`, which carries **3**
-   `checksum=` lines (all `mode=pipeline`), not 46. No single committed document
-   holds the full current-composition set: the nearest, slice 43's Section 8
-   table, holds 45 and keeps `realistic_provider` in a separate section by its
-   own documented convention. AC9 is now **self-contained** — a local sweep
-   recorded in this slice's own verification document and a three-way
-   local ↔ PR-head ↔ push tuple diff, with slice 51's three pipeline values as
-   the cross-slice anchor. This is the slice-44 §5 pattern.
+   `checksum=` lines (all `mode=pipeline`), not 46. The fix was a **three-way
+   local ↔ PR-head ↔ push tuple diff** internal to this slice — the slice-44 §5
+   pattern — plus a cross-slice anchor. This round sized that anchor at three
+   values; the third round found the sizing wrong and widened it to 46 (below).
 2. **AC2 checked a proxy rather than the invariant.** A run-id threshold assumes
    run ids order workflow *versions*, which they do not: a branch cut before
    slice 45 merged could produce a higher run id carrying the old shape. The
@@ -56,12 +53,40 @@ tree; one estimate was optimistic in a way that matters and is recorded there �
 the script's `--self-test` covers `window_run_ids` and *nothing else*, so the
 budget arithmetic has no standing check today and this token's drill is the first.
 
-One correction to the review's reasoning, which does not change its conclusion:
-`realistic_provider` **did** print `checksum=` before slice 45 — slice 44's
-document records `756321289736960`. What that document says is that the row is
-excluded from its 45-row *table*, not that the value was missing. The full set is
-absent because the table and Section 5 are separate, not because a mode printed
-nothing.
+**A third review round validated the revision and found three more**, all in the
+verification block rather than in the design, and all verified against the tree:
+
+1. **AC9 was still unmeetable, for a new reason.** The extraction
+   `grep -o 'scenario=[^ ]* .*checksum=[0-9]*'` is greedy: `.*` swallows
+   `p95_ns`, `p99_ns`, and every `headroom_*` field, all of which *must* differ
+   between local and hosted (hosted runs 2-3x slower — that is the calibration
+   authority rule). The three-way diff could never come out empty. Worse, the
+   tuple was `(scenario, checksum)`, and scenario names are shared by up to
+   **six** modes each — `uniform_1m`, `uniform_100k`,
+   `1k_lines_20_visible_overscan_0`, `100k_lines_80_visible_overscan_5`,
+   `1m_lines_200_visible_overscan_50`. The key is `(mode, scenario)`.
+2. **The 46-value cross-slice anchor exists after all, and the second draft
+   weakened AC9 to three values on a false premise.** The premise conflated a
+   *table* with a *document*: slice 43's Section 8 table holds 45 rows, but the
+   document as a whole carries **46 distinct `(mode|scenario, checksum)` tuples**
+   across all twelve gated modes, `realistic_provider` included. This is the same
+   fact as the correction the second draft made to the first review — that
+   `realistic_provider` did print `checksum=` before slice 45,
+   `756321289736960` — followed one step further. Slice 51's three `pipeline`
+   values appear in that document unchanged, so the set is still current.
+3. **The window-file redirect reintroduced the hole it was written to close.**
+   Moving `derive … --window-run-ids` out of a pipe and into a file fixed the
+   pipeline-status problem and left the redirect's own status unchecked, under a
+   block that declares no `set -e`. A failing derive leaves an empty
+   `window.txt`, and then **both** AC2 checks pass vacuously. Fixing the shape of
+   a check is not the same as making it status-sensitive.
+
+The remaining third-round items are folded in below: `--dry-run` writes its
+decisions to **stderr** (a naive `> file` capture records nothing), the
+`AGENTS.md` paragraph runs to `:431` rather than `:427`, Decision 13's self-test
+needs a re-invocation form this script has never used, and the measured
+distribution of the thin axis (**45 of 46**) now appears in Decision 11,
+Decision 13, and AC3 instead of being discovered during execution.
 
 The next step after sign-off is the TDD implementation plan (`writing-plans`),
 written under the four plan-assertion conventions `AGENTS.md` gained in slice 51.
@@ -75,7 +100,7 @@ at selection time showed the calibration base was ten slices stale. The same cal
 gave D-8 the product target it had been waiting on since slice 43, which is what
 converts it from "cannot be scheduled" into ordinary work.
 
-Six facts measured while exploring, all load-bearing:
+Seven facts measured while exploring, all load-bearing:
 
 - **The corpus has not been appended since 2026-07-18** (commit `9ce6975`,
   "harvest slice 40 post-merge run and re-derive budgets under the window"). It
@@ -111,6 +136,17 @@ Six facts measured while exploring, all load-bearing:
   16_666_666 ns ceiling that leaves 2.87× on the budget and ~30× on the observed
   p99 maximum: the ceiling is breached only if that scenario's median p95 nearly
   triples.
+
+- **The thin axis is not a short list — it is nearly everything.** Measured over
+  the committed corpus, **45 of the 46** p95 budgets are already governed by the
+  `8 × median` term. The sole exception is `line_query|uniform_1k`
+  (`8 × med = 192` against `3 × max = 219`). The rule behind the count is
+  arithmetic and does not rot: a budget is median-governed exactly when
+  `max / med <= 2.67`, and hosted runner noise essentially never produces a
+  worst-to-median ratio that large. So the `3 × max` term is close to vestigial
+  on p95, and D-9's surviving half describes the normal state of the recipe
+  rather than an occasional condition. This is why Decision 13's token is worth
+  having and why Decision 11 records a **rule and a ratio**, not a list.
 
 `everyGatedBudget()` reads the scenario functions directly rather than holding a
 second copy of the numbers, so the budgets have exactly one home
@@ -396,8 +432,18 @@ D-9 has two halves and they end this slice in different states. The
 shape-transition half is **discharged by fact**: after the harvest the window
 holds no pre-slice-45 run, which is checkable and checked. The p95 thin-axis half
 is structural — it is a property of the recipe, not a defect that can be fixed —
-so it stays open, with its statement amended to record the re-observation and the
-named list of scenarios currently governed by the median term.
+so it stays open, with its statement amended to record the re-observation.
+
+**The amendment records a rule and a ratio, not a list of scenarios.** A named
+list is the wrong durable form here: it runs to 45 of 46 entries (Source Context)
+and the next harvest can move any of them, so a ledger row holding it is stale on
+arrival — this repository's own lesson that a document restating a measured value
+is falsified by the next re-derivation. What does not rot is the arithmetic: a
+p95 budget rests on the median term exactly when `max / med <= 2.67`, and today
+that is 45 of 46 with `line_query|uniform_1k` the only exception. The ledger
+carries the rule and the ratio; the scenario-by-scenario snapshot lives in this
+slice's verification record, and after Decision 13 it is re-derivable on demand
+rather than transcribed.
 
 This follows the D-15 precedent from slice 51: a ledger row whose statement is
 corrected by evidence is amended in place, never silently re-scoped.
@@ -439,6 +485,18 @@ is precisely the kind of instruction that decays into silence; `gov_p95=median`
   it reads `>=`. That asymmetry is commented in the script, or the next reader
   harmonizes the operators and silently changes the rule.
 
+**Expect a near-constant token, and say so before anyone reads it.** On today's
+corpus `gov_p95=median` on **45 of 46** lines, with `line_query|uniform_1k` the
+lone `max` (Source Context). A reader meeting a column that is one value 98% of
+the time will suspect a broken field, so the expectation is stated here and
+quoted in the verification record. The token still earns its place: its value is
+in the **flip**, not the distribution. A scenario moving from `median` to `max`
+means a freak sample has taken over its floor, and a sweep-to-sweep diff of the
+column makes that visible at the moment it happens instead of at whatever later
+slice thinks to recompute it by hand. The alternative — printing the `max / med`
+ratio — was rejected as a second number to calibrate by eye when the question the
+thin axis asks is binary.
+
 **Compatibility, verified rather than assumed.** `GateFloorTests`'
 `derivedBudgets(fromScriptOutput:)` splits each line on whitespace and scans for
 the `budget_p95=` / `budget_p99=` prefixes; its own comment records that a
@@ -456,6 +514,23 @@ whose rows carry an outlier (so `3 × max` beats `8 × median`) plus two
 assertions, one per branch. Since slice 51 put all four script self-tests under
 `swift test`, the guarantee is build-failing from its first day at no extra
 wiring cost.
+
+**But it needs a form this script has never used.** Both existing assertions call
+a *function* (`window_run_ids`); the derivation lives in the `awk` program
+**below** the `--self-test` dispatch and is not reachable that way. Asserting on
+derived output therefore means re-invoking the script itself,
+`"$0" "$fixture"` — and under this script's `set -euo pipefail` a non-zero child
+aborts the shell before `assert_equal` can print its label, turning a real
+failure into a bare exit. The capture must be written so the status is caught
+rather than fatal:
+
+```bash
+out="$("$0" "$fixture")" || { echo "self_test=fail label=gov_p95_derivation_exited $?"; exit 1; }
+```
+
+This is a new pattern for the file and it sits next to D-15's dispatcher-shape
+nit, so the plan states it rather than leaving it to be improvised at the
+keyboard.
 
 **Interaction with D-14, recorded rather than hidden.** This adds arithmetic to a
 script whose coverage/exemption classification is *not* pinned — D-14 exactly.
@@ -543,9 +618,9 @@ with an assertion line, which reads as one convention and is two.
   `b95` computation, and one `gov_p95=%s` field in the `printf` format.
 - `run_self_test` gains a second fixture scenario carrying an outlier — so
   `3 × max` beats `8 × median` there — and two assertions, one per branch. It
-  re-invokes the script's own derivation path on the existing `mktemp` fixture; a
-  crash yields an empty token and the assertion fails, so the check stays
-  status-sensitive.
+  reaches the derivation by re-invoking `"$0" "$fixture"`, captured in the
+  status-catching form Decision 13 spells out: under `set -euo pipefail` a bare
+  `$(…)` would abort the shell before the assertion could name what failed.
 - Nothing else in the script moves: no change to the recipe, the window, the
   `--window-run-ids` seam, or the existing fixtures.
 
@@ -600,10 +675,13 @@ named only the third of them, and AC5's source scan cannot see any of them:
 - **`:417`** — "checked against **p99 only** (a passing p99 implies a passing p95
   under a uniform ceiling)". The parenthetical is true *within* one mode and false
   across modes once two ceilings exist; tightened to say so.
-- **`:420-427`** — the "applies to **frame-hot-path** modes only … is **exempt** …
+- **`:420-431`** — the "applies to **frame-hot-path** modes only … is **exempt** …
   prints `budget_absolute_p99_ns=exempt`" paragraph, including the
   `BenchmarkMode.isFrameHotPath` reference and the `GateFloorTests` sentence that
-  describes the now-removed filter.
+  describes the now-removed filter. The paragraph runs to `:431` ("So the runtime
+  absolute gate can never redden a clean tree."), not to `:427` as an earlier
+  draft had it — the four lines that draft cut off are exactly the sentence about
+  the filter, which is the part the new model changes most.
 - **`:548`** — the three-failure-reasons paragraph: "`budget_absolute_exceeded`
   means a frame-hot-path op blew the fixed 60 FPS ceiling". Generalized to both
   classes. The three reasons themselves do not change.
@@ -616,7 +694,9 @@ are outside the scan.
 - **`AGENTS.md`, `## Gate budgets`** also documents the `gov_p95` token where it
   already explains that p95 "carries only the median term as backup, so it is the
   thin axis to watch": the sentence now says what to read rather than only what to
-  watch for.
+  watch for, and records the rule behind it — median-governed exactly when
+  `max / med <= 2.67`, which is why nearly every budget is. Stating the rule
+  rather than the current count keeps the paragraph true across re-derivations.
 - **Arc decision log** (`docs/superpowers/arcs/wrap.md`): the 2026-08-08 user call
   — Option C over the node-3 lean, plus the D-8 target — with the map pass noting
   that slice 52 consumes no node, like slices 48 and 51.
@@ -630,6 +710,13 @@ either fails non-zero on its own fault, or is followed by an explicit test whose
 exit status is sensitive to the invariant.
 
 ```bash
+# `set -e` is NOT enough on its own here and `set -e` alone is not what this block
+# wants: it would abort before the `echo` that says which invariant broke. So:
+# -u and pipefail globally, and an explicit `|| exit 1` on every bare command whose
+# only failure signal is its exit status. Rule: a command with no `||` and no
+# following test is a bug in this block, not a command that cannot fail.
+set -uo pipefail
+
 CORPUS=docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv
 WORK="$(mktemp -d)"
 [ -n "$WORK" ] && [ -d "$WORK" ] || { echo 'temp root unavailable'; exit 1; }
@@ -643,16 +730,33 @@ for run in 29701333581 29701547123; do
   [ "$host" = "success" ] || { echo "run $run host job = ${host:-missing}"; exit 1; }
 done
 
-# Harvest plan first: --dry-run prints one decision per candidate and is recorded.
-./.github/scripts/harvest-gate-corpus.sh --limit 100 --corpus "$CORPUS" --dry-run
+# Harvest plan first. The decisions go to STDERR (`echo "$decision" >&2` in the
+# script), so `> file` alone would record an empty file and look like a clean plan.
+# No pipe: rule 1's strongest form is not to pipe at all, which also keeps the
+# block free of ${PIPESTATUS} and portable to whatever shell runs it.
+./.github/scripts/harvest-gate-corpus.sh --limit 100 --corpus "$CORPUS" --dry-run \
+  > "$WORK/harvest-plan.txt" 2>&1 \
+  || { echo 'harvest --dry-run failed'; cat "$WORK/harvest-plan.txt"; exit 1; }
 
-# Append. The redirect is the point, so the script's own exit status is the check.
-./.github/scripts/harvest-gate-corpus.sh --limit 100 --corpus "$CORPUS" >> "$CORPUS"
+# Append. The redirect is the point, so the script's own exit status is the check --
+# but a status nobody tests is not a check: a mid-sweep abort would leave partial
+# rows appended and the block would carry on to derive budgets from them.
+./.github/scripts/harvest-gate-corpus.sh --limit 100 --corpus "$CORPUS" >> "$CORPUS" \
+  || { echo 'harvest failed; corpus may hold a partial append -- inspect before committing'; exit 1; }
 
 # Window run ids to a FILE first. Reading them through a pipe into awk would put
 # the check on the left of the pipe: a failing derive would still yield an empty
 # result and the assertion would pass (AGENTS.md plan-assertion rule 1).
-./.github/scripts/derive-gate-budgets.sh --window-run-ids 20 < "$CORPUS" > "$WORK/window.txt"
+#
+# The redirect needs BOTH guards below. Moving the command out of a pipe fixed the
+# pipeline-status half and left the redirect's own status untested -- and an empty
+# window.txt makes the two AC2 checks below pass vacuously, which is the same
+# cannot-fail shape wearing different clothes. The line count is the stronger of
+# the two: it fails on a truncated file, which a zero exit status does not see.
+./.github/scripts/derive-gate-budgets.sh --window-run-ids 20 < "$CORPUS" > "$WORK/window.txt" \
+  || { echo 'derive --window-run-ids failed'; exit 1; }
+ids="$(wc -l < "$WORK/window.txt")"
+[ "$ids" -eq 20 ] || { echo "window holds $ids run ids, want 20"; exit 1; }
 
 # PRIMARY -- the invariant itself: no run in the window may contribute more than one
 # realistic_provider row, because a post-slice-45 run prints exactly one summary line
@@ -671,14 +775,25 @@ old="$(awk '$1 < 29692848870' "$WORK/window.txt")"
 [ -z "$old" ] || { printf 'window carries pre-slice-45 runs:\n%s\n' "$old"; exit 1; }
 
 # Sweep every mode; a mode with no corpus rows is an error, not an empty success.
-./.github/scripts/derive-gate-budgets.sh "$CORPUS"
+# To a file, again without a pipe: this output is AC3's evidence (the gov_p95
+# column) and AC4's, and it is recorded verbatim in the verification document.
+./.github/scripts/derive-gate-budgets.sh "$CORPUS" > "$WORK/sweep.txt" \
+  || { echo 'sweep failed'; exit 1; }
+
+# AC3, read off the sweep rather than recomputed. Expect ~45 of 46 on `median`
+# (Decision 13). `grep` exits 1 on NO match, so the desired outcome would read as a
+# failure -- rule 2. Hence: assert the count, and mark the may-be-empty grep `|| true`.
+med="$(grep -c 'gov_p95=median' "$WORK/sweep.txt")"
+[ "$med" -ge 1 ] || { echo 'no gov_p95=median lines -- token missing from the sweep?'; exit 1; }
+echo "median-governed: $med of 46"
+grep 'gov_p95=max' "$WORK/sweep.txt" || true   # an empty max set is a legitimate outcome
 
 # The arbiter of Phase 1: budgets must reproduce from the committed corpus.
-swift test --filter GateFloorTests
+swift test --filter GateFloorTests || exit 1
 
 # Full suite and release build.
-swift test
-swift build -c release
+swift test || exit 1
+swift build -c release || exit 1
 
 # Every gated mode locally, captured to a file rather than piped: `… | tee` would
 # put the loop on the left of a pipe and its exit inside a subshell -- rule 1 again.
@@ -695,7 +810,32 @@ done
 # an empty checksum set would diff clean against anything.
 n="$(grep -c 'checksum=' "$WORK/local-gate.txt")"
 [ "$n" -eq 46 ] || { echo "expected 46 checksum lines, got $n"; exit 1; }
-grep -o 'scenario=[^ ]* .*checksum=[0-9]*' "$WORK/local-gate.txt" | sort > "$WORK/local.txt"
+
+# Extract (mode|scenario, checksum) and NOTHING else. Two traps, both of which an
+# earlier draft fell into:
+#   * a greedy `.*checksum=` between two anchors drags p95_ns/p99_ns/headroom_* along,
+#     and those MUST differ local vs hosted (hosted runs 2-3x slower -- that is the
+#     calibration-authority rule). A tuple carrying them can never diff empty.
+#   * scenario alone is not a key: `uniform_1m`, `uniform_100k`,
+#     `1k_lines_20_visible_overscan_0`, `100k_lines_80_visible_overscan_5` and
+#     `1m_lines_200_visible_overscan_50` each appear in SIX modes.
+extract_checksums() {
+  sed -nE 's/.*mode=([a-z_]+).*scenario=([^ ]+).*checksum=([0-9]+).*/\1|\2\t\3/p' "$1" | sort -u
+}
+
+extract_checksums "$WORK/local-gate.txt" > "$WORK/local.txt"
+keys="$(cut -f1 "$WORK/local.txt" | sort -u | wc -l)"
+[ "$keys" -eq 46 ] || { echo "expected 46 distinct mode|scenario keys, got $keys"; exit 1; }
+
+# The 46-value CROSS-SLICE anchor. Slice 43's verification document carries all 46
+# tuples across all twelve gated modes (realistic_provider included) -- its Section 8
+# *table* holds 45, the document does not. Extracted with the same function, so a
+# difference is a real difference and not a parsing artefact.
+extract_checksums docs/superpowers/verification/2026-07-18-absolute-product-budget.md \
+  > "$WORK/anchor.txt"
+[ "$(wc -l < "$WORK/anchor.txt")" -eq 46 ] || { echo 'anchor is not 46 tuples'; exit 1; }
+diff "$WORK/anchor.txt" "$WORK/local.txt" \
+  || { echo 'checksums drifted since slice 43 -- a workload moved'; exit 1; }
 
 # The core is untouched: the Foundation-free scan must find nothing.
 [ -z "$(rg -n 'Foundation' Sources/TextEngineCore)" ] || { echo 'Foundation leaked'; exit 1; }
@@ -707,22 +847,36 @@ each showing all twelve blocking gate steps green — **46** scenario lines
 reporting `gate=pass`, one per gated scenario — with the five bulk lines now
 carrying `budget_absolute_p99_ns=16666666` where they previously read `exempt`.
 
-**The checksum comparison is self-contained inside this slice.** The local sweep
-above is recorded verbatim in this slice's verification document, and the same
-46 `(scenario, checksum)` pairs are extracted from the PR-head and post-merge
-hosted logs; the three sets must diff empty against each other. No external
-baseline is required, and none exists: no committed document holds all 46 values
-of the current composition — slice 51's holds three (all `pipeline`), and slice
-43's 45-row table keeps `realistic_provider` in a separate section by its own
-convention. Those three `pipeline` values are quoted as a **cross-slice anchor**,
-which is what actually proves the workload did not drift across slices 51 → 52;
-the three-way diff proves only internal consistency. This is the pattern slice
-44's verification document used in its Section 5.
+**The checksum comparison has two independent halves, and they prove different
+things.** The same `extract_checksums` function is run over the local sweep, the
+PR-head log, and the post-merge log, giving 46 `(mode|scenario, checksum)` tuples
+each; the three sets must diff empty pairwise, and all three are recorded in this
+slice's verification document. That is the **internal** half, and on its own it
+proves only that three environments agree with each other — three identically
+wrong sets would pass it.
+
+The **cross-slice** half is what proves the workload did not drift, and it is a
+full 46-value anchor rather than a token sample:
+[`2026-07-18-absolute-product-budget.md`](../verification/2026-07-18-absolute-product-budget.md)
+carries all 46 tuples across all twelve gated modes, `realistic_provider`
+included. An earlier draft weakened this to slice 51's three `pipeline` values on
+the belief that no committed document held the full set; that belief confused
+slice 43's **Section 8 table** (45 rows, `realistic_provider` written up
+separately) with the **document** (46 tuples). Slice 51's three values are present
+in that document unchanged, which is the evidence the anchor is still current, and
+they remain quoted as a spot check across 51 → 52.
+
+Extracting the anchor with the same function as the fresh sets is deliberate: a
+tuple parsed two ways can differ for reasons that have nothing to do with the
+engine. This is the pattern slice 44's verification document used in its
+Section 5, with the anchor widened from a table lookup to a mechanical read.
 
 ## Acceptance Criteria
 
 1. **AC1 — Idempotent, provenance-checked append.** The corpus is appended via
-   `--corpus`; the `--dry-run` decision plan is recorded; no pre-existing row is
+   `--corpus`; the `--dry-run` decision plan is recorded (captured from **stderr**,
+   where the script writes it — a stdout capture records an empty plan and reads
+   as a clean one); no pre-existing row is
    edited, reordered, or removed (`git diff` over the corpus shows additions
    only). **And** the two run-level failures (`29701333581`, `29701547123`) are
    shown to have a `success` **host** job, with the `gh` output recorded. That
@@ -745,7 +899,14 @@ the three-way diff proves only internal consistency. This is the pattern slice
    `gov_p95=median|max` on every scenario line, its tie rule (`median` at
    `8 × med == 3 × max`) is asserted by the script's own `--self-test`, and that
    self-test fails `swift test` when broken. The verification record quotes the
-   swept output and names the scenarios currently on the median term.
+   swept output with the counts on both sides of the token.
+
+   What goes into the **ledger** is the rule and the ratio — a p95 budget is
+   median-governed exactly when `max / med <= 2.67`, and after the harvest it is
+   *n* of 46 — not the enumeration, which runs to nearly every scenario and rots
+   at the next re-derivation (Decision 11). The pre-harvest measurement is 45 of
+   46, so a post-harvest result anywhere near that is the expected outcome and not
+   a finding; a sharp move in either direction is.
 4. **AC4 — Budgets reproduce.** All 46 gated scenarios reproduce from the appended
    corpus; `swift test` green.
 5. **AC5 — Total classification.** Two precise scans over
@@ -785,18 +946,24 @@ the three-way diff proves only internal consistency. This is the pattern slice
    scenario lines reporting `gate=pass`, `swift test` green, and the five bulk
    gate lines showing `budget_absolute_p99_ns=16666666`.
 
-   The checksum criterion is a **three-way tuple diff internal to this slice** —
-   the 46 `(scenario, checksum)` pairs from the local sweep, the PR-head log, and
-   the post-merge log must diff empty pairwise, with all three sets recorded in
-   this slice's verification document. Plus one **cross-slice anchor**: the three
-   `mode=pipeline` checksums quoted in
-   [`2026-08-07-cross-target-script-hardening.md`](../verification/2026-08-07-cross-target-script-hardening.md)
-   must appear unchanged.
+   The checksum criterion has two halves, both required:
 
-   The anchor is deliberately three values rather than 46, because 46 do not
-   exist in any one committed document — the first draft asserted against a
-   baseline that is not there. The internal diff proves the three environments
-   agree; the anchor is what proves the workload did not drift since slice 51.
+   - **Internal** — a three-way tuple diff. The 46 `(mode|scenario, checksum)`
+     tuples from the local sweep, the PR-head log, and the post-merge log diff
+     empty pairwise, all three sets recorded here. The key is `(mode, scenario)`,
+     never scenario alone: five scenario names are shared by six modes each. The
+     tuple carries the checksum and nothing else — no `p95_ns`, no `headroom_*`,
+     which differ between local and hosted by construction.
+   - **Cross-slice** — a 46-value anchor. Every tuple must equal the one extracted
+     by the same function from
+     [`2026-07-18-absolute-product-budget.md`](../verification/2026-07-18-absolute-product-budget.md),
+     which carries all 46 across all twelve gated modes. Slice 51's three
+     `pipeline` values are quoted alongside as a spot check.
+
+   The internal diff proves three environments agree; only the anchor proves the
+   workload did not drift. An earlier draft cut the anchor to three values on the
+   false premise that 46 exist in no committed document — a *table* holds 45, the
+   document holds 46.
 10. **AC10 — Paper trail.** Spec, plan, verification record, arc decision-log
     entry, and ledger status changes (D-8 discharged, D-9 amended) all committed.
 
