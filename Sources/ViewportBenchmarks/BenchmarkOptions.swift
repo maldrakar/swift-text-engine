@@ -88,42 +88,6 @@ enum BenchmarkMode: CaseIterable {
         }
     }
 
-    // Whether the absolute product ceiling (GateLimits.absoluteP99Nanoseconds) applies to
-    // this mode. Frame-hot-path operations run inside the 60 FPS scroll/keystroke loop --
-    // viewport compute, incremental recompute after a single edit, and every
-    // position/geometry query -- so they must fit well within a frame.
-    // bulk_structural_mutation inserts/removes thousands of lines in one operation (a
-    // large paste or range delete): a discrete user action that may legitimately span
-    // more than one frame, NOT on the scroll path. Its hosted p99 (~570us) and
-    // median-derived regression budgets (3-5.8ms) sit ABOVE a 10%-frame ceiling, so it is
-    // gated on its regression budget only and exempt here.
-    //
-    // Exhaustive switch, never a deny-list -- the same discipline as isGateable: a new
-    // mode must classify itself, so it cannot silently inherit the ceiling or silently
-    // escape it. testFrameHotPathExclusionsAreExactlyDocumented pins the excluded set.
-    var isFrameHotPath: Bool {
-        switch self {
-        case .bulkStructuralMutation:
-            return false
-        case .pipeline,
-             .rangeOnly,
-             .realisticProvider,
-             .variableHeight,
-             .variableHeightMutation,
-             .structuralMutation,
-             .lineQuery,
-             .lineGeometryQuery,
-             .columnQuery,
-             .columnGeometryQuery,
-             .pointQuery,
-             .pointGeometryQuery,
-             .memoryShape,
-             .memoryObservation,
-             .wrapCompute:
-            return true
-        }
-    }
-
     // Which absolute product ceiling this mode is held to. Exhaustive, never a
     // deny-list -- the same discipline as isGateable.
     //
