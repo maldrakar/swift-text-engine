@@ -88,6 +88,37 @@ needs a re-invocation form this script has never used, and the measured
 distribution of the thin axis (**45 of 46**) now appears in Decision 11,
 Decision 13, and AC3 instead of being discovered during execution.
 
+**A fourth review round re-verified every measurable claim in this document
+against the tree and found no factual error** — the corpus counts, the 45-of-46
+thin-axis distribution and its lone exception, the 46-tuple anchor, the bulk
+margins, and every file:line reference including the third round's `:431`
+correction all hold. It raised two P2s and five P3s, all about what the document
+*says* rather than what it measures, and all are folded in:
+
+1. **Decision 9 contradicted itself, and the contradiction had a code
+   consequence.** It claimed Decision 7's pin makes the runtime absolute check
+   unable to fire *and* that the check "fires once the regression budget has
+   climbed past 16.67 ms" — but the pin is exactly what forbids that budget from
+   being committed. The branch is unreachable by construction, not merely
+   "today", which is the same no-inhabitants defect Decision 4 rejects an
+   optional ceiling for. Decision 9 is rewritten around the true enforcement
+   point (the static pin), and the consequence the earlier drafts missed is now
+   in Component Design: that test's **failure message** currently offers two
+   remediations this slice invalidates.
+2. **`gov_p95` was observable but not watched, and its real value was
+   mis-stated.** A token nobody diffs decays exactly like the hand-transcription
+   Decision 13 rejects. More usefully, a `max → median` flip is the *signature*
+   of the budget-tightening risk this document already names as having no
+   pre-hosted control — a connection no draft drew. Decision 13, the risk entry,
+   and the verification block now carry it, with a zero-code directional diff as
+   the control.
+
+The five P3s are folded in as: Decision 6's product rationale restated so it
+survives its own 10%/90% premise, the anchor's 54-raw-lines → 46-tuples
+collapse explained where it is asserted, two count assertions closing AC5's
+unchecked half, a comment on the deliberately unquoted `$mode`, and the
+brief-alignment argument added to Source Context and the arc entry.
+
 The next step after sign-off is the TDD implementation plan (`writing-plans`),
 written under the four plan-assertion conventions `AGENTS.md` gained in slice 51.
 
@@ -99,6 +130,20 @@ chose **Option C** instead — the calibration route — after live evidence gat
 at selection time showed the calibration base was ten slices stale. The same call
 gave D-8 the product target it had been waiting on since slice 43, which is what
 converts it from "cannot be scheduled" into ordinary work.
+
+**This is a debt route that de-risks a named brief criterion**, and the
+distinction is worth stating rather than leaving the slice to read as
+housekeeping. The wrap brief's fourth success criterion commits future wrap work
+to this exact machinery — «новые wrap-режимы становятся блокирующими CI-гейтами
+**по существующему рецепту калибровки (harvest → derive)**», holding «p95/p99-бюджеты
+и абсолютный потолок 60 FPS». Both halves of that sentence are what this slice
+repairs: the recipe's evidence base currently contains no post-slice-45 run, and
+the absolute ceiling is a boolean designed before wrap existed. After this slice a
+future `wrap_compute` gate calibrates against evidence that includes the last ten
+slices, and a future wrap mode **classifies itself** into a ceiling class rather
+than inheriting one. The scoreboard still moves by zero — this slice advances no
+criterion and consumes no map node, like slices 48 and 51 — but the reason to run
+it now is not only that D-8 and D-9 are old.
 
 Seven facts measured while exploring, all load-bearing:
 
@@ -189,9 +234,11 @@ In scope, in this order:
    its two self-test assertions (Decision 13). It goes first so the Phase 1 sweep
    already carries the token and no second sweep is needed to produce the
    evidence AC3 asks for.
-2. **Phase 1 (data).** Harvest every hosted run newer than the corpus maximum
-   into the corpus; sweep-re-derive **all** modes; update every budget literal the
-   recipe now produces differently; record which p95 budgets are median-governed.
+2. **Phase 1 (data).** Capture the pre-harvest budget baseline; harvest every
+   hosted run newer than the corpus maximum into the corpus; sweep-re-derive
+   **all** modes; update every budget literal the recipe now produces differently;
+   record which p95 budgets are median-governed and which budgets moved in which
+   direction. The baseline comes first because it is unrecoverable afterwards.
 3. **Phase 2 (policy).** Replace the exemption with a total two-class absolute
    ceiling; give `bulk_structural_mutation` a ceiling of one whole 60 FPS frame;
    generalize the four pins that depend on the old boolean.
@@ -213,8 +260,10 @@ Out of scope — see Non-Goals.
 4. Every gated mode carries an absolute product ceiling; none is exempt.
 5. `bulk_structural_mutation`'s ceiling is one 60 FPS frame, fixed and derived
    from the frame constant, never corpus-derived.
-6. The absolute gate still cannot redden a clean tree: every one of the 46
-   committed budgets sits under the ceiling of its own class, enforced by a test.
+6. Every one of the 46 committed budgets sits under the ceiling of its own class,
+   enforced by a test. That test is the product target's enforcement point — its
+   red is the ceiling firing — and it is also why the runtime absolute check cannot
+   redden a clean tree (Decision 9).
 
 ## Non-Goals
 
@@ -319,10 +368,24 @@ every call site should have to name the class it means.
 ### Decision 6 — The bulk ceiling is one whole 60 FPS frame, and it is FIXED
 
 `AbsoluteCeiling.discreteAction.p99Nanoseconds == GateLimits.frameNanoseconds ==
-16_666_666`. The product statement: a scroll-frame operation gets 10% of a frame
-because the other 90% belongs to shaping, rasterization, and UI outside the
-headless core; a discrete bulk edit is not a scroll frame, and the core's share of
-it is allowed to be a whole frame's worth of work rather than a tenth.
+16_666_666`.
+
+**The product statement, phrased so it survives the premise it inherits.** The
+scroll-frame ceiling is 10% of a frame because the other 90% belongs to shaping,
+rasterization, and UI outside the headless core. An earlier draft extended that
+sentence by saying the core's share of a bulk edit "is allowed to be a whole
+frame's worth rather than a tenth" — which does not survive its own premise: a
+4096-line paste unquestionably triggers shaping and rasterization too, so a
+ceiling that hands the core 100% of a frame leaves 0% for the very layers whose
+existence justified the 10%. The number is right; that derivation of it is not.
+
+What actually distinguishes the two classes is **whether the frame may be
+dropped**. A scroll frame must not drop, so every participant is rationed and the
+core's ration is a tenth. A discrete action is one the user has already accepted a
+perceptible pause for, so it *may* cost a dropped frame — and the core's budget
+for the action it triggered is one frame's worth of work. The 10%/90% split keeps
+meaning what it meant, and 16_666_666 follows from "one dropped frame" rather than
+from "the core may consume a whole frame".
 
 The derivation is frame-based on purpose. Two alternatives were put to the user
 with their arithmetic: 10 ms (10% of the 100 ms "feels instantaneous" threshold,
@@ -380,24 +443,67 @@ would not redden: at `p99 = 16_666_667` a 1.67 ms ceiling is breached just as a
 16.67 ms one is, and the reported reason is `.budgetAbsoluteExceeded` either way.
 Each of the two mutations reddens exactly one of the two tests.
 
-### Decision 9 — The absolute check is unreachable today, and that is the design
+### Decision 9 — The product ceiling is enforced statically; the runtime reason is defense-in-depth
 
-With bulk's regression p99 budget at 5.8 ms and its ceiling at 16.67 ms, any
-latency that breaches the ceiling also breaches the regression budget — and
-`budget_exceeded` is evaluated first, so it wins. The new check therefore cannot
-fire on today's tree.
+Earlier drafts of this decision said two incompatible things: that Decision 7's
+pin makes the runtime absolute check unable to fire, *and* that the check "exists
+for the future — it fires once slow drift has pushed the regression budget past
+16.67 ms". The pin is precisely what forbids that budget from ever being
+committed, so the second sentence describes a state the first sentence makes
+unreachable. The resolution is not to weaken either claim but to name the
+enforcement point correctly, and doing so makes the guarantee **stronger** than
+the version it replaces.
 
-This is the same property the scroll-frame ceiling already has, and Decision 7's
-pin is what makes it a guarantee rather than a coincidence. The check exists for
-the future: it fires once slow drift has been ratified by a series of individually
-legitimate re-derivations and the regression budget has climbed past 16.67 ms. The
-regression gate structurally cannot catch that, because it is anchored to a moving
-median.
+**The unreachability is structural, not temporal:**
 
-Consequence for the falsifiability audit: the drill for this guarantee is a
-synthetic summary in a unit test, not a hosted run. A guarantee whose red can only
-be produced synthetically is still falsifiable; one whose red cannot be produced at
-all is not.
+```
+pin (Decision 7):      ∀ gated budget:  budget_p99 < ceiling(its class)
+observed p99 > ceiling  ⟹  observed p99 > budget_p99
+                        ⟹  budgetExceeded, which is evaluated FIRST
+⟹ the budgetAbsoluteExceeded branch has no reachable inhabitant
+```
+
+This holds for `.scrollFrame` exactly as it does for `.discreteAction`; it is not
+a property of bulk's current 2.87× margin, and no re-derivation can create the
+gap, because the re-derivation that would is the one `swift test` rejects.
+
+**So the product gate is the static test, and its red IS the ceiling firing.**
+When slow drift — ratified by a series of individually legitimate re-derivations,
+which is exactly what a median-anchored regression budget cannot see — finally
+produces a re-derived budget at or above the class ceiling,
+`testEveryGatedBudgetIsUnderItsClassCeiling` fails at `swift test`, before the
+gate steps in the same host job ever run. That is the moment the product target
+is enforced, and the message that test prints is therefore the message that has
+to carry the doctrine (Component Design spells out what it must say, because the
+current text offers two remediations this slice invalidates).
+
+The runtime half still earns its place, but for two jobs neither of which is
+"catch the drift":
+
+- **Defense-in-depth.** The `budget_absolute_exceeded` branch is what still fails
+  the build if the pin is deleted, weakened, or bypassed by editing budget
+  literals without running the suite. Unreachable *given* the pin is not the same
+  as redundant: it is the second of two independent checks on one invariant, and
+  they fail under disjoint conditions.
+- **Publication** — which belongs to the classification and the output layer, not
+  to the reason. `BenchmarkSupport` reads `mode.absoluteCeiling.p99Nanoseconds` to
+  put `budget_absolute_p99_ns` and `headroom_absolute_p99` on every gated line, so
+  each hosted run records the product number and its live margin whether or not
+  anything fires. Slice 43 built that; this slice makes it total, so the number
+  appears on all 46 lines rather than 41 — and bulk's margin becomes visible for
+  the first time instead of reading `exempt`.
+
+Consequence for the falsifiability audit, stated so the post-slice review does not
+have to re-derive it: the drills for both halves are synthetic — a unit test over a
+constructed `BenchmarkSummary` for the runtime branch (Testing Strategy rows 1–2),
+and a raised budget literal for the static pin (row 4). A guarantee whose red can
+only be produced synthetically is still falsifiable; one whose red cannot be
+produced at all is not, and row 4's red is the one that would fire in earnest.
+
+Its position in `gateFailureReason` — after `budgetExceeded`, before
+`budgetStale` — does not move. Under the pin the ordering is unobservable at
+runtime, but it is the ordering that makes the branch *correct* if the pin is ever
+gone, and inverting it would let a blown frame be reported as a stale budget.
 
 ### Decision 10 — If the re-derived bulk budget reaches the ceiling, diagnose first, then stop
 
@@ -476,7 +582,13 @@ is precisely the kind of instruction that decays into silence; `gov_p95=median`
 
 - **`gov_p95` only, no `gov_p99`.** p99 is not thin: it carries the
   `2 × budget_p95` floor as a structural backup, so a median-governed p99 is not
-  the same warning. A three-way token nobody watches is noise.
+  the same warning. One qualification, because an earlier draft over-stated this
+  as "a token nobody watches": Decision 10's halt **does** require reading the p99
+  governing term, since bulk's `budget_p99` is governed by `2 × budget_p95` today
+  and cause (a) vs cause (b) turns on which term moved. That read stays manual,
+  off the `p99[med=… max=…]` columns the sweep already prints. The narrow scope is
+  a judgement that one halt-time manual read is cheaper than a second column on
+  every line of every sweep — not a claim that the p99 term is never wanted.
 - **The tie rule is `median` when `8 × med >= 3 × max`.** The token answers "is
   this budget resting on the median term alone?", and on a tie it is.
 - **The comparison operator differs from the one beside it, on purpose.** The
@@ -489,13 +601,47 @@ is precisely the kind of instruction that decays into silence; `gov_p95=median`
 corpus `gov_p95=median` on **45 of 46** lines, with `line_query|uniform_1k` the
 lone `max` (Source Context). A reader meeting a column that is one value 98% of
 the time will suspect a broken field, so the expectation is stated here and
-quoted in the verification record. The token still earns its place: its value is
-in the **flip**, not the distribution. A scenario moving from `median` to `max`
-means a freak sample has taken over its floor, and a sweep-to-sweep diff of the
-column makes that visible at the moment it happens instead of at whatever later
-slice thinks to recompute it by hand. The alternative — printing the `max / med`
-ratio — was rejected as a second number to calibrate by eye when the question the
-thin axis asks is binary.
+quoted in the verification record. Its value is in the **flip**, not the
+distribution — and the two directions do not mean the same thing:
+
+- **`median → max`** — a freak sample has taken over that scenario's floor, so
+  `3 × max` now governs and the budget **loosened**. Noisier evidence, but the
+  loose direction is the one the runtime gate already catches loudly, as
+  `budget_stale`.
+- **`max → median`** — the freak aged out of the N=20 window, `3 × max` released,
+  and the budget dropped back to `8 × median`. **This is the signature of the one
+  risk this design says nothing else catches before CI.** Risks And Gaps records
+  that a *tightened* budget is the direction that reddens a clean tree, that every
+  Phase 1 check is arithmetic and runs no benchmark, and that the only control is
+  AC9's hosted PR-head run. A `max → median` flip is that mechanism, named, in the
+  sweep output, before the hosted run.
+
+The alternative — printing the `max / med` ratio — was rejected as a second number
+to calibrate by eye when the question the thin axis asks is binary.
+
+**A printed token is not yet a watch, and this design does not pretend otherwise.**
+The argument against hand-transcription ("precisely the kind of instruction that
+decays into silence") applies one level up to hand-*diffing*: the previous sweep
+lives in a previous slice's verification record, and comparing them requires
+someone to remember, across documents, at the next harvest. So the token is paired
+with a control that runs at the moment it matters:
+
+- **Required, zero code:** the verification block emits a **directional budget
+  diff** — every scenario whose re-derived budget differs from the committed one,
+  with the direction — and the *tightened* set is recorded as the explicit
+  watch-list for AC9's PR-head run. This is what turns the risk entry's "the only
+  control is a hosted run" into "a hosted run, with a list of what to look at".
+- **Optional, stronger, deliberately not taken here:** pin the max-governed set
+  the way this repository pins every other set (`testFrameHotPathExclusionsAreExactlyDocumented`,
+  `pinnedGateSteps`, `SELF_TEST_COVERED`/`SELF_TEST_EXEMPT`).
+  `GateFloorTests` already shells out to `derive-gate-budgets.sh` and parses its
+  output in `derivedBudgets(fromScriptOutput:)`, so extending that parse to
+  `gov_p95` and asserting the set equals a committed literal (today
+  `["line_query|uniform_1k"]`) is ~20 lines and no new machinery. It is left out
+  of this slice because the set changes at every harvest that flips a scenario,
+  which is a standing cost this slice has no evidence to size yet; the first
+  post-52 harvest is exactly the evidence. It becomes a ledger row at the
+  post-slice review, alongside the harvester's shape-2 retirement candidate.
 
 **Compatibility, verified rather than assumed.** `GateFloorTests`'
 `derivedBudgets(fromScriptOutput:)` splits each line on whitespace and scans for
@@ -558,6 +704,14 @@ should be visible when D-14 is next weighed rather than rediscovered then.
   ceiling" and of bulk being exempt. Both are false under the new model, and the
   second is the one that explains why the check sits between `budgetExceeded` and
   `budgetStale` — it must now make Decision 9's argument for both classes.
+  Decision 9's argument changed in the fourth review round, so this comment does
+  too: it explains that under the floor pin this branch is **unreachable by
+  construction** (any p99 above the ceiling is also above the budget, and
+  `budgetExceeded` is checked first), that it is therefore defense-in-depth plus
+  the publisher of the two output tokens, and that the enforcement point for the
+  product target is `testEveryGatedBudgetIsUnderItsClassCeiling`. A comment
+  claiming this branch is what catches slow drift would send the next reader
+  looking for a hosted red that cannot occur.
 
 **`Sources/ViewportBenchmarks/BenchmarkOptions.swift`**
 
@@ -611,6 +765,28 @@ with an assertion line, which reads as one convention and is two.
 - `testEveryFrameHotPathBudgetIsUnderTheAbsoluteCeiling` →
   `testEveryGatedBudgetIsUnderItsClassCeiling`, filter removed, message naming the
   class it compared against.
+- **Its failure message is rewritten, not just re-labelled — this is the load-bearing
+  half.** Decision 9 establishes that this test's red *is* the product ceiling firing,
+  so the text it prints is the only place the doctrine reaches the person who broke it.
+  The current message offers three remediations and **two of them stop existing in this
+  slice**:
+
+  > "Reclassify the mode as not frame-hot-path, raise the ceiling fraction (a
+  > conscious product decision), or accept the op is too slow for a frame."
+
+  `not frame-hot-path` is a state Decision 4 deletes along with the boolean, and
+  `raise the ceiling fraction` is exactly what `AGENTS.md` forbids — "on breach the
+  response is to **fix the code/architecture — never loosen the ceiling**". The new
+  message must carry that instruction, name the class it compared against and that
+  class's ceiling, and leave exactly one legitimate alternative: reclassifying the
+  mode into the other ceiling class, which is a product decision with its own
+  argument, not a knob. A rename that keeps this body would ship a test whose red
+  tells the reader to do the one thing the doctrine prohibits.
+- The comment block above it also states the filter and the exemption ("Bulk is
+  filtered out here exactly as `isFrameHotPath` filters it at runtime, so the two
+  agree"). It must instead state Decision 9's relationship: the runtime check and
+  this pin do not merely "agree" — this pin is what makes the runtime branch
+  unreachable, which is why the pin, not the branch, is the enforcement point.
 
 **`.github/scripts/derive-gate-budgets.sh`** (Decision 13, the one script change)
 
@@ -682,6 +858,16 @@ named only the third of them, and AC5's source scan cannot see any of them:
   absolute gate can never redden a clean tree."), not to `:427` as an earlier
   draft had it — the four lines that draft cut off are exactly the sentence about
   the filter, which is the part the new model changes most.
+
+  Its closing sentence needs more than generalizing. "So the runtime absolute gate
+  can never redden a clean tree" is true but reads as a reassurance about a gate
+  that otherwise works; Decision 9 establishes that it is the *whole* story — the
+  runtime branch is unreachable while the pin holds. The rewritten paragraph must
+  therefore say which check enforces the product target (`GateFloorTests`, at
+  `swift test` time), and what the runtime reason is for (defense-in-depth if the
+  pin goes, plus publishing the ceiling and headroom on every gate line). A reader
+  who takes the current sentence at face value will go looking for a hosted
+  `budget_absolute_exceeded` that cannot occur.
 - **`:548`** — the three-failure-reasons paragraph: "`budget_absolute_exceeded`
   means a frame-hot-path op blew the fixed 60 FPS ceiling". Generalized to both
   classes. The three reasons themselves do not change.
@@ -697,9 +883,21 @@ are outside the scan.
   watch for, and records the rule behind it — median-governed exactly when
   `max / med <= 2.67`, which is why nearly every budget is. Stating the rule
   rather than the current count keeps the paragraph true across re-derivations.
+  It also records what the two flip directions mean (Decision 13), since
+  `max → median` is the tightening signature and that is the token's real use.
+- **`AGENTS.md`, `## Gate budgets`** gains one sentence on the **pre-harvest budget
+  baseline**: a re-derivation is compared against the budgets it replaces, and the
+  tightened set is the watch-list for the hosted run. Today the harvest recipe
+  documents how to produce new budgets and says nothing about comparing them with
+  the old ones, which is why the tightening direction has been uncontrolled since
+  slice 41 introduced the window that causes it.
 - **Arc decision log** (`docs/superpowers/arcs/wrap.md`): the 2026-08-08 user call
   — Option C over the node-3 lean, plus the D-8 target — with the map pass noting
-  that slice 52 consumes no node, like slices 48 and 51.
+  that slice 52 consumes no node, like slices 48 and 51. It also records *why now*
+  beyond debt age: the wrap brief's fourth criterion binds future wrap gates to
+  this recipe and to the absolute ceiling, so a ten-slice-stale calibration base
+  and a pre-wrap boolean are both de-risking work for a named criterion, even
+  though the scoreboard moves by zero (Source Context).
 - **Debt ledger:** D-8 → `scheduled(slice-52)` then `discharged(...)`; D-9
   statement amended per Decision 11.
 
@@ -737,6 +935,22 @@ done
 ./.github/scripts/harvest-gate-corpus.sh --limit 100 --corpus "$CORPUS" --dry-run \
   > "$WORK/harvest-plan.txt" 2>&1 \
   || { echo 'harvest --dry-run failed'; cat "$WORK/harvest-plan.txt"; exit 1; }
+
+# PRE-harvest baseline for the directional diff below. It must be taken HERE: after
+# the append the old budgets are unrecoverable from the corpus, and the comparison
+# would be against themselves. `key p95 p99` per line, sorted, ready for `join`.
+budget_columns() {
+  awk '{ p95 = ""; p99 = ""
+         for (i = 1; i <= NF; i++) {
+           if ($i ~ /^budget_p95=/) { split($i, a, "="); p95 = a[2] }
+           if ($i ~ /^budget_p99=/) { split($i, a, "="); p99 = a[2] } }
+         if (p95 != "" && p99 != "") print $1, p95, p99 }' "$1" | sort
+}
+./.github/scripts/derive-gate-budgets.sh "$CORPUS" > "$WORK/sweep-old.txt" \
+  || { echo 'pre-harvest sweep failed'; exit 1; }
+budget_columns "$WORK/sweep-old.txt" > "$WORK/old-budgets.txt"
+old_n="$(wc -l < "$WORK/old-budgets.txt")"
+[ "$old_n" -eq 46 ] || { echo "pre-harvest baseline holds $old_n budgets, want 46"; exit 1; }
 
 # Append. The redirect is the point, so the script's own exit status is the check --
 # but a status nobody tests is not a check: a mid-sweep abort would leave partial
@@ -788,6 +1002,42 @@ med="$(grep -c 'gov_p95=median' "$WORK/sweep.txt")"
 echo "median-governed: $med of 46"
 grep 'gov_p95=max' "$WORK/sweep.txt" || true   # an empty max set is a legitimate outcome
 
+# DIRECTIONAL DIFF (Decision 13) -- the control for the TIGHTENING risk.
+#
+# Every other Phase 1 check is arithmetic and none of them runs the benchmark, so
+# without this the first sign of a budget that landed too close to observed latency
+# is a red hosted run with no prior. A `max -> median` flip in the token above is the
+# mechanism; this is the same fact read off the numbers, per scenario.
+#
+# NOT an assertion. A tightening is legitimate -- it is exactly what slice 41's window
+# was built to allow -- so failing here would redden the block for correct behaviour.
+# This is EVIDENCE: the tightened set is the watch-list for AC9's PR-head run and is
+# recorded in the verification document.
+budget_columns "$WORK/sweep.txt" > "$WORK/new-budgets.txt"
+new_n="$(wc -l < "$WORK/new-budgets.txt")"
+[ "$new_n" -eq 46 ] || { echo "post-harvest sweep holds $new_n budgets, want 46"; exit 1; }
+
+# `join` drops keys present in only one side, which would silently hide a scenario
+# that appeared or vanished. Both sides are pinned at 46 above and this slice changes
+# no scenario (Non-Goals), so assert the join is total rather than trusting it.
+join "$WORK/old-budgets.txt" "$WORK/new-budgets.txt" > "$WORK/budget-diff.txt"
+joined_n="$(wc -l < "$WORK/budget-diff.txt")"
+[ "$joined_n" -eq 46 ] || { echo "join matched $joined_n of 46 keys -- scenario set moved"; exit 1; }
+
+# To files, then count them -- the same shape as every other check here, and for the
+# same reason: `awk … | wc -l` would report 0 if awk failed, and "0 tightened" is the
+# outcome a reader most wants to see. Evidence that reads as good news when its own
+# producer broke is the rule-2 trap wearing an evidence label.
+awk '$2 != $4 || $3 != $5 {
+       dir = ($2 > $4 || $3 > $5) ? "TIGHTENED" : "loosened"
+       printf "%-10s %-46s p95 %s->%s  p99 %s->%s\n", dir, $1, $2, $4, $3, $5 }' \
+    "$WORK/budget-diff.txt" > "$WORK/moved.txt" || { echo 'movement scan failed'; exit 1; }
+awk '$2 > $4 || $3 > $5 { print $1 }' "$WORK/budget-diff.txt" > "$WORK/tightened.txt" \
+  || { echo 'tightening scan failed'; exit 1; }
+echo "--- budget movement (old -> new): $(wc -l < "$WORK/moved.txt") of 46 moved, \
+$(wc -l < "$WORK/tightened.txt") tightened ---"
+cat "$WORK/moved.txt"
+
 # The arbiter of Phase 1: budgets must reproduce from the committed corpus.
 swift test --filter GateFloorTests || exit 1
 
@@ -803,8 +1053,26 @@ for mode in "" --realistic-provider --variable-height --variable-height-mutation
             --point-query --point-geometry-query; do
   # Without the explicit exit the loop swallows a failing gate and the whole
   # block becomes a check that cannot fail (rule 2).
+  #
+  # $mode is UNQUOTED on purpose and must stay that way: the first element is the
+  # empty string (the default pipeline mode takes no flag), and `"$mode"` would pass
+  # a literal empty argument instead of passing none. Under `set -u` the variable is
+  # always assigned, so the usual unquoted-expansion hazard does not apply here --
+  # every element is a single fixed token with no whitespace or globs. Commented for
+  # the same reason Decision 13 comments its `>=`: the next reader's instinct is to
+  # "fix" the quoting, and the fix is a silent behaviour change.
   swift run -c release ViewportBenchmarks -- $mode --gate >> "$WORK/local-gate.txt" || exit 1
 done
+
+# AC5's second half, which had no mechanical check until the fourth review round: every
+# gated summary must print a NUMERIC ceiling and a headroom beside it. The scans in AC5
+# prove the old tokens are gone; these prove the new ones are present on all 46 lines.
+# Counts, not bare greps -- `grep` exits 1 on no match, so the failing case would read
+# as the desired one (rule 2).
+n="$(grep -c 'budget_absolute_p99_ns=[0-9]' "$WORK/local-gate.txt")"
+[ "$n" -eq 46 ] || { echo "numeric budget_absolute_p99_ns on $n lines, want 46"; exit 1; }
+n="$(grep -c 'headroom_absolute_p99=' "$WORK/local-gate.txt")"
+[ "$n" -eq 46 ] || { echo "headroom_absolute_p99 on $n lines, want 46"; exit 1; }
 
 # The local half of AC9's three-way comparison. Assert the COUNT before comparing:
 # an empty checksum set would diff clean against anything.
@@ -831,6 +1099,16 @@ keys="$(cut -f1 "$WORK/local.txt" | sort -u | wc -l)"
 # tuples across all twelve gated modes (realistic_provider included) -- its Section 8
 # *table* holds 45, the document does not. Extracted with the same function, so a
 # difference is a real difference and not a parsing artefact.
+#
+# Why 46 and not the document's raw line count: it holds 54 `checksum=` lines, and
+# `sort -u` inside extract_checksums collapses them to 46 because every repetition
+# AGREES. That collapse is not a weakening -- it is what makes the count assertion
+# meaningful. A document that recorded two DIFFERENT checksums for one (mode,scenario)
+# -- which any drill log legitimately would, since a drill records mutated output
+# verbatim -- would yield 47+ tuples and fail the line below. So the count is asserted
+# BEFORE the diff, and it is what qualifies a document to serve as an anchor at all.
+# Anyone reusing this pattern against a different verification record must re-check it
+# there rather than assume; this slice's own record will carry seven drill reds.
 extract_checksums docs/superpowers/verification/2026-07-18-absolute-product-budget.md \
   > "$WORK/anchor.txt"
 [ "$(wc -l < "$WORK/anchor.txt")" -eq 46 ] || { echo 'anchor is not 46 tuples'; exit 1; }
@@ -907,13 +1185,27 @@ Section 5, with the anchor widened from a table lookup to a mechanical read.
    at the next re-derivation (Decision 11). The pre-harvest measurement is 45 of
    46, so a post-harvest result anywhere near that is the expected outcome and not
    a finding; a sharp move in either direction is.
-4. **AC4 — Budgets reproduce.** All 46 gated scenarios reproduce from the appended
-   corpus; `swift test` green.
+4. **AC4 — Budgets reproduce, and their movement is recorded with its direction.**
+   All 46 gated scenarios reproduce from the appended corpus; `swift test` green.
+
+   **And** the verification record carries the directional budget diff against the
+   **pre-harvest** baseline — every scenario whose budget moved, labelled tightened
+   or loosened, with the tightened set called out as the watch-list for AC9's
+   PR-head run. The baseline must be captured before the append (afterwards the old
+   budgets are unrecoverable from the corpus). This is evidence, never an
+   assertion: a tightening is legitimate behaviour, and the criterion is that the
+   diff was taken and recorded, not that it came out empty. It is the only
+   pre-hosted control on the tightening risk.
 5. **AC5 — Total classification.** Two precise scans over
    `Sources Tests AGENTS.md` find nothing:
    `rg -n 'isFrameHotPath|absoluteP99Nanoseconds'` and
-   `rg -n 'budget_absolute_p99_ns=exempt'`. Every gated summary prints a numeric
-   `budget_absolute_p99_ns` alongside a `headroom_absolute_p99`.
+   `rg -n 'budget_absolute_p99_ns=exempt'`. (`.github/**` was checked and carries
+   neither identifier nor the token, so the three-path scope is complete.)
+
+   Every gated summary prints a numeric `budget_absolute_p99_ns` alongside a
+   `headroom_absolute_p99` — asserted, not asserted-by-eye: two count checks over
+   the 46 local gate lines, since the scans above can only prove the *old* tokens
+   are gone and nothing else proved the new ones arrived.
 
    Two scoping decisions, both load-bearing:
 
@@ -935,8 +1227,19 @@ Section 5, with the anchor widened from a table lookup to a mechanical read.
 6. **AC6 — Bulk ceiling pinned.** `.discreteAction` equals `frameNanoseconds`
    (16_666_666) and the set of gateable modes in that class is exactly
    `{bulk_structural_mutation}`, both asserted.
-7. **AC7 — Full-coverage floor pin.** `testEveryGatedBudgetIsUnderItsClassCeiling`
-   iterates all 46 budgets with no filter, and each is under its class ceiling.
+7. **AC7 — Full-coverage floor pin, carrying the doctrine.**
+   `testEveryGatedBudgetIsUnderItsClassCeiling` iterates all 46 budgets with no
+   filter, and each is under its class ceiling.
+
+   **And** its failure message is rewritten, not merely re-labelled. Decision 9
+   makes this test the enforcement point for the product target, so its text is
+   where the doctrine reaches whoever tripped it. The message must name the class
+   and its ceiling and instruct **fix the code/architecture — never loosen the
+   ceiling**. Neither remediation the current message offers may survive:
+   "reclassify the mode as not frame-hot-path" names a state Decision 4 deletes,
+   and "raise the ceiling fraction" is the one response `AGENTS.md` forbids. A pass
+   here with the old body would ship a product gate whose red advises the
+   prohibited fix.
 8. **AC8 — Seven recorded reds.** Each drill in Testing Strategy is executed and
    its failure output recorded verbatim, then reverted. The eighth guarantee —
    AC2's window check — needs no drill: its red is the pre-work state, recorded
@@ -980,24 +1283,37 @@ Section 5, with the anchor widened from a table lookup to a mechanical read.
   mode, so scenarios this slice never targeted will move. The opposite outcome — no
   budget changes at all — is also legitimate (`round_up_2sf` hysteresis) and is
   recorded as a finding rather than treated as an empty slice.
-- **The dangerous direction is a budget that TIGHTENS, and nothing in Phase 1
-  catches it.** A loosened budget is harmless: the runtime gate compares against
-  this run's latency, so a budget with too much headroom fails loudly as
-  `budget_stale`. A *tightened* budget is the one that reddens a clean tree — the
-  window is doing exactly what slice 41 built it to do, an old freak sample ages
-  out, and the re-derived budget lands closer to the observed latency than the
-  code can reliably clear on a noisy runner. Every Phase 1 check is arithmetic
-  (does the literal reproduce from the corpus?) and none of them runs the
-  benchmark, so the **only** control on this direction is AC9's hosted PR-head
-  run. That makes a green PR-head run a load-bearing check rather than a
-  formality, and a `budget_exceeded` there after a clean local run is this risk
-  materializing — not an engine regression.
+- **The dangerous direction is a budget that TIGHTENS.** A loosened budget is
+  harmless: the runtime gate compares against this run's latency, so a budget with
+  too much headroom fails loudly as `budget_stale`. A *tightened* budget is the one
+  that reddens a clean tree — the window is doing exactly what slice 41 built it to
+  do, an old freak sample ages out, and the re-derived budget lands closer to the
+  observed latency than the code can reliably clear on a noisy runner. Every Phase 1
+  check is arithmetic (does the literal reproduce from the corpus?) and none of them
+  runs the benchmark, so **no Phase 1 check can fail on this**.
+
+  The fourth review round added the one control that is available before CI, and it
+  costs no code: the verification block takes a **pre-harvest budget baseline** and
+  prints the directional diff, so the tightened set is known by name at the moment
+  the literals are updated. `gov_p95` is the same fact in the sweep — a
+  `max → median` flip *is* a tightening, mechanically (the `3 × max` term released
+  and the budget fell back to `8 × median`). Neither is an assertion: tightening is
+  legitimate behaviour, not a defect.
+
+  What they change is that AC9's hosted PR-head run — still the only *empirical*
+  control — now runs against a watch-list rather than blind. A green PR-head run
+  stays load-bearing rather than a formality, and a `budget_exceeded` there after a
+  clean local run is this risk materializing, not an engine regression; the diff
+  says in advance which scenarios could produce it.
 - **`realistic_provider`'s statistical base changes in kind.** Its window goes from
   128 shape-2 rows to roughly 20 shape-1 rows. Its budget will move for that reason
   alone, and that movement says nothing about the engine.
 - **The harvester's provenance gap (D-7) is untouched.** This slice's two `failure`
   runs are cleared by a hand check recorded in the verification document. That check
   is evidence, not a control: the next harvest will not repeat it automatically.
-- **The new absolute check cannot fire on today's tree** (Decision 9). Its
-  falsifiability rests on synthetic unit tests. This is stated here so the
-  post-slice review's audit does not have to rediscover it.
+- **The runtime absolute check cannot fire at all while the floor pin holds**
+  (Decision 9) — structurally, not just on today's tree. Its falsifiability rests on
+  synthetic unit tests, and the product target is really enforced by
+  `testEveryGatedBudgetIsUnderItsClassCeiling` at `swift test` time. Stated here so
+  the post-slice review's falsifiability audit does not have to rediscover it, and so
+  nobody later "fixes" the unreachable branch by removing the pin that guarantees it.
