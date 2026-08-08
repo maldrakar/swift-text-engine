@@ -769,4 +769,67 @@ level from the downloaded log, not inferred from job conclusions:
   `blocking_failures=0 exit=0`.
 
 The post-merge `push` run and the post-slice review remain outstanding per
-§6a.
+§6a. §8 below discharges the first of those two.
+
+---
+
+## 8. Post-merge `push` run — AC8's second half
+
+PR [#120](https://github.com/maldrakar/swift-text-engine/pull/120) merged as
+`bd5e042` ("Merge pull request #120 from
+maldrakar/slice-51-cross-target-script-hardening"). This section supersedes
+§6a's first bullet: the proof this repo actually anchors on — merged code, not
+PR-head code — now exists.
+
+- **Push run**:
+  [`31214035498`](https://github.com/maldrakar/swift-text-engine/actions/runs/31214035498)
+  (`event=push`, head `bd5e0423a0481ceb90b0286d3a83835079cb62a1`), conclusion
+  **success**. All three jobs succeeded: `Host tests and benchmark gate`,
+  `iOS cross-target compile`, `WASM cross-target compile`.
+
+Read from the downloaded log at **step** level, never from job conclusions
+(this repo's standing lesson: a green job can hide a dead
+`continue-on-error` step):
+
+- **It took the heavy path, not the docs-only skip.** The one verdict line
+  each job acted on is `mode=docs_only_pr event=push result=not_pull_request
+  docs_only_pr=false`. Worth stating explicitly because a naive grep for
+  `docs_only_pr` returns 12 hits and one of them reads
+  `result=infrastructure_failure` — those are GitHub **echoing the step's own
+  inline script source** (ANSI `^[[36;1m` prefix), not emitted output. The
+  observables below are the independent confirmation that the work really ran.
+- `swift test` on hosted Linux: **361 tests, 0 failures**, matching §1a, §5d,
+  and the PR-head runs.
+- **46 `gate=pass`, 0 `gate=fail`**, across all twelve gated modes:
+  `pipeline`, `variable_height`, `variable_height_mutation`,
+  `structural_mutation`, `bulk_structural_mutation`, `line_query`,
+  `line_geometry_query`, `column_query`, `column_geometry_query`,
+  `point_query`, `point_geometry_query`, `realistic_provider`.
+- **AC8's decisive line**: exactly one
+  `cross_target_sdk_install_seconds=5 attempts=1` in the whole run — one
+  install, first attempt, no retry. This is what proves the Task 3 ladder
+  rewrite and the Task 4 `WASM_BUNDLE_STATE` change left the happy path
+  untouched, now on merged code.
+- Four WASM blocking lines `result=pass reason=none blocking=true` (two kinds
+  × two packages) and four iOS blocking lines, same shape.
+- Both cross-target jobs `blocking_failures=0 exit=0`.
+- Zero occurrences of `result=fail`, `gate=fail`, or `self_test=fail` anywhere
+  in the log.
+- `ScriptSelfTestTests.testEveryScriptSelfTestPasses` and
+  `testTableCoversEveryScriptWithASelfTest` both **passed on merged code** —
+  the first post-merge run in which any script `--self-test` assertion was
+  capable of failing the build, including the §7 declaration-form pin.
+
+As noted in §6, the four scripts' own `self_test=pass` lines do not appear in
+the hosted log: `ScriptSelfTestTests` captures each script's stdout through a
+pipe and asserts on it rather than echoing it. The passing test-suite lines
+are the evidence.
+
+### 8a. Still outstanding
+
+- The **post-slice review** has not been written. It carries the
+  `choosing-next-slice` output contract and owns three calls this record
+  deliberately did not make: flipping ledger rows D-1/D-2/D-3/D-6 from
+  `scheduled(slice-51)` to `discharged(<links>)`, deciding whether the D-2
+  conventions need a **fifth** rule for mutation-drill ordering (§2d), and
+  recommending the next slice.
