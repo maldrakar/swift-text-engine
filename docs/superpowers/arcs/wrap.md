@@ -102,6 +102,18 @@ order) / fork V. Lean is node 3 — **but** the D-1/D-2 escalation (open P2s now
 completed slices old) forces a user schedule-or-defer product call this review, so
 the review routes the A/B/C choice to the user rather than auto-selecting node 3.
 
+Map pass 2026-08-08 (Slice 51 review): Slice 51 was the **debt route** and
+consumed **no map node** — the same shape as the process slice 48. Nothing it
+shipped touched wrap feasibility, so nodes 3–9 and fork V stand unrevised and
+un-relearned; there is no correction to absorb this pass. It did discharge both
+escalated P2s (D-1, D-2) plus D-3/D-6, so the escalation that routed the Slice 50
+review's recommendation to the user is now cleared by *scheduling*, not by a
+fourth defer. Next step is **topological** (node 3 = y→row, the next criterion-3
+analog behind node 2); first genuine fork remains node 8 (host order) / fork V.
+Lean is node 3, and this review **selects** it rather than routing — the aging
+defers D-8/D-9 are surfaced for a re-affirmation, but neither is a fork blocking
+the selection.
+
 ## Decision log
 
 - 2026-07-20 — User chose the soft-wrap arc over `pointOf(line:column:)`
@@ -176,3 +188,22 @@ the review routes the A/B/C choice to the user rather than auto-selecting node 3
   wrap criterion** and consumes **no map node** (like the process slice 48);
   **node 3 (y→row) remains the lean** for the next feature slice. Next
   inner-loop step: brainstorm slice 51.
+- 2026-08-08 — **Slice 51 merged** (PR #120, merge `bd5e042`; post-merge push run
+  `31214035498` green at step level; post-merge proof PR #121). Debt route
+  complete: **D-1, D-2, D-3, D-6 all discharged** — both slice-47 escalated P2s
+  closed by scheduling. Scoreboard unchanged **by design** (no criterion
+  advanced, no map node consumed). Enforcement multiplier worth recording: all
+  four `.github/scripts` self-tests now run under `swift test`, so
+  `detect-docs-only-pr.sh` — the trusted gate deciding whether heavy CI runs —
+  has build-failing assertions for the first time. Two in-slice falsifiability
+  corrections: the whole-branch review caught a fail-open `mktemp -d` that would
+  have written to `/` in the root-run CI container while reporting
+  `self_test=pass`; and the post-merge conformance pass found the D-6 pin's own
+  detector (`defined_functions`) blind to five of six declaration forms, fixed
+  test-first in `2c71676`. New/changed debt: **D-16** (P3, accepted-risk —
+  string-literal residual in the coverage check), **D-15** statement corrected
+  (its recorded trigger cannot fire under the sibling scripts' `set -e`).
+  Slice 51's review **selects Slice 52 = node 3 (y→row wrap analog)** as the
+  topological next step, with D-13 as a fold-in candidate; **D-8** is surfaced
+  for a user re-affirm-or-schedule (it needs a product target before it can ever
+  be scheduled), and D-9's self-healing prediction is now testable and unchecked.
