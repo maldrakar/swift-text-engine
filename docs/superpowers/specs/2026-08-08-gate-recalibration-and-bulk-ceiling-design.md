@@ -49,6 +49,13 @@ diagnosed branches, the tightening-direction risk, Decision 8's correction (the
 old test's *body* changes, not just its comment), drill 4's `--filter` and its
 expected collateral red, and the non-gateable modes' classification.
 
+A second review round proposed making Goal 3 mechanical rather than one-off, and
+it is adopted as **Decision 13** (`gov_p95` in the derive output) with Decision 12
+amended to name the exception. Its compatibility claims were verified against the
+tree; one estimate was optimistic in a way that matters and is recorded there —
+the script's `--self-test` covers `window_run_ids` and *nothing else*, so the
+budget arithmetic has no standing check today and this token's drill is the first.
+
 One correction to the review's reasoning, which does not change its conclusion:
 `realistic_provider` **did** print `checksum=` before slice 45 — slice 44's
 document records `756321289736960`. What that document says is that the row is
@@ -142,13 +149,17 @@ this as an open P2 since slice 43, deferred three times for want of a target.
 
 In scope, in this order:
 
-1. **Phase 1 (data).** Harvest every hosted run newer than the corpus maximum
+1. **Phase 0 (tooling).** Add the `gov_p95` token to `derive-gate-budgets.sh` and
+   its two self-test assertions (Decision 13). It goes first so the Phase 1 sweep
+   already carries the token and no second sweep is needed to produce the
+   evidence AC3 asks for.
+2. **Phase 1 (data).** Harvest every hosted run newer than the corpus maximum
    into the corpus; sweep-re-derive **all** modes; update every budget literal the
    recipe now produces differently; record which p95 budgets are median-governed.
-2. **Phase 2 (policy).** Replace the exemption with a total two-class absolute
+3. **Phase 2 (policy).** Replace the exemption with a total two-class absolute
    ceiling; give `bulk_structural_mutation` a ceiling of one whole 60 FPS frame;
    generalize the four pins that depend on the old boolean.
-3. **Paper trail.** Spec, plan, verification record, arc decision-log entry,
+4. **Paper trail.** Spec, plan, verification record, arc decision-log entry,
    ledger status changes.
 
 Out of scope — see Non-Goals.
@@ -159,8 +170,10 @@ Out of scope — see Non-Goals.
    slices, and reproduces from the committed corpus.
 2. The N=20 window contains no pre-slice-45 run, so D-9's shape-transition half is
    closed by fact rather than by prediction.
-3. The p95 thin axis is re-observed **by name**: the verification record lists
-   which scenarios' p95 budgets are governed by the median term alone.
+3. The p95 thin axis becomes **mechanically observable**: `derive-gate-budgets.sh`
+   prints `gov_p95=median|max` beside every budget, so which scenarios rest on the
+   median term alone is answered by the tool at every future re-derivation, not
+   transcribed by hand once. This slice's verification record quotes that output.
 4. Every gated mode carries an absolute product ceiling; none is exempt.
 5. `bulk_structural_mutation`'s ceiling is one 60 FPS frame, fixed and derived
    from the frame constant, never corpus-derived.
@@ -190,13 +203,17 @@ Out of scope — see Non-Goals.
 
 ## Decisions
 
-### Decision 1 — Two phases, data strictly before policy
+### Decision 1 — Three phases: tooling, then data, then policy
 
 Phase 1 (harvest + re-derive) lands before Phase 2 (the ceiling). The reason is
 mechanical rather than stylistic: Phase 2 adds a test asserting that every gated
 budget sits under its class ceiling. Written against stale budgets, that pin
 would have to be repaired inside the same slice the moment the fresh numbers
 land. Written against fresh budgets, it is correct on arrival.
+
+Phase 0 (the `gov_p95` token) precedes both for a weaker but real reason: the
+sweep is the evidence AC3 records, and a sweep run before the token exists would
+have to be run again afterwards. Nothing depends on it beyond that.
 
 ### Decision 2 — Harvest everything newer than the corpus maximum, including the two `failure` runs
 
@@ -385,12 +402,66 @@ named list of scenarios currently governed by the median term.
 This follows the D-15 precedent from slice 51: a ledger row whose statement is
 corrected by evidence is amended in place, never silently re-scoped.
 
-### Decision 12 — Nothing else moves
+### Decision 12 — Nothing else moves, with one named exception
 
-No engine source, no provider source, no workflow file, no script. AC9's
+No engine source, no provider source, no workflow file, and **no script except
+the one reporting token in Decision 13**. That exception is stated here rather
+than left to be discovered in the diff: a decision quietly contradicted by a later
+one is worse than either choice on its own. Everything else holds — AC9's
 three-way checksum diff must come out empty and the three `pipeline` values must
 match slice 51's; if either fails, something moved that this design did not
 authorize.
+
+### Decision 13 — `gov_p95` makes the thin-axis observation mechanical
+
+`derive-gate-budgets.sh`'s per-scenario line gains one token,
+`gov_p95=median|max`, naming which term produced `budget_p95`. Goal 3 then stops
+being a one-off transcription and becomes a property of every future
+re-derivation — the same move slice 44 made when it turned "derived, never
+hand-typed" from a per-slice discipline into a standing test.
+
+**Why it is worth breaking Decision 12 for.** D-9's surviving half is "when the
+windowed `3 × max` term relaxes, a p95 budget rests on the `8 × median` backup
+term alone — the thin axis to watch at every re-derivation." Watching it by hand
+is precisely the kind of instruction that decays into silence; `gov_p95=median`
+*is* the watch, printed beside the budget it describes.
+
+**Scope, deliberately narrow:**
+
+- **`gov_p95` only, no `gov_p99`.** p99 is not thin: it carries the
+  `2 × budget_p95` floor as a structural backup, so a median-governed p99 is not
+  the same warning. A three-way token nobody watches is noise.
+- **The tie rule is `median` when `8 × med >= 3 × max`.** The token answers "is
+  this budget resting on the median term alone?", and on a tie it is.
+- **The comparison operator differs from the one beside it, on purpose.** The
+  value at `:143` is chosen with `8 * m95 > 3 * x95`, where a tie is harmless
+  because both terms yield the same number. For the token a tie is meaningful, so
+  it reads `>=`. That asymmetry is commented in the script, or the next reader
+  harmonizes the operators and silently changes the rule.
+
+**Compatibility, verified rather than assumed.** `GateFloorTests`'
+`derivedBudgets(fromScriptOutput:)` splits each line on whitespace and scans for
+the `budget_p95=` / `budget_p99=` prefixes; its own comment records that a
+*missing* token becomes a loud missing-key failure. An *additional* token passes
+through untouched, and `testEveryCommittedBudgetReproducesFromCorpus` compares
+parsed budgets rather than raw lines.
+
+**The surface it lands on is emptier than it looks.** `run_self_test` in that
+script contains exactly two assertions, both on `window_run_ids` fixtures — the
+budget arithmetic has **no** self-test coverage at all today. So this token's
+drill is also the first standing check on that arithmetic. The cost stays small
+because the fixture machinery already exists: `run_self_test` writes a corpus TSV
+to a `mktemp` file under a cleanup trap, and the addition is a second scenario
+whose rows carry an outlier (so `3 × max` beats `8 × median`) plus two
+assertions, one per branch. Since slice 51 put all four script self-tests under
+`swift test`, the guarantee is build-failing from its first day at no extra
+wiring cost.
+
+**Interaction with D-14, recorded rather than hidden.** This adds arithmetic to a
+script whose coverage/exemption classification is *not* pinned — D-14 exactly.
+This slice exercises what it adds, so nothing is silent today, but the next
+addition to that script still would be. That is an argument for D-14, and it
+should be visible when D-14 is next weighed rather than rediscovered then.
 
 ## Component Design
 
@@ -466,13 +537,25 @@ with an assertion line, which reads as one convention and is two.
   `testEveryGatedBudgetIsUnderItsClassCeiling`, filter removed, message naming the
   class it compared against.
 
+**`.github/scripts/derive-gate-budgets.sh`** (Decision 13, the one script change)
+
+- One `gov95 = (8 * m95 >= 3 * x95) ? "median" : "max"` assignment beside the
+  `b95` computation, and one `gov_p95=%s` field in the `printf` format.
+- `run_self_test` gains a second fixture scenario carrying an outlier — so
+  `3 × max` beats `8 × median` there — and two assertions, one per branch. It
+  re-invokes the script's own derivation path on the existing `mktemp` fixture; a
+  crash yields an empty token and the assertion fails, so the check stays
+  status-sensitive.
+- Nothing else in the script moves: no change to the recipe, the window, the
+  `--window-run-ids` seam, or the existing fixtures.
+
 **`docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv`**
 
 - Appended only. Existing rows are never edited, reordered, or de-duplicated.
 
 ## Testing Strategy
 
-Six drills, one per guarantee this slice adds or changes. Each is executed, its
+Seven drills, one per guarantee this slice adds or changes. Each is executed, its
 red output recorded verbatim in the verification document, and then reverted.
 
 | Guarantee | Mutation | Test that must redden |
@@ -483,6 +566,7 @@ red output recorded verbatim in the verification document, and then reverted.
 | Every budget is under its class ceiling | Raise `1m_lines_batch_4096`'s p99 budget above `16_666_666` | `testEveryGatedBudgetIsUnderItsClassCeiling`, recorded under `--filter`; `testEveryCommittedBudgetReproducesFromCorpus` reddens too and is recorded as expected collateral |
 | Ceiling values are pinned to the frame math | Replace a derived value with a differing bare literal | Frame-math pin |
 | `exempt` is gone from the output | Restore the `else` branch in `BenchmarkSupport` | Output-line test |
+| `gov_p95` names the right term | Flip the token's `>=` to `<` | `derive-gate-budgets.sh --self-test` reports `self_test=fail` on the median-governed fixture, and `ScriptSelfTestTests` carries it into a red `swift test` |
 
 Rows 1 and 2 are the bracket from Decision 8, and they are deliberately *not*
 interchangeable: each mutation reddens exactly one of the two tests, and the
@@ -529,8 +613,10 @@ identifiers, since AC5 scans `AGENTS.md` for them. Describing the history belong
 in this spec and in the verification record, both of which live under `docs/` and
 are outside the scan.
 
-- **`AGENTS.md`, `## Gate budgets`** also gains one sentence on why a harvest is
-  the moment the p95 thin axis should be re-read — the observation Goal 3 produces.
+- **`AGENTS.md`, `## Gate budgets`** also documents the `gov_p95` token where it
+  already explains that p95 "carries only the median term as backup, so it is the
+  thin axis to watch": the sentence now says what to read rather than only what to
+  watch for.
 - **Arc decision log** (`docs/superpowers/arcs/wrap.md`): the 2026-08-08 user call
   — Option C over the node-3 lean, plus the D-8 target — with the map pass noting
   that slice 52 consumes no node, like slices 48 and 51.
@@ -655,9 +741,11 @@ the three-way diff proves only internal consistency. This is the pattern slice
    `29205750443 8`, `29206089605 8`, `29195160122 8`, … ). It is red today and the
    slice's job is to make it green — the one guarantee here whose red needs no
    mutation drill, because the pre-work state is the red.
-3. **AC3 — Thin axis observed by name.** The verification record lists every
-   scenario whose re-derived p95 budget is governed by the `8 × median` term alone,
-   derived from the sweep output without changing the script.
+3. **AC3 — Thin axis observed mechanically.** `derive-gate-budgets.sh` emits
+   `gov_p95=median|max` on every scenario line, its tie rule (`median` at
+   `8 × med == 3 × max`) is asserted by the script's own `--self-test`, and that
+   self-test fails `swift test` when broken. The verification record quotes the
+   swept output and names the scenarios currently on the median term.
 4. **AC4 — Budgets reproduce.** All 46 gated scenarios reproduce from the appended
    corpus; `swift test` green.
 5. **AC5 — Total classification.** Two precise scans over
@@ -688,8 +776,10 @@ the three-way diff proves only internal consistency. This is the pattern slice
    `{bulk_structural_mutation}`, both asserted.
 7. **AC7 — Full-coverage floor pin.** `testEveryGatedBudgetIsUnderItsClassCeiling`
    iterates all 46 budgets with no filter, and each is under its class ceiling.
-8. **AC8 — Six recorded reds.** Each drill in Testing Strategy is executed and its
-   failure output recorded verbatim, then reverted.
+8. **AC8 — Seven recorded reds.** Each drill in Testing Strategy is executed and
+   its failure output recorded verbatim, then reverted. The eighth guarantee —
+   AC2's window check — needs no drill: its red is the pre-work state, recorded
+   before the harvest rather than manufactured after it.
 9. **AC9 — Hosted proof, step level, self-contained checksums.** PR-head run and
    post-merge push run both green at step level: twelve blocking gate steps, 46
    scenario lines reporting `gate=pass`, `swift test` green, and the five bulk
