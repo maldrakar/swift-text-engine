@@ -81,9 +81,10 @@ private func corpusExtremes(from text: String, windowSize: Int) -> [String: Corp
 }
 
 // Parse derive-gate-budgets.sh stdout into key -> (p95, p99). Each scenario line is
-// `<key>  n=... p95[...] p99[...] budget_p95=<int> budget_p99=<int> margin...` (the key is
-// %-46s-padded, so field 0 is the key with no embedded spaces, and the two budgets are
-// whitespace-delimited `budget_p9x=<int>` tokens). A line missing either token is skipped:
+// `<key>  n=... p95[...] p99[...] budget_p95=<int> budget_p99=<int> gov_p95=<median|max>
+// margin...` (the key is %-46s-padded, so field 0 is the key with no embedded spaces, and
+// the two budgets are whitespace-delimited `budget_p9x=<int>` tokens). A line missing
+// either budget token is skipped:
 // combined with the "every gated key must be present" assertion in the test, that turns any
 // rename/removal of those output tokens into a loud missing-key failure, not a silent pass --
 // so the test transitively pins the derive script's output shape as well as its arithmetic.

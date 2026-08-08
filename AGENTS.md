@@ -416,9 +416,9 @@ The regression band above asks "slower than recent code?"; the absolute ceiling 
 frame. Both are **FIXED**: never recalibrated, never corpus-derived. On breach the gate
 reports `reason=budget_absolute_exceeded`, and the response is to **fix the
 code/architecture — never loosen the ceiling** (contrast `budget_stale`, which says
-re-derive the budget). It is checked against **p99 only** (within one mode a passing p99
-implies a passing p95, since both are held to that mode's single ceiling — the
-implication does not cross modes now that two ceilings exist).
+re-derive the budget). It is checked against **p99 only** (within one mode, p95 <= p99
+within any sample, so a passing p99 implies a passing p95 — the implication does not
+cross modes now that two ceilings exist).
 
 It applies to **every** gated mode — there is no exemption. Each classifies itself
 through the exhaustive `BenchmarkMode.absoluteCeiling` switch into one of two classes:
@@ -478,7 +478,10 @@ reddens a clean tree: an old freak sample aged out of the window (exactly what t
 window is for), and the new budget may sit closer to observed latency than a noisy
 runner can reliably clear. Nothing in the arithmetic catches that — no re-derivation
 runs the benchmark — so the tightened set is the watch-list for the hosted PR-head
-run, and the baseline is unrecoverable once the corpus is appended.
+run. Taking the baseline first is the cheap path to it; if you forget, it is still
+recoverable from git rather than lost: `git show <pre-harvest-ref>:<corpus-path> >
+old.tsv`, then `derive-gate-budgets.sh old.tsv` reconstructs it from the corpus as it
+stood before the append.
 
 **`hosted` in the recipe is a trailing window, not full corpus history.** It
 means the most-recent **N=20 distinct runs, keyed on the integer run id** —
@@ -572,7 +575,7 @@ cross-check the *selection*). A red here after a harvest is `budget_stale` — r
 that mode and re-commit; it is not an engine regression. `round_up_2sf` gives natural
 hysteresis, so most small median/max moves round to the same budget and do not trip it.
 
-**When an optimization trips the ceiling, raise the budget — never the
+**When an optimization trips the headroom ceiling, raise the budget — never the
 ceiling.** A genuine speed-up (Slices 29/30 cut `lineAt` from O(log^2 N) to
 O(log N)) or faster hardware will push headroom past the ceiling and turn a
 gate red on a clean tree. That is the ceiling working as designed. Re-derive
