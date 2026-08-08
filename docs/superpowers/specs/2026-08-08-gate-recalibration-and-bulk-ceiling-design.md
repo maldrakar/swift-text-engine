@@ -1,0 +1,542 @@
+# Gate Recalibration + Bulk Absolute Ceiling (D-9 / D-8) Design
+
+- **Slice:** 52 — calibration route (no wrap-arc criterion, no map node)
+- **Arc:** [`docs/superpowers/arcs/wrap.md`](../arcs/wrap.md) (selection recorded
+  in its decision log, 2026-08-08)
+- **Ledger:** [`docs/superpowers/debt-ledger.md`](../debt-ledger.md) — D-8 moves
+  `deferred(user, 2026-07-22)` → `scheduled(slice-52)`; D-9 is re-observed and
+  its statement amended
+
+## Status
+
+Proposed. Brainstormed 2026-08-08; this document is the ratified design.
+
+Four questions were decided with the user during selection and brainstorming and
+are recorded as Decisions below: the slice boundary (recalibration **and** D-8,
+not one or the other), the harvest breadth (everything newer than the corpus
+max), the product target for D-8 (one whole 60 FPS frame), and the ceiling model
+(a total two-class classification rather than a second boolean or an optional).
+
+The next step after sign-off is the TDD implementation plan (`writing-plans`),
+written under the four plan-assertion conventions `AGENTS.md` gained in slice 51.
+
+## Source Context
+
+Slice 51 closed the debt route and its post-slice review ran the outer-loop
+checklist. That review's lean was Option A (wrap map node 3, y→row); the user
+chose **Option C** instead — the calibration route — after live evidence gathered
+at selection time showed the calibration base was ten slices stale. The same call
+gave D-8 the product target it had been waiting on since slice 43, which is what
+converts it from "cannot be scheduled" into ordinary work.
+
+Six facts measured while exploring, all load-bearing:
+
+- **The corpus has not been appended since 2026-07-18** (commit `9ce6975`,
+  "harvest slice 40 post-merge run and re-derive budgets under the window"). It
+  carries 48 distinct run ids; its maximum is `29606487287`.
+- **The N=20 window therefore contains zero post-slice-45 runs.** Slice 45's own
+  runs are `29692848870` (PR head) and `29694705807` (post-merge push), both
+  above the corpus maximum. Every one of the twelve blocking budgets rests on
+  pre-slice-45 evidence.
+- **Nothing is red.** `derive-gate-budgets.sh` over the committed corpus
+  reproduces all **46** gated scenarios byte-identically, so
+  `testEveryCommittedBudgetReproducesFromCorpus` passes. This is staleness, not
+  breakage — the distinction matters, because it means the slice is refreshing
+  evidence, not repairing a failure.
+- **62 hosted runs are newer than the corpus maximum** (2026-07-17 … 2026-08-08),
+  all inside log retention. Roughly half are docs-only PRs, which skip the heavy
+  path and print no `p95_ns=` lines at all — the corpus self-filters them, since
+  a run with no sample lines contributes no rows.
+- **Two of the 62 carry a run-level `failure`** (`29701333581`, `29701547123`,
+  both from slice 46's WASM promotion). Both were checked job-by-job: `Host tests
+  and benchmark gate` is **`success`** in each; only `WASM cross-target
+  observation` failed. Their samples are legitimate measurements taken on a
+  hosted runner with every gate passing.
+- **The binding bulk scenario has structural margin.** From the committed corpus:
+
+  ```
+  bulk_structural_mutation|1m_lines_batch_4096  n=20
+    p95[med=362205 max=514326]  p99[med=399530 max=550764]
+    budget_p95=2900000  budget_p99=5800000
+  ```
+
+  `budget_p99` is governed by the `2 × budget_p95` term, and `budget_p95` by the
+  `8 × median(p95)` term — so `budget_p99 = 16 × median(p95)`. Against a
+  16_666_666 ns ceiling that leaves 2.87× on the budget and ~30× on the observed
+  p99 maximum: the ceiling is breached only if that scenario's median p95 nearly
+  triples.
+
+`everyGatedBudget()` reads the scenario functions directly rather than holding a
+second copy of the numbers, so the budgets have exactly one home
+(`Sources/ViewportBenchmarks/*Benchmark.swift`) and cannot drift between the
+runtime gate and the floor test.
+
+## Problem
+
+Two recorded gaps, one in the calibration data and one in the gate policy.
+
+**D-9 — the calibration base is stale, and its self-healing prediction was never
+tested.** The ledger records D-9 as "the p95 thin axis … the realistic
+shape-transition half self-heals as pre-slice-45 rows age out of the N=20
+window". That prediction cannot have begun: no harvest has run since slice 45
+changed the `realistic_provider` line shape, so the window is *entirely*
+pre-transition. Concretely, `realistic_provider|100k_lines_10mb_text` shows
+`n=128` — 8 shape-2 rows per run across 16 runs — where a post-slice-45 run
+contributes exactly one row. The budget under it is derived from a statistic the
+mode no longer prints.
+
+The second half of D-9 is structural rather than temporal: when the windowed
+`3 × max` term relaxes, a p95 budget rests on the `8 × median` backup term alone.
+That half is a watch-item, not a defect, and it has never been observed by name —
+nobody has written down *which* scenarios are currently on it.
+
+**D-8 — `bulk_structural_mutation` has no product ceiling.** Slice 43 introduced
+the absolute 60 FPS ceiling for frame-hot-path modes and deliberately exempted
+bulk edits: a multi-line paste or range delete is a discrete user action that may
+legitimately span more than one frame, and no product target existed for it. The
+exemption was honest but it left the mode gated on its regression budget alone —
+and a regression budget is anchored to a moving median, so it cannot see slow
+drift that successive legitimate re-derivations ratify. The ledger has carried
+this as an open P2 since slice 43, deferred three times for want of a target.
+
+## Scope
+
+In scope, in this order:
+
+1. **Phase 1 (data).** Harvest every hosted run newer than the corpus maximum
+   into the corpus; sweep-re-derive **all** modes; update every budget literal the
+   recipe now produces differently; record which p95 budgets are median-governed.
+2. **Phase 2 (policy).** Replace the exemption with a total two-class absolute
+   ceiling; give `bulk_structural_mutation` a ceiling of one whole 60 FPS frame;
+   generalize the four pins that depend on the old boolean.
+3. **Paper trail.** Spec, plan, verification record, arc decision-log entry,
+   ledger status changes.
+
+Out of scope — see Non-Goals.
+
+## Goals
+
+1. Every gated budget is derived from hosted evidence that includes the last ten
+   slices, and reproduces from the committed corpus.
+2. The N=20 window contains no pre-slice-45 run, so D-9's shape-transition half is
+   closed by fact rather than by prediction.
+3. The p95 thin axis is re-observed **by name**: the verification record lists
+   which scenarios' p95 budgets are governed by the median term alone.
+4. Every gated mode carries an absolute product ceiling; none is exempt.
+5. `bulk_structural_mutation`'s ceiling is one 60 FPS frame, fixed and derived
+   from the frame constant, never corpus-derived.
+6. The absolute gate still cannot redden a clean tree: every one of the 46
+   committed budgets sits under the ceiling of its own class, enforced by a test.
+
+## Non-Goals
+
+- **D-7 (harvester provenance).** Re-affirmed `deferred` at the slice-51
+  selection. This slice checks its two `failure` runs by hand and records the
+  check; it does not add a conclusion filter. A filter that is not pinned is
+  worse than none, and pinning it is D-7's own spec.
+- **Retiring the harvester's shape-2 branch.** Explicitly rejected when the slice
+  boundary was chosen. After this slice the window no longer uses that branch, so
+  it becomes a retirement candidate — that becomes a ledger row at the post-slice
+  review, not work here.
+- **D-14 / D-15** (script classification and dispatcher shape) and **D-13** (core
+  binary-search triplication) — different concerns, different slices.
+- **Any change to `.github/workflows/swift-ci.yml`.** Bulk already runs as a
+  blocking `--gate` step; this slice adds no CI step and does not touch
+  `WorkflowShapeTests`.
+- **Any change to engine or provider source.** The benchmark checksums must come
+  out byte-identical; that is an acceptance criterion, not a hope.
+- **Any change to the three gate failure reasons.** `budget_absolute_exceeded`
+  already exists and already carries the right instruction; bulk simply starts
+  being able to report it.
+
+## Decisions
+
+### Decision 1 — Two phases, data strictly before policy
+
+Phase 1 (harvest + re-derive) lands before Phase 2 (the ceiling). The reason is
+mechanical rather than stylistic: Phase 2 adds a test asserting that every gated
+budget sits under its class ceiling. Written against stale budgets, that pin
+would have to be repaired inside the same slice the moment the fresh numbers
+land. Written against fresh budgets, it is correct on arrival.
+
+### Decision 2 — Harvest everything newer than the corpus maximum, including the two `failure` runs
+
+`--limit 100 --corpus <corpus>`: the corpus dedup skips already-harvested ids
+before fetching their logs, so a generous limit costs only the listing call. This
+takes all 62 candidates, of which ~30 carry samples — comfortably more than the
+20 the window needs, so the pre-slice-45 tail is guaranteed to be flushed. The
+narrower `--limit 40` default was rejected: it yields roughly 20 sample-carrying
+runs, exactly on the boundary, and a docs-only count slightly higher than
+estimated would leave the tail in place and silently fail Goal 2.
+
+The two run-level failures are included. What makes a run dangerous to harvest is
+not a red conclusion but a **host job that failed on its budget**: those samples
+are the slow ones, and ingesting them raises `max()` and loosens the very budget
+they violated. Neither of these two is that case — both host jobs are `success`
+and only the WASM job failed. The check is per-run and recorded in the
+verification document; systematizing it is D-7.
+
+### Decision 3 — Harvest and re-derivation are ONE commit
+
+`testEveryCommittedBudgetReproducesFromCorpus` compares every committed budget
+literal against a re-derivation from the committed corpus. Appending corpus rows
+in one commit and updating the literals in the next leaves an intermediate tree
+where that test is red. "One logical step per commit" therefore resolves here to
+**one** commit containing the new corpus rows and every budget literal the recipe
+now produces differently. Phase 2 splits into ordinary TDD steps.
+
+### Decision 4 — A total two-class classification replaces the boolean
+
+```swift
+enum AbsoluteCeiling {
+    case scrollFrame      // GateLimits.frameNanoseconds / 10 = 1_666_666
+    case discreteAction   // GateLimits.frameNanoseconds      = 16_666_666
+
+    var p99Nanoseconds: Int64 { ... }
+}
+
+extension BenchmarkMode {
+    var absoluteCeiling: AbsoluteCeiling { /* exhaustive switch */ }
+}
+```
+
+`isFrameHotPath: Bool` is removed, and with it the concept of exemption. Two
+alternatives were considered and rejected:
+
+- **A second boolean** (`isDiscreteAction` beside `isFrameHotPath`) is the
+  smallest diff, but it requires the two flags to stay mutually exclusive and
+  jointly total with nothing enforcing either property — the repository's own
+  "pins must model what runtime reads" lesson, and it leaves the `exempt` output
+  branch reachable in principle and dead in fact.
+- **An optional ceiling** (`Int64?`, `nil` = exempt) keeps exemption available at
+  the cost of a branch with no inhabitants — a code path that cannot fire, which
+  this repository treats the same way it treats a gate that cannot fail.
+
+The total function keeps the property that made the original design safe: an
+exhaustive switch forces a newly added mode to classify itself.
+
+### Decision 5 — Class belongs to the mode, nanoseconds belong to the limits
+
+`BenchmarkMode.absoluteCeiling` answers *which class*; `AbsoluteCeiling.p99Nanoseconds`
+answers *how many nanoseconds*, and both values are computed from
+`GateLimits.frameNanoseconds`. `GateLimits.absoluteP99Nanoseconds` is **removed**
+rather than kept as a synonym for `.scrollFrame.p99Nanoseconds`: with two ceilings
+in play, a bare "the absolute ceiling" is no longer a well-formed reference, and
+every call site should have to name the class it means.
+
+### Decision 6 — The bulk ceiling is one whole 60 FPS frame, and it is FIXED
+
+`AbsoluteCeiling.discreteAction.p99Nanoseconds == GateLimits.frameNanoseconds ==
+16_666_666`. The product statement: a scroll-frame operation gets 10% of a frame
+because the other 90% belongs to shaping, rasterization, and UI outside the
+headless core; a discrete bulk edit is not a scroll frame, and the core's share of
+it is allowed to be a whole frame's worth of work rather than a tenth.
+
+The derivation is frame-based on purpose. Two alternatives were put to the user
+with their arithmetic: 10 ms (10% of the 100 ms "feels instantaneous" threshold,
+1.72× over the binding budget) and 100 ms (10% of the 1 s "flow of thought"
+class, 17× over it — comfortable, and too weak to ever fire). The user chose the
+frame derivation.
+
+Like the scroll-frame ceiling, it is **never recalibrated and never
+corpus-derived**. On breach the response is to fix the code or the architecture.
+A ceiling that scales with batch size was rejected outright: it would be a second
+calibration surface and would undo the one property that makes an absolute
+ceiling worth having.
+
+### Decision 7 — The floor pin loses its filter
+
+`GateFloorTests.testEveryFrameHotPathBudgetIsUnderTheAbsoluteCeiling` currently
+reads `everyGatedBudget().filter { $0.mode.isFrameHotPath }` — bulk is simply not
+checked. With every mode classified, the filter disappears and each budget is
+compared against the ceiling of its own class. This is strictly stronger: the
+number of budgets under the pin rises from 41 to all 46.
+
+That test is what guarantees the runtime absolute gate cannot redden a clean
+tree, and the guarantee now extends to bulk.
+
+### Decision 8 — The existing bulk test keeps its body and changes its meaning
+
+`testAbsoluteCeilingDoesNotFireForBulkMode` feeds a bulk summary with
+`p99 = 1_666_667` and asserts `gateFailureReason == nil`. Under the new model that
+assertion still holds — 1.67 ms is far below bulk's own 16.67 ms ceiling — but it
+now proves something different: not "bulk has no ceiling" but "bulk is not held to
+the *scroll-frame* ceiling". It is re-commented, not rewritten.
+
+Its new companion is where D-8 actually lands: the same shape at
+`p99 = 16_666_667` with a passing regression budget must report
+`.budgetAbsoluteExceeded`.
+
+The pair does more than state the change; it **brackets the ceiling from both
+sides**, and neither test alone would. The old one fails if bulk's ceiling drops
+to 1_666_667 or below — the "bulk got dragged back onto the scroll-frame ceiling"
+mutation. The new one fails if the ceiling rises above 16_666_667 or disappears
+altogether. Together they confine the value to `(1_666_667, 16_666_666]`, and the
+frame-math pin nails it to the exact number inside that interval.
+
+This bracketing is why the drill table below does not contain the obvious-looking
+mutation "classify bulk as `.scrollFrame`, expect the new test to redden". It
+would not redden: at `p99 = 16_666_667` a 1.67 ms ceiling is breached just as a
+16.67 ms one is, and the reported reason is `.budgetAbsoluteExceeded` either way.
+Each of the two mutations reddens exactly one of the two tests.
+
+### Decision 9 — The absolute check is unreachable today, and that is the design
+
+With bulk's regression p99 budget at 5.8 ms and its ceiling at 16.67 ms, any
+latency that breaches the ceiling also breaches the regression budget — and
+`budget_exceeded` is evaluated first, so it wins. The new check therefore cannot
+fire on today's tree.
+
+This is the same property the scroll-frame ceiling already has, and Decision 7's
+pin is what makes it a guarantee rather than a coincidence. The check exists for
+the future: it fires once slow drift has been ratified by a series of individually
+legitimate re-derivations and the regression budget has climbed past 16.67 ms. The
+regression gate structurally cannot catch that, because it is anchored to a moving
+median.
+
+Consequence for the falsifiability audit: the drill for this guarantee is a
+synthetic summary in a unit test, not a hosted run. A guarantee whose red can only
+be produced synthetically is still falsifiable; one whose red cannot be produced at
+all is not.
+
+### Decision 10 — If the re-derived bulk budget reaches the ceiling, stop
+
+If Phase 1 produces `bulk_structural_mutation|1m_lines_batch_4096` with
+`budget_p99 >= 16_666_666`, the slice **halts and returns to the user**. The
+doctrine forbids loosening the ceiling, and the alternative — fixing the code — is
+a different slice with a different spec. Measured margin says this is unlikely
+(the median p95 would have to nearly triple), but the response is decided in
+advance so that it is not decided under pressure.
+
+### Decision 11 — D-9 is amended, not closed
+
+D-9 has two halves and they end this slice in different states. The
+shape-transition half is **discharged by fact**: after the harvest the window
+holds no pre-slice-45 run, which is checkable and checked. The p95 thin-axis half
+is structural — it is a property of the recipe, not a defect that can be fixed —
+so it stays open, with its statement amended to record the re-observation and the
+named list of scenarios currently governed by the median term.
+
+This follows the D-15 precedent from slice 51: a ledger row whose statement is
+corrected by evidence is amended in place, never silently re-scoped.
+
+### Decision 12 — Nothing else moves
+
+No engine source, no provider source, no workflow file, no script. The
+verification record must show the benchmark checksum set byte-identical to the
+committed baseline; if it is not, something moved that this design did not
+authorize.
+
+## Component Design
+
+**`Sources/ViewportBenchmarks/BenchmarkModels.swift`**
+
+- `GateLimits.frameNanoseconds` unchanged.
+- `GateLimits.absoluteP99Nanoseconds` removed (Decision 5).
+- New `enum AbsoluteCeiling` with `scrollFrame` / `discreteAction` and a
+  `p99Nanoseconds` computed from `frameNanoseconds`.
+- `BenchmarkSummary.headroomAbsoluteP99` reads `mode.absoluteCeiling.p99Nanoseconds`
+  instead of the single constant. The zero-observed `.infinity` guard is untouched.
+- The gate check becomes `if p99Nanoseconds > mode.absoluteCeiling.p99Nanoseconds`.
+  Its position in `gateFailureReason` — after `budgetExceeded`, before
+  `budgetStale` — does not move; Decision 9 explains why that ordering still holds.
+- The comment block above `GateLimits` is rewritten: exemption language out, two
+  classes and their derivations in.
+
+**`Sources/ViewportBenchmarks/BenchmarkOptions.swift`**
+
+- `isFrameHotPath: Bool` → `absoluteCeiling: AbsoluteCeiling`, same exhaustive
+  switch shape, `bulkStructuralMutation` alone returning `.discreteAction`.
+
+**`Sources/ViewportBenchmarks/BenchmarkSupport.swift`**
+
+- The `if summary.mode.isFrameHotPath { … } else { … "exempt" }` branch collapses:
+  every gated summary prints `budget_absolute_p99_ns=<n>` and
+  `headroom_absolute_p99=<h>`. The `exempt` marker is deleted.
+
+**`Sources/ViewportBenchmarks/*Benchmark.swift`**
+
+- Budget literals updated wherever the sweep re-derivation differs. No structural
+  change; scenario names, counts, and workloads are untouched.
+
+**`Tests/ViewportBenchmarksTests/GateLogicTests.swift`**
+
+- Exclusion pin → class-membership pin: the set of gateable modes classified
+  `.discreteAction` equals `["bulk_structural_mutation"]`.
+- Frame-math pin extended: `.scrollFrame == frameNanoseconds / 10` and
+  `.discreteAction == frameNanoseconds`, plus both literals.
+- `testAbsoluteCeilingDoesNotFireForBulkMode` re-commented (Decision 8).
+- New `testAbsoluteCeilingFiresForBulkModeAtItsOwnCeiling`.
+- `testGateOutputMarksBulkExempt` (`:298`) inverts: it asserts the bulk line
+  carries `budget_absolute_p99_ns=16666666` and a `headroom_absolute_p99` token,
+  and is renamed accordingly. The sibling asserting the token is absent from
+  non-gate output (`:314`) is unaffected.
+
+**`Tests/ViewportBenchmarksTests/GateFloorTests.swift`**
+
+- `testEveryFrameHotPathBudgetIsUnderTheAbsoluteCeiling` →
+  `testEveryGatedBudgetIsUnderItsClassCeiling`, filter removed, message naming the
+  class it compared against.
+
+**`docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv`**
+
+- Appended only. Existing rows are never edited, reordered, or de-duplicated.
+
+## Testing Strategy
+
+Six drills, one per guarantee this slice adds or changes. Each is executed, its
+red output recorded verbatim in the verification document, and then reverted.
+
+| Guarantee | Mutation | Test that must redden |
+|---|---|---|
+| Bulk has an absolute ceiling at all — D-8's substance | Skip the absolute check for `.discreteAction` (or give it an unbounded value) | **New** paired test: expected `.budgetAbsoluteExceeded`, actual `nil` |
+| The bulk ceiling is one frame, not a tenth of one | Classify `.bulkStructuralMutation` as `.scrollFrame` | **Old** re-commented test: expected `nil`, actual `.budgetAbsoluteExceeded` |
+| Class membership is pinned | Classify a second mode as `.discreteAction` | Membership pin fails, naming the extra mode |
+| Every budget is under its class ceiling | Raise `1m_lines_batch_4096`'s p99 budget above `16_666_666` | `testEveryGatedBudgetIsUnderItsClassCeiling` |
+| Ceiling values are pinned to the frame math | Replace a derived value with a differing bare literal | Frame-math pin |
+| `exempt` is gone from the output | Restore the `else` branch in `BenchmarkSupport` | Output-line test |
+
+Rows 1 and 2 are the bracket from Decision 8, and they are deliberately *not*
+interchangeable: each mutation reddens exactly one of the two tests, and the
+mutation that looks like it should redden the new test (reclassifying bulk
+downward) reddens the old one instead. A drill recorded against the wrong test
+would look like evidence and be none.
+
+Phase 1 needs no new test: `testEveryCommittedBudgetReproducesFromCorpus` is a
+standing guarantee whose red was drilled in slice 44, and it is the arbiter of
+whether the re-derivation was transcribed correctly. Re-drilling it is not
+required by the falsifiability rule, which asks for evidence per **added or
+changed** guarantee.
+
+TDD order inside Phase 2: the paired bulk test is written first and must fail with
+the old model before the classification lands.
+
+## Documentation Updates
+
+- **`AGENTS.md`, `## Gate budgets`.** The absolute-ceiling paragraph currently
+  says the ceiling "applies to frame-hot-path modes only" and that
+  `bulk_structural_mutation` is "exempt", printing `budget_absolute_p99_ns=exempt`.
+  Rewritten to two classes with their derivations, the standing pins named, and the
+  never-recalibrate instruction preserved for both. The `BenchmarkMode.isFrameHotPath`
+  reference becomes `BenchmarkMode.absoluteCeiling`.
+- **`AGENTS.md`, `## Gate budgets`** also gains one sentence on why a harvest is
+  the moment the p95 thin axis should be re-read — the observation Goal 3 produces.
+- **Arc decision log** (`docs/superpowers/arcs/wrap.md`): the 2026-08-08 user call
+  — Option C over the node-3 lean, plus the D-8 target — with the map pass noting
+  that slice 52 consumes no node, like slices 48 and 51.
+- **Debt ledger:** D-8 → `scheduled(slice-52)` then `discharged(...)`; D-9
+  statement amended per Decision 11.
+
+## Verification
+
+Written under the plan-assertion conventions in `AGENTS.md`: every command below
+either fails non-zero on its own fault, or is followed by an explicit test whose
+exit status is sensitive to the invariant.
+
+```bash
+CORPUS=docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv
+
+# Harvest plan first: --dry-run prints one decision per candidate and is recorded.
+./.github/scripts/harvest-gate-corpus.sh --limit 100 --corpus "$CORPUS" --dry-run
+
+# Append. The redirect is the whole point, so the script's own status is the check.
+./.github/scripts/harvest-gate-corpus.sh --limit 100 --corpus "$CORPUS" >> "$CORPUS"
+
+# Window must carry no pre-slice-45 run. 29692848870 is slice 45's PR-head run --
+# the first run whose workflow prints realistic_provider in the shape-1 summary
+# form, since a pull_request run executes the workflow from the merge ref.
+stale="$(./.github/scripts/derive-gate-budgets.sh --window-run-ids 20 < "$CORPUS" \
+         | awk '$1 < 29692848870')"
+[ -z "$stale" ] || { printf 'window still carries pre-slice-45 runs:\n%s\n' "$stale"; exit 1; }
+
+# Sweep every mode; a mode with no corpus rows is an error, not an empty success.
+./.github/scripts/derive-gate-budgets.sh "$CORPUS"
+
+# The arbiter of Phase 1: budgets must reproduce from the committed corpus.
+swift test --filter GateFloorTests
+
+# Full suite, release build, and every gated mode locally.
+swift test
+swift build -c release
+for mode in "" --realistic-provider --variable-height --variable-height-mutation \
+            --structural-mutation --bulk-structural-mutation --line-query \
+            --line-geometry-query --column-query --column-geometry-query \
+            --point-query --point-geometry-query; do
+  # Without the explicit exit the loop swallows a failing gate and the whole
+  # block becomes a check that cannot fail (AGENTS.md plan-assertion rule 2).
+  swift run -c release ViewportBenchmarks -- $mode --gate || exit 1
+done
+
+# The core is untouched: the Foundation-free scan must find nothing.
+[ -z "$(rg -n 'Foundation' Sources/TextEngineCore)" ] || { echo 'Foundation leaked'; exit 1; }
+```
+
+Hosted evidence is read at **step level**, not job conclusion: a green job can
+hide a dead step. Both the PR-head run and the post-merge push run are recorded,
+each showing all twelve blocking gate steps green — **46** scenario lines
+reporting `gate=pass`, one per gated scenario — with the five bulk lines now
+carrying `budget_absolute_p99_ns=16666666` where they previously read `exempt`.
+
+## Acceptance Criteria
+
+1. **AC1 — Idempotent append.** The corpus is appended via `--corpus`; the
+   `--dry-run` decision plan is recorded; no pre-existing row is edited, reordered,
+   or removed (`git diff` over the corpus shows additions only).
+2. **AC2 — Window flushed.** The N=20 window contains no run id below
+   `29692848870` (slice 45's PR-head run). Recorded with the actual window
+   run-id list, and corroborated by `realistic_provider`'s `n=` falling from 128
+   toward ~20 as shape-2 rows leave the window.
+3. **AC3 — Thin axis observed by name.** The verification record lists every
+   scenario whose re-derived p95 budget is governed by the `8 × median` term alone,
+   derived from the sweep output without changing the script.
+4. **AC4 — Budgets reproduce.** All 46 gated scenarios reproduce from the appended
+   corpus; `swift test` green.
+5. **AC5 — Total classification.** Two precise scans find nothing:
+   `rg -n 'isFrameHotPath|absoluteP99Nanoseconds' Sources Tests` and
+   `rg -n 'budget_absolute_p99_ns=exempt' Sources Tests`. Every gated summary
+   prints a numeric `budget_absolute_p99_ns` alongside a `headroom_absolute_p99`.
+
+   The scans are written on identifiers and on the emitted **token**, not on the
+   English word "exempt", which legitimately survives in two unrelated places:
+   `GateLogicTests`'s registry-invariant comment and `WorkflowShapeTests`'s
+   exemption-set comment. A bare `rg exempt` would match those and make the
+   criterion unmeetable — the repository's own token-not-substring lesson,
+   applied to its own acceptance criteria.
+6. **AC6 — Bulk ceiling pinned.** `.discreteAction` equals `frameNanoseconds`
+   (16_666_666) and the set of gateable modes in that class is exactly
+   `{bulk_structural_mutation}`, both asserted.
+7. **AC7 — Full-coverage floor pin.** `testEveryGatedBudgetIsUnderItsClassCeiling`
+   iterates all 46 budgets with no filter, and each is under its class ceiling.
+8. **AC8 — Six recorded reds.** Each drill in Testing Strategy is executed and its
+   failure output recorded verbatim, then reverted.
+9. **AC9 — Hosted proof, step level.** PR-head run and post-merge push run both
+   green at step level: twelve blocking gate steps, 46 scenario lines reporting
+   `gate=pass`, `swift test` green, every benchmark checksum byte-identical to the
+   values recorded in
+   [`2026-08-07-cross-target-script-hardening.md`](../verification/2026-08-07-cross-target-script-hardening.md),
+   and the five bulk gate lines showing the numeric ceiling.
+10. **AC10 — Paper trail.** Spec, plan, verification record, arc decision-log
+    entry, and ledger status changes (D-8 discharged, D-9 amended) all committed.
+
+## Risks And Gaps
+
+- **The re-derived bulk budget could reach the ceiling.** Handled by Decision 10:
+  halt and return to the user. Measured likelihood is low — the governing term is
+  `16 × median(p95)` and the median would have to nearly triple.
+- **The window might still hold a pre-slice-45 tail** if docs-only runs are more
+  numerous than estimated. Detected immediately by AC2's check and by
+  `realistic_provider`'s `n=` falling from 128 to roughly 20; the response is a
+  wider `--limit` and a re-run, not a weakened criterion.
+- **A large budget diff is expected, not a smell.** A harvest re-derives every
+  mode, so scenarios this slice never targeted will move. The opposite outcome — no
+  budget changes at all — is also legitimate (`round_up_2sf` hysteresis) and is
+  recorded as a finding rather than treated as an empty slice.
+- **`realistic_provider`'s statistical base changes in kind.** Its window goes from
+  128 shape-2 rows to roughly 20 shape-1 rows. Its budget will move for that reason
+  alone, and that movement says nothing about the engine.
+- **The harvester's provenance gap (D-7) is untouched.** This slice's two `failure`
+  runs are cleared by a hand check recorded in the verification document. That check
+  is evidence, not a control: the next harvest will not repeat it automatically.
+- **The new absolute check cannot fire on today's tree** (Decision 9). Its
+  falsifiability rests on synthetic unit tests. This is stated here so the
+  post-slice review's audit does not have to rediscover it.
