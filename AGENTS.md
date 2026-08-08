@@ -453,6 +453,17 @@ budget_p95 = round_up_2sf(max(8 x median(hosted p95), 3 x max(hosted p95)))
 budget_p99 = round_up_2sf(max(2 x budget_p95, 8 x median(p99), 3 x max(p99)))
 ```
 
+**Take a budget baseline before the harvest, and diff the directions afterwards.**
+Run the sweep once against the corpus *before* appending and keep its
+`budget_p95`/`budget_p99` per scenario; after re-deriving, compare. A budget that
+**loosened** is harmless — the runtime gate compares against this run's latency and
+says `budget_stale` if it drifts too far. A budget that **tightened** is the one that
+reddens a clean tree: an old freak sample aged out of the window (exactly what the
+window is for), and the new budget may sit closer to observed latency than a noisy
+runner can reliably clear. Nothing in the arithmetic catches that — no re-derivation
+runs the benchmark — so the tightened set is the watch-list for the hosted PR-head
+run, and the baseline is unrecoverable once the corpus is appended.
+
 **`hosted` in the recipe is a trailing window, not full corpus history.** It
 means the most-recent **N=20 distinct runs, keyed on the integer run id** —
 older rows still sit in the corpus but are not counted. The corpus stays
