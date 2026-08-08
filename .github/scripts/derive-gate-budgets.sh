@@ -61,6 +61,16 @@ run_self_test() {
   printf '210\tline_query\tuniform_1k\t28\t58\n'   >> "$fixture"
   printf '99\tline_query\tuniform_1k\t22\t52\n'    >> "$fixture"
 
+  # Second scenario, deliberately carrying an outlier: p95 med=10, max=100, so
+  # 3*max (300) beats 8*med (80) and the MAX term governs. The first scenario is
+  # median-governed (8*24=192 vs 3*30=90), so the two cover both branches of gov_p95.
+  # Reuses the four run ids above on purpose: adding a new one would change the
+  # window_run_ids assertions above.
+  printf '305\tcolumn_query\toutlier\t10\t20\n'  >> "$fixture"
+  printf '210\tcolumn_query\toutlier\t10\t20\n'  >> "$fixture"
+  printf '100\tcolumn_query\toutlier\t10\t20\n'  >> "$fixture"
+  printf '99\tcolumn_query\toutlier\t100\t200\n' >> "$fixture"
+
   assert_equal "305
 210" "$(window_run_ids 2 < "$fixture")" "keeps the 2 most-recent distinct run ids"
 
@@ -69,6 +79,23 @@ run_self_test() {
 210
 100
 99" "$(window_run_ids 10 < "$fixture")" "keeps all runs when N exceeds the run count"
+
+  # gov_p95 lives in the awk program BELOW the --self-test dispatch, so it is not
+  # reachable as a function: re-invoke the script itself. `local` on its own line --
+  # `local x="$(cmd)"` would take the builtin's status, masking a failing child.
+  local derived
+  derived="$("$0" "$fixture")" || {
+    echo "self_test=fail label=gov_p95_derivation_exited status=$?"
+    exit 1
+  }
+
+  gov_of() { printf '%s\n' "$derived" | awk -v k="$1" '$1 == k {
+    for (i = 1; i <= NF; i++) if ($i ~ /^gov_p95=/) { split($i, a, "="); print a[2] } }'; }
+
+  assert_equal "median" "$(gov_of 'line_query|uniform_1k')" \
+    "gov_p95=median when 8*med >= 3*max"
+  assert_equal "max" "$(gov_of 'column_query|outlier')" \
+    "gov_p95=max when 3*max > 8*med"
 
   echo "self_test=pass"
 }
@@ -141,13 +168,19 @@ END {
     m99 = med(b, cnt); x99 = b[cnt] + 0
 
     b95 = ru2(8 * m95 > 3 * x95 ? 8 * m95 : 3 * x95)
+    # `>=`, NOT the `>` on the line above, and the asymmetry is deliberate. Up there a
+    # tie is harmless: both terms yield the same number, so either branch is correct.
+    # Here a tie is MEANINGFUL -- the token answers "is this budget resting on the
+    # median term alone?", and on a tie it is. Harmonizing the two operators would
+    # silently change the rule.
+    gov95 = (8 * m95 >= 3 * x95) ? "median" : "max"
     lo99 = 2 * b95
     if (8 * m99 > lo99) lo99 = 8 * m99
     if (3 * x99 > lo99) lo99 = 3 * x99
     b99 = ru2(lo99)
 
-    printf "%-46s n=%-3d p95[med=%-6d max=%-6d] p99[med=%-6d max=%-6d] budget_p95=%-7d budget_p99=%-7d margin_p95=%.1fx margin_p99=%.1fx\n", \
-           k, cnt, m95, x95, m99, x99, b95, b99, b95 / x95, b99 / x99
+    printf "%-46s n=%-3d p95[med=%-6d max=%-6d] p99[med=%-6d max=%-6d] budget_p95=%-7d budget_p99=%-7d gov_p95=%-6s margin_p95=%.1fx margin_p99=%.1fx\n", \
+           k, cnt, m95, x95, m99, x99, b95, b99, gov95, b95 / x95, b99 / x99
   }
 }
 ' <(window_run_ids < "$corpus") "$corpus" | sort

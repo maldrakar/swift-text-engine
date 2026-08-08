@@ -472,7 +472,16 @@ and the budget it forced can tighten back down. What covers that freak's
 *recurrence*, if it happens again, is the median-anchored floor terms (and,
 on p99, the `2 x budget_p95` floor) — not the `3x`-max term, which is exactly
 what just relaxed. p95 carries only the median term as backup, so it is the
-thin axis to watch.
+thin axis — and
+`derive-gate-budgets.sh` now prints `gov_p95=median|max` beside every budget, so
+which term governs is read rather than recomputed. A budget is median-governed
+exactly when `max / med <= 2.67`, which is why nearly every one of them is; the
+current count belongs in a verification record, not here, since the next harvest
+moves it. The value is in the **flip**, and the two directions differ:
+`median -> max` means a freak sample took over the floor and the budget LOOSENED
+(the runtime gate catches that loudly, as `budget_stale`), while `max -> median`
+means the freak aged out and the budget TIGHTENED — the direction that reddens a
+clean tree, and the one nothing else catches before a hosted run.
 
 The 3x floor covers both statistics because the gate fails on either.
 
