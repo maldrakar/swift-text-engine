@@ -55,8 +55,14 @@ closing note).
 term of the p95 recipe governs each budget. Read against the corpus **as it stood
 before** the harvest:
 
+The derive script prints one line per scenario, so the summary is a count over its
+output, not something the script prints itself. `$SWEEP` is that captured sweep:
+
 ```
-$ ./.github/scripts/derive-gate-budgets.sh docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv
+$ WORK="$(mktemp -d)"
+$ SWEEP="$WORK/sweep-preharvest.txt"
+$ ./.github/scripts/derive-gate-budgets.sh docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv > "$SWEEP"
+$ echo "median=$(grep -c 'gov_p95=median' "$SWEEP") max=$(grep -c 'gov_p95=max' "$SWEEP") total=$(wc -l < "$SWEEP" | tr -d ' ')"
 median=45 max=1 total=46
 $ grep 'gov_p95=max' "$SWEEP"
 line_query|uniform_1k                          n=20  p95[med=24     max=73    ] p99[med=52     max=84    ] budget_p95=220     budget_p99=440     gov_p95=max    margin_p95=3.0x margin_p99=5.2x
@@ -64,6 +70,15 @@ line_query|uniform_1k                          n=20  p95[med=24     max=73    ] 
 
 45 median-governed, 1 max-governed, total 46. The single max-governed scenario was
 `line_query|uniform_1k` (`8 x 24 = 192` vs `3 x 73 = 219`). Compare with section 5.
+
+**This block does not reproduce at HEAD, by design.** The prose above says "as it stood
+**before** the harvest", and that is load-bearing: the same two commands run against the
+committed (post-harvest) corpus still print `median=45 max=1 total=46`, but the single
+`gov_p95=max` line is now `column_query|prefixsum_100k`, not `line_query|uniform_1k` —
+the harvest moved which scenario the `3 x max` term governs. To replay the pre-harvest
+state, derive against the corpus at the pre-harvest commit
+(`git show 6e5b155:docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv`)
+rather than against the working tree.
 
 ---
 
@@ -96,8 +111,8 @@ planned=70 skipped=30
 ```
 
 Well clear of the `>= 20` floor the plan requires. The 30 skips are the idempotent
-`--corpus` dedup declining runs the corpus already carries. Full plan (abridged to its
-shape; every line is `plan=harvest run=<id>` or `skip=already_harvested run=<id>`):
+`--corpus` dedup declining runs the corpus already carries. Full plan, quoted verbatim
+in full (every line is `plan=harvest run=<id>` or `skip=already_harvested run=<id>`):
 
 ```
 plan=harvest run=31244871233
@@ -216,12 +231,22 @@ $ tail -1549 docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv | c
       33
 ```
 
-This is expected and is not a partial harvest. The other 37 planned runs are
-**docs-only PR runs**: `detect-docs-only-pr.sh` short-circuits the heavy Swift path, so
-those runs print no `p95_ns=` line at all and there is nothing for the harvester to
-read. Recording the yield here is what makes the harvest auditable after the fact — 70
-in the plan and 33 in the corpus is the correct pairing, and without this line a later
-reader would have to re-derive to tell a docs-only skip from a dropped log.
+This is expected and is not a partial harvest. The 37 planned runs that contributed no
+rows are **believed to be docs-only PR runs**: `detect-docs-only-pr.sh` short-circuits
+the heavy Swift path, so such a run prints no `p95_ns=` line at all and there is nothing
+for the harvester to read.
+
+**That attribution is an inference, not a measurement.** What was measured is the yield
+itself (70 planned, 33 contributing, and no `warn=log_unavailable`); the docs-only
+explanation was spot-checked against a **3-run sample** of the 37, not all 37. The
+mechanism is the known one and no counter-example turned up, but this record should not
+be read as having audited every non-contributing run. What the evidence does establish
+is that no run was lost to log retention — so a non-contributing run printed nothing,
+rather than having something the harvester failed to read.
+
+Recording the yield here is what makes the harvest auditable after the fact — 70 in the
+plan and 33 in the corpus is the correct pairing, and without this line a later reader
+would have to re-derive to tell a docs-only skip from a dropped log.
 
 ### 3.3 The corpus stayed append-only
 
@@ -1069,9 +1094,9 @@ Swift Testing harness, not a failure.)
 
 ```
 $ swift build -c release
-BUILD_EXIT=0
 [0/2] Write swift-version-58A378E29CF047B.txt
 Build complete! (0.10s)
+BUILD_EXIT=0
 ```
 
 ```
@@ -1086,18 +1111,272 @@ new ledger entry D-17 for the related `${PIPESTATUS[0]}` hazard in this repo's s
 
 ---
 
-## 12. Hosted evidence (stub — recorded by a later task)
+## 12. Hosted evidence — AC9 discharged
 
-**Not yet recorded.** This section is reserved for the hosted CI evidence, which is
-the calibration authority (hosted Linux x86_64 runs 2-3x slower than this machine, so
-it binds and local does not). To be filled in with, read at **step level** and not from
-job conclusions:
+Hosted CI is the calibration authority (hosted Linux x86_64 runs 2-3x slower than this
+machine, so it binds and local does not). The stub this section replaced listed five
+things "to be filled in ... both green". **All five are now recorded below, and both
+runs are confirmed green — at step level, never from a job conclusion.** A green job can
+hide a dead `continue-on-error` step; that is this repo's slice-16 trap, and the check
+below is written to see through it.
 
-- the PR-head run id and the post-merge `push` run id, both green;
-- the host job's twelve blocking gate steps, all `gate=pass`, 46 scenarios;
-- the six **tightened** scenarios from section 6's watch-list, read on **both**
-  statistics (two of them tightened on one statistic only);
-- the five `budget_absolute_p99_ns=16666666` bulk lines and their hosted
-  `headroom_absolute_p99`;
-- AC9's hosted half: the same 46 `(mode|scenario, checksum)` tuples as section 9,
-  byte-identical (timings differ by design; checksums must not).
+### 12.1 The two runs
+
+| Role | Run id | headSha | Event | Result |
+|---|---|---|---|---|
+| PR-head (PR #123) | [`31268616348`](https://github.com/maldrakar/swift-text-engine/actions/runs/31268616348) | `45a1591` | `pull_request` | success |
+| Post-merge push | [`31307764210`](https://github.com/maldrakar/swift-text-engine/actions/runs/31307764210) | `955dec8` | `push` (`main`) | success |
+
+An earlier PR-head run [`31267476021`](https://github.com/maldrakar/swift-text-engine/actions/runs/31267476021)
+(`headSha=b731eed`) is also green and also real evidence; `31268616348` is *the* PR head,
+because the fix wave added `45a1591` after it. `955dec8` is the merge commit — so the
+post-merge run is proof of **merged** code, which is what this repo requires and which
+the PR run alone cannot give.
+
+### 12.2 Step-level confirmation on the post-merge push run `31307764210`
+
+All three required jobs completed `success`, and **every step that ran** reported
+`conclusion=success`. Exactly one step per job did not run — `Complete docs-only PR`,
+the short-circuit that is *supposed* to stay dormant here, since this push carries the
+slice's Swift and test changes and must take the heavy path:
+
+| Job | Steps | success | skipped | anything else |
+|---|---|---|---|---|
+| Host tests and benchmark gate | 24 | 23 | 1 (`Complete docs-only PR`) | **0** |
+| iOS cross-target compile | 8 | 7 | 1 (`Complete docs-only PR`) | **0** |
+| WASM cross-target compile | 10 | 9 | 1 (`Complete docs-only PR`) | **0** |
+
+Read with
+`gh run view 31307764210 --json jobs --jq '.jobs[] | .steps[] | select(.conclusion != "success")'`,
+which returned exactly the three `Complete docs-only PR` rows and nothing else — so no
+step failed, errored, or was cancelled behind a green job.
+
+The heavy path really ran — the detector classified the push as not-docs-only:
+
+```
+mode=docs_only_pr event=push result=not_pull_request docs_only_pr=false
+```
+
+**WASM actually compiled and blocked — four `result=pass … blocking=true` lines**
+(two kinds x two packages), not a skip:
+
+```
+mode=cross_target_compile target=wasm package=core result=pass reason=none blocking=true
+mode=cross_target_compile target=wasm_embedded package=core result=pass reason=none blocking=true
+mode=cross_target_compile target=wasm package=providers result=pass reason=none blocking=true
+mode=cross_target_compile target=wasm_embedded package=providers result=pass reason=none blocking=true
+```
+
+iOS mirrors the same shape, also blocking:
+
+```
+mode=cross_target_compile target=ios_device package=core result=pass reason=none blocking=true
+mode=cross_target_compile target=ios_simulator package=core result=pass reason=none blocking=true
+mode=cross_target_compile target=ios_device package=providers result=pass reason=none blocking=true
+mode=cross_target_compile target=ios_simulator package=providers result=pass reason=none blocking=true
+```
+
+with `mode=cross_target_compile_overall blocking_failures=0 exit=0` in both jobs. The
+cross-job `result=skipped reason=not_requested blocking=false` lines are expected: the
+WASM job is not asked for iOS targets and vice versa.
+
+Toolchains: host and WASM jobs on `Swift version 6.2.1` (the pinned container, matching
+the pinned WASM SDK); the iOS job on `Swift version 6.3.3`, the `macos-latest` runner's
+Xcode toolchain — `Package.swift` declares no `platforms:`, so this is the documented
+default-deployment-target path, not a drift.
+
+**Twelve blocking gate steps, each step-level `success`:**
+
+```
+Run synthetic benchmark gate                      Run column query benchmark gate
+Run variable-height benchmark gate                Run column geometry query benchmark gate
+Run variable-height mutation benchmark gate       Run point query benchmark gate
+Run structural mutation benchmark gate            Run point geometry query benchmark gate
+Run bulk structural mutation benchmark gate       Run realistic provider benchmark gate
+Run line query benchmark gate                     Run line geometry query benchmark gate
+```
+
+(The two non-gate diagnostics, `Run memory shape diagnostic` and `Run RSS memory
+observation diagnostic`, also ran and also succeeded; they are not part of the twelve.)
+
+**Exactly 46 `gate=pass`, zero `gate=fail`:**
+
+```
+$ grep -c 'gate=pass' push.log
+46
+$ grep -c 'gate=fail' push.log
+0
+```
+
+Per-mode breakdown, summing to 46: `bulk_structural_mutation` 5, `column_geometry_query`
+5, `column_query` 5, `line_geometry_query` 5, `line_query` 5, `pipeline` 3,
+`point_geometry_query` 4, `point_query` 4, `realistic_provider` 1, `structural_mutation`
+3, `variable_height` 3, `variable_height_mutation` 3.
+
+**`swift test` green: 362 tests, 0 failures** — the same count as local section 11.
+
+```
+Executed 362 tests, with 0 failures (0 unexpected) in 7.382 (7.382) seconds
+```
+
+**Zero `continue-on-error`**, in the workflow file and in the whole run log:
+
+```
+$ grep -c 'continue-on-error' push.log
+0
+$ grep -c 'continue-on-error' .github/workflows/swift-ci.yml
+0
+```
+
+Corroborated from inside the run itself: `WorkflowShapeTests.testNoPinnedGateIsContinueOnError`
+is one of the 362 passing tests.
+
+### 12.3 The absolute-ceiling split: 41 at one tenth of a frame, 5 at one whole frame
+
+This is the observable D-8 changed. Before this slice `bulk_structural_mutation` printed
+`budget_absolute_p99_ns=exempt`; the boolean exemption is gone, replaced by a total
+two-class `AbsoluteCeiling { scrollFrame, discreteAction }`.
+
+```
+$ grep -c 'budget_absolute_p99_ns=1666666 ' push.log     # trailing space: anchored
+41
+$ grep -c 'budget_absolute_p99_ns=16666666' push.log
+5
+$ grep -c 'budget_absolute_p99_ns=exempt' push.log
+0
+```
+
+41 + 5 = 46, matching the `gate=pass` total: the classification is **total**, every gated
+scenario carries a numeric ceiling, and no scenario is exempt any more. The trailing
+space matters — `1666666` is a prefix of `16666666`, so an unanchored count returns 46
+and silently reads the five one-frame lines as tenth-of-a-frame lines.
+
+The five `.discreteAction` lines, verbatim from the `Run bulk structural mutation
+benchmark gate` step:
+
+```
+mode=bulk_structural_mutation provider=balanced_tree scenario=1k_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=1000 p95_ns=6266 p99_ns=6436 failures=0 budget_p95_ns=51000 budget_p99_ns=110000 headroom_p95=8.1x headroom_p99=17.1x budget_absolute_p99_ns=16666666 headroom_absolute_p99=2589.6x gate=pass checksum=82740062444
+mode=bulk_structural_mutation provider=balanced_tree scenario=100k_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=100000 p95_ns=15664 p99_ns=15957 failures=0 budget_p95_ns=130000 budget_p99_ns=260000 headroom_p95=8.3x headroom_p99=16.3x budget_absolute_p99_ns=16666666 headroom_absolute_p99=1044.5x gate=pass checksum=36564666309410
+mode=bulk_structural_mutation provider=balanced_tree scenario=1m_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=1000000 p95_ns=53990 p99_ns=56896 failures=0 budget_p95_ns=450000 budget_p99_ns=900000 headroom_p95=8.3x headroom_p99=15.8x budget_absolute_p99_ns=16666666 headroom_absolute_p99=292.9x gate=pass checksum=1317343499882000
+mode=bulk_structural_mutation provider=balanced_tree scenario=100k_lines_batch_4096 iterations=2000 operations_per_sample=16 line_count=100000 p95_ns=163788 p99_ns=170078 failures=0 budget_p95_ns=1400000 budget_p99_ns=2800000 headroom_p95=8.5x headroom_p99=16.5x budget_absolute_p99_ns=16666666 headroom_absolute_p99=98.0x gate=pass checksum=2285022074625
+mode=bulk_structural_mutation provider=balanced_tree scenario=1m_lines_batch_4096 iterations=2000 operations_per_sample=16 line_count=1000000 p95_ns=354480 p99_ns=380855 failures=0 budget_p95_ns=3000000 budget_p99_ns=6000000 headroom_p95=8.5x headroom_p99=15.8x budget_absolute_p99_ns=16666666 headroom_absolute_p99=43.8x gate=pass checksum=82203678997143
+```
+
+The binding `.discreteAction` scenario on hosted is `1m_lines_batch_4096` at
+`headroom_absolute_p99=43.8x` — a bulk 4096-line edit on a million-line document uses
+about 2.3% of the one frame D-8 grants it. Section 7's local pre-condition (bulk clears
+the one-frame ceiling) therefore holds on the authority hardware too, with a ~44x
+margin on the binding scenario.
+
+### 12.4 The tightening watch-list — the risk did not materialize
+
+Six budgets **tightened** in this slice. That is the trailing N=20 window working as
+designed: an old freak sample aged out, so the `3 x max` term it had inflated relaxed
+back down. But a tightened budget is the one direction the arithmetic cannot self-check
+— re-derivation proves a budget reproduces from the corpus, not that live hosted code
+still fits underneath it. **The hosted run was the only empirical control on this**, and
+section 6 opened the loop by naming the six in advance. It closes here.
+
+Read on the post-merge run `31307764210`, on **both** statistics:
+
+| Scenario | Tightened on | p95 obs / budget | headroom p95 | p99 obs / budget | headroom p99 | gate |
+|---|---|---|---|---|---|---|
+| `bulk_structural_mutation\|100k_lines_batch_4096` | both | 163788 / 1400000 | 8.5x | 170078 / 2800000 | 16.5x | **pass** |
+| `bulk_structural_mutation\|1m_lines_batch_64` | both | 53990 / 450000 | 8.3x | 56896 / 900000 | 15.8x | **pass** |
+| `column_geometry_query\|prefixsum_1m` | both | 136 / 690 | **5.1x** | 156 / 1400 | 9.0x | **pass** |
+| `column_geometry_query\|uniform_1m` | both | 51 / 390 | 7.6x | 81 / 780 | 9.6x | **pass** |
+| `column_query\|uniform_100k` | p99 only | 34 / 280 | 8.2x | 65 / 560 | 8.6x | **pass** |
+| `line_query\|uniform_1k` | p95 only | 23 / 190 | 8.3x | 54 / 440 | 8.1x | **pass** |
+
+**Stated plainly: the tightening risk did not materialize.** All six passed on the
+post-merge run, and all six passed on both PR-head runs as well — three independent
+hosted samples, no `budget_exceeded` on any of them. The tightest single value anywhere
+in the table is `column_geometry_query|prefixsum_1m` p95 at **5.1x**, still comfortably
+above the **3x** structural floor that `GateFloorTests` enforces; every other cell sits
+between 7.6x and 16.5x. Nothing here is one noisy runner away from reddening a clean
+tree.
+
+Two honest caveats, so this is not read as more than it is. First, three hosted samples
+is a small sample of runner variance — the standing protection against a recurrence of
+the aged-out freak is the median-anchored floor terms, not this run. Second, the
+sub-microsecond query scenarios (`column_query`, `line_query`, `column_geometry_query`) sit
+near the nanosecond quantization of the clock, so their headroom ratios are coarse; the
+`3x` floor, not this table, is what structurally guarantees them.
+
+### 12.5 AC9's hosted half — the three-way checksum diff
+
+This slice authorized budget-literal and gate-classification changes only, so **no
+workload may have moved**. Timings differ local vs hosted by design; checksums must not.
+Extraction used exactly section 9's function, so a tuple parsed two ways cannot differ
+for reasons unrelated to the engine:
+
+```bash
+extract_checksums() {
+  sed -nE 's/.*mode=([a-z_]+).*scenario=([^ ]+).*checksum=([0-9]+).*/\1|\2\t\3/p' "$1" | sort -u
+}
+```
+
+**A correction to the plan's Task 8 Step 3, found while executing it.** Applied to a
+whole hosted run log this function yields **54** tuples, not 46, so the plan's
+`[ "$N" -eq 46 ] || exit 1` assertion **fails as written** — on a perfectly healthy run.
+The extra 8 come from the two non-gate diagnostic steps, which also print
+`mode=`/`scenario=`/`checksum=` fields but are not gated scenarios: `memory_shape` (5)
+and `memory_observation` (3). Section 9's local set never saw them because it extracts
+from gate-only output. The fix is a filter, not a different count; intent is preserved:
+
+```bash
+grep -v '^memory_shape|\|^memory_observation|' raw.tsv > gated.tsv   # 54 -> 46
+```
+
+This is a real defect in the plan step, recorded here because the next slice to follow
+that recipe will hit it too.
+
+With the filter applied, all four sets hold exactly 46 tuples:
+
+```
+local (section 9)              46
+slice 43 anchor                46
+PR-head 31268616348 (filtered) 46   (raw 54)
+push    31307764210 (filtered) 46   (raw 54)
+```
+
+Every pairwise `diff` printed nothing and exited 0:
+
+| Comparison | Result |
+|---|---|
+| local vs PR-head `31268616348` | **EMPTY** |
+| local vs push `31307764210` | **EMPTY** |
+| PR-head vs push | **EMPTY** |
+| local vs slice 43 anchor | **EMPTY** |
+| PR-head vs slice 43 anchor | **EMPTY** |
+| push vs slice 43 anchor | **EMPTY** |
+
+The three-way internal diff proves three *environments* agree — but three identically
+wrong sets would also pass it, so that is not by itself proof the workload held. The
+**cross-slice anchor** is what carries that weight: all 46 tuples equal the values Slice
+43 recorded in
+`docs/superpowers/verification/2026-07-18-absolute-product-budget.md`, computed before
+any of this slice's changes existed. The anchor document holds 54 raw `checksum=` lines
+which `sort -u` collapses to 46 — the count is asserted **before** the diff, because a
+document recording two *different* checksums for one `(mode, scenario)` key would yield
+47+ and must fail loudly rather than diff away.
+
+**Conclusion: no workload moved.** This slice changed budget literals and the ceiling
+classification, and nothing else observable.
+
+### 12.6 AC9 summary
+
+| Item | Evidence | Result |
+|---|---|---|
+| Both runs green at **step level** | every step `conclusion=success`; only `Complete docs-only PR` skipped | CONFIRMED |
+| Three required jobs present | Host / iOS / WASM | CONFIRMED |
+| WASM compiled and blocked, not skipped | 4x `result=pass … blocking=true`, `blocking_failures=0` | CONFIRMED |
+| Twelve blocking gate steps | all present, all step-level success | CONFIRMED |
+| 46 `gate=pass`, 0 `gate=fail` | grep counts | CONFIRMED |
+| Absolute ceiling is total | 41x `=1666666`, 5x `=16666666`, **0x `=exempt`** | CONFIRMED |
+| `swift test` | 362 / 0 | CONFIRMED |
+| No swallowed failures | 0 `continue-on-error` in workflow and log | CONFIRMED |
+| Tightening watch-list | 6/6 pass, tightest 5.1x vs a 3x floor | CONFIRMED, risk did not materialize |
+| Checksums | 46 tuples, 6/6 pairwise diffs empty, equal to slice 43's anchor | CONFIRMED, no workload moved |
+
+**AC9 is discharged.**
