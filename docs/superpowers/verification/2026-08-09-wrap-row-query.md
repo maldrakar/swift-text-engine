@@ -400,7 +400,16 @@ diverges. Reverted immediately; `git diff` on the mutated file confirmed empty.
 
 ### Drill 5 — linear scan replacing the provider-native inverse (`WrapRowQueryCountTests`)
 
-Mutated `Sources/TextEngineCore/WrapPositionQuery.swift`, replacing the
+This drill exists in **two forms**, run against two different shapes of
+`ProbeCounter`. Form A is the original drill, recorded at implementation time. Form
+B is a second scan shape the fix-wave review (post-slice-53 whole-branch review)
+identified as **invisible to Form A's counter** — that gap, not a new drill, is what
+motivated widening `ProbeCounter` to sum `firstVisualRowCalls +
+visualRowCountCalls` (`totalCalls`) rather than track `firstVisualRowCalls` alone.
+
+**Form A — linear scan reading `firstVisualRow(ofLine:)` per step** (the scan
+originally shipped in this drill). Mutated
+`Sources/TextEngineCore/WrapPositionQuery.swift`, replacing the
 `logicalLine(containingVisualRow:)` call with a linear scan.
 
 Observed (`EXPECTED RED`), all three `WrapRowQueryCountTests` tests failed, probe
@@ -415,7 +424,7 @@ WrapRowQueryCountTests.swift:87: testProbeCountDoesNotGrowLinearlyWithTheDocumen
   XCTAssertLessThan failed: ("1004") is not less than ("102")
 ```
 
-Observed probe counts under the drill: **704, 1004, 1026** (the clamp case at 1026
+Observed probe counts under Form A: **704, 1004, 1026** (the clamp case at 1026
 sits slightly above the predicted ~700-1000 band — it walks from a boundary near
 `lineCount` rather than from 0). Contrast run under the same still-in-place mutation:
 `WrapRowQueryRoundTripTests` (1/1) and the three other mapping suites
@@ -425,6 +434,71 @@ probe-count pin can see the regression. Reverted; `git diff` on the mutated file
 confirmed empty, `git status --porcelain` showed only the two new test files
 untracked. Re-run post-revert: `PASS` on both `WrapRowQueryRoundTripTests` and
 `WrapRowQueryCountTests`.
+
+**Form B — linear scan reading `visualRowCount(inLine:)` per step** (added in the
+post-slice-53 fix wave). Mutated the same call site in `WrapPositionQuery.swift`
+to a scan of the same shape, but walking `visualRowCount(inLine:)` per line
+examined instead of `firstVisualRow(ofLine:)`:
+
+```swift
+var scanLine = 0
+var scanCumulative = 0
+while true {
+    let rowsInScanLine = layout.visualRowCount(inLine: scanLine)
+    if scanCumulative + rowsInScanLine > globalRow { break }
+    scanCumulative += rowsInScanLine
+    scanLine += 1
+}
+let logicalLine = scanLine
+```
+
+First, reproduced the gap the review reported: with `CountingVisualRowLayout`
+still forwarding `visualRowCount(inLine:)` **uncounted** (the shape shipped at
+Task 8, `Tests/TextEngineCoreTests/WrapRowQueryCountTests.swift` before this
+fix wave), all three `WrapRowQueryCountTests` stayed **GREEN** under the Form B
+mutation:
+
+```
+Executed 3 tests, with 0 failures (0 unexpected) in 0.004 seconds
+```
+
+and the observed total for `testInRangeQueryIsLogarithmicOnTheLayoutAxis`,
+forced out via a temporary failing assertion, was exactly **3**
+(`firstVisualRowCalls=3 visualRowCountCalls=0 total=3`) — the 2 ladder probes plus
+the 1 final `rowInLine` probe, with the entire scan itself invisible because
+nothing counts `visualRowCount(inLine:)` calls. This confirms the review's finding:
+the old counter cannot see this scan shape at any document size.
+
+Then, with `ProbeCounter` widened to `totalCalls = firstVisualRowCalls +
+visualRowCountCalls` (this fix wave's change) and the same Form B mutation still in
+place, all three `WrapRowQueryCountTests` went **RED**:
+
+```
+WrapRowQueryCountTests.swift:123: testClampedQueriesStillSearchTheLayoutAxis
+  XCTAssertLessThanOrEqual failed: ("1027") is greater than ("14") - y=16385.0
+WrapRowQueryCountTests.swift:96: testInRangeQueryIsLogarithmicOnTheLayoutAxis
+  XCTAssertLessThanOrEqual failed: ("704") is greater than ("14")
+WrapRowQueryCountTests.swift:105: testProbeCountDoesNotGrowLinearlyWithTheDocument
+  XCTAssertLessThan failed: ("1004") is not less than ("102")
+```
+
+Observed probe counts under Form B with the widened counter: **704, 1004, 1027**
+(the clamp case at 1027 differs from Form A's 1026 by one probe — a shape artifact
+of the two scans' loop bounds, not a discrepancy worth chasing). Contrast run under
+the same still-in-place Form B mutation: `WrapRowQueryTests` (2/2),
+`WrapRowQueryValidationTests` (12/12), `WrapRowQueryEquivalenceTests` (9/9), and
+`WrapRowQueryRoundTripTests` (1/1) all stayed **GREEN** — same story as Form A, the
+scan is correct, only slow. Reverted both the source mutation and the temporary
+uncounted-forwarding probe; `git diff` on `WrapPositionQuery.swift` confirmed empty
+before commit; `swift test --filter WrapRowQueryCountTests` re-run post-revert:
+`PASS`, `Executed 3 tests, with 0 failures (0 unexpected)`.
+
+**Net effect**: Form A was always visible to the counter (it reads
+`firstVisualRow`, the one field the original `ProbeCounter` tracked). Form B was
+invisible to that same counter — a scan can walk the document via either provider
+call, and a counter that only watches one of them has a blind spot exactly the size
+of the other. Widening `ProbeCounter` to sum both closes it: both forms now redden
+identically (modulo the one-probe shape difference above).
 
 ### Drill 6 — parity is blind to absence (`WrapViewportVirtualizer.swift`)
 

@@ -14,6 +14,15 @@ import TextEngineCore
 final class WrapRowQueryCountTests: XCTestCase {
     private final class ProbeCounter {
         var firstVisualRowCalls = 0
+        var visualRowCountCalls = 0
+
+        /// Every bound below is checked against this SUM, not either field alone. A
+        /// bound pinned to only `firstVisualRowCalls` would go blind to a scan that
+        /// walks the document by reading `visualRowCount(inLine:)` per step instead —
+        /// exactly the mutation form the widened Drill 5 exercises — and the reverse
+        /// holds too. Summing both provider calls closes that hole: a scan cannot hide
+        /// in whichever one the counter used to ignore.
+        var totalCalls: Int { firstVisualRowCalls + visualRowCountCalls }
     }
 
     private struct CountingVisualRowLayout: VisualRowLayoutSource {
@@ -26,7 +35,11 @@ final class WrapRowQueryCountTests: XCTestCase {
         func columnCount(inLine line: Int) -> Int { base.columnCount(inLine: line) }
         func columnOffset(inLine line: Int, column: Int) -> Double { base.columnOffset(inLine: line, column: column) }
         func canBreak(beforeColumn column: Int, inLine line: Int) -> Bool { base.canBreak(beforeColumn: column, inLine: line) }
-        func visualRowCount(inLine line: Int) -> Int { base.visualRowCount(inLine: line) }
+
+        func visualRowCount(inLine line: Int) -> Int {
+            counter.visualRowCountCalls += 1
+            return base.visualRowCount(inLine: line)
+        }
 
         func firstVisualRow(ofLine line: Int) -> Int {
             counter.firstVisualRowCalls += 1
@@ -64,10 +77,15 @@ final class WrapRowQueryCountTests: XCTestCase {
     // + <= ceilLog2(lineCount) + 1 inside the default logicalLine search
     // + 1 final probe for the rowInLine subtraction.
     //
-    // The bound is EXACTLY tight at 1024 lines: the search's worst case is 11 probes,
-    // + 2 + 1 = 14 = ceilLog2(1024) + 4. There is no slack, which is deliberate — slack
-    // is what lets a regression hide. If a future change makes this red by one, check
-    // whether a probe was genuinely added before widening the bound.
+    // The bound is tight at 1024 lines but not uniformly across every test: the
+    // clamped-to-bottom sample (testClampedQueriesStillSearchTheLayoutAxis, y past the
+    // document's end) drives the default binary search to its full 11-probe worst
+    // case, landing exactly on 2 + 11 + 1 = 14 = ceilLog2(1024) + 4 — no slack there.
+    // The in-range sample (testInRangeQueryIsLogarithmicOnTheLayoutAxis) measures one
+    // probe under, at 13, because its target isn't the search's adversarial worst
+    // case. Slack is still what lets a regression hide, so if a future change makes
+    // either test red, check whether a probe was genuinely added before widening the
+    // bound.
     private var expectedMax: Int { ceilLog2(Self.lineCount) + 4 }
 
     func testInRangeQueryIsLogarithmicOnTheLayoutAxis() {
@@ -75,7 +93,7 @@ final class WrapRowQueryCountTests: XCTestCase {
         guard case .row = ViewportVirtualizer.visualRowAt(y: 700.0 * Self.rowHeight + 3.0, layout: layout) else {
             return XCTFail("expected .row")
         }
-        XCTAssertLessThanOrEqual(counter.firstVisualRowCalls, expectedMax)
+        XCTAssertLessThanOrEqual(counter.totalCalls, expectedMax)
     }
 
     func testProbeCountDoesNotGrowLinearlyWithTheDocument() {
@@ -84,7 +102,7 @@ final class WrapRowQueryCountTests: XCTestCase {
             return XCTFail("expected .row")
         }
         // A linear walk over 1024 lines would blow this by two orders of magnitude.
-        XCTAssertLessThan(counter.firstVisualRowCalls, Self.lineCount / 10)
+        XCTAssertLessThan(counter.totalCalls, Self.lineCount / 10)
     }
 
     /// `LineAtQueryCountTests.testClampBranchesDoNotSearch` pins a two-probe CONSTANT for
@@ -100,9 +118,9 @@ final class WrapRowQueryCountTests: XCTestCase {
                 return XCTFail("expected .row at y=\(y)")
             }
             XCTAssertNotEqual(located.clamp, .inRange, "y=\(y) must clamp")
-            XCTAssertGreaterThan(counter.firstVisualRowCalls, 2,
+            XCTAssertGreaterThan(counter.totalCalls, 2,
                                  "the no-wrap axis's two-probe clamp constant must NOT hold here")
-            XCTAssertLessThanOrEqual(counter.firstVisualRowCalls, expectedMax, "y=\(y)")
+            XCTAssertLessThanOrEqual(counter.totalCalls, expectedMax, "y=\(y)")
         }
     }
 }

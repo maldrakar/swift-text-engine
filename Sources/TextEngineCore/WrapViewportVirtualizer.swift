@@ -6,10 +6,13 @@
 /// callers, and each caller's *next* check differs (`compute` validates its input,
 /// `visualRowAt` validates `y`). Hoisting it would change `compute`'s shipped error
 /// precedence against its input-value checks (`nonFiniteValue`,
-/// `negativeViewportHeight`, `negativeOverscan`) — a pairing no test currently
-/// covers, so this placement is an architectural decision, not a test-enforced one.
-/// (`testLadderOrderLineCountBeforeRowHeight` pins only lineCount-before-rowHeight,
-/// which survives the hoist.)
+/// `negativeViewportHeight`, `negativeOverscan`) — a pairing no test currently covers
+/// on `compute`'s side, so that half of the placement is an architectural decision,
+/// not a test-enforced one. (`testLadderOrderLineCountBeforeRowHeight` pins only
+/// lineCount-before-rowHeight, which survives the hoist.) `visualRowAt`'s side of the
+/// same pairing IS test-enforced: `testLadderOrderLineCountBeforeY` pins
+/// lineCount-before-`y`, and sinking this check into the shared helper (so it would
+/// run after `y`'s finiteness check) reddens exactly that test.
 enum VisualRowLayoutValidation {
     case failure(ViewportValidationError)
     case empty                            // lineCount == 0

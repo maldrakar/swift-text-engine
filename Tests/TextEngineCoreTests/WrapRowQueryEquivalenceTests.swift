@@ -69,5 +69,24 @@ final class WrapRowQueryEquivalenceTests: XCTestCase {
     func testNarrowWidthIsNotEquivalent() {
         let layout = TestVisualRowLayout(lines: Self.lines, rowHeight: Self.rowHeight, wrapWidth: 5.0)
         XCTAssertGreaterThan(layout.firstVisualRow(ofLine: Self.lines.count), Self.lines.count)
+
+        // The fixture premise above only shows there ARE more rows than lines; this
+        // shows the two queries actually disagree at a concrete y, not merely that
+        // they could. At rowHeight 12, line 0 alone packs to 3 rows at this width
+        // (firstVisualRow(ofLine: 1) == 3), so its rows span y in [0, 36) — y = 35 is
+        // still inside line 0 on the wrap axis. The no-wrap axis has no notion of
+        // wrapping, so at the same y it has already stepped to its third logical line.
+        // Assert on the located indices themselves (not a hand-typed expectation) so
+        // this fails honestly if the fixture or the packing ever changes.
+        let uniform = UniformLineMetrics(lineCount: Self.lines.count, lineHeight: Self.rowHeight)
+        let y = 35.0
+        guard case .row(let located) = ViewportVirtualizer.visualRowAt(y: y, layout: layout) else {
+            return XCTFail("expected .row at y=\(y)")
+        }
+        guard case .line(let reference) = ViewportVirtualizer.lineAt(y: y, metrics: uniform) else {
+            return XCTFail("expected .line at y=\(y)")
+        }
+        XCTAssertNotEqual(located.logicalLine, reference.lineIndex,
+                          "y=\(y) must diverge from the no-wrap axis")
     }
 }
