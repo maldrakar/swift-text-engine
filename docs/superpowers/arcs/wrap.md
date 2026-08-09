@@ -31,11 +31,18 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    narrower width has more rows → a couple more binary-search steps; flat within
    noise, not constant). Criterion 1 is `partial`, not `done`: the *exact*
    width-change reindex is Ω(N), so `done` needs the veneer fork V, not this node.
-3. `pending` — **← next (SELECTED by the Slice 52 review, topological).** y→row
+3. `pending` — **← next: SELECTED as Slice 53 (user, 2026-08-09; topological).** y→row
    inverse query (wrap-aware `lineAt` analog over the visual-row axis). Criterion 3
-   (next query analog behind node 2). Folds in D-13: node 3 would otherwise add a
-   **fourth** copy of the per-axis binary-search body, so consolidation is cheapest
-   here.
+   (next query analog behind node 2). **Fold-in rationale corrected at selection time:**
+   node 3 does **not** add a fourth copy of the per-axis binary-search body — following
+   node 2's own reuse pattern it reuses `binarySearchLineIndex` (via
+   `UniformLineMetrics`) plus the existing `binarySearchLogicalLine`. D-13 therefore
+   rides on merit, not on "cheapest here". The fold-in that *is* on this node's own
+   axis: `UniformLineMetrics` (`LineMetricsSource.swift:103`) overrides **neither**
+   native hook, so the reused compute pays O(log totalRows) where a uniform axis answers
+   by division — the exact term behind this map's "not literally width-independent"
+   correction. Floating-point edges make it a design question for the brainstorm, not a
+   drive-by.
 4. `pending` — point→(row, cell) wrap-aware composite. Criterion 3.
 5. `pending` — `--memory-shape` extension to the wrap path. Criterion 2.
 6. `pending` — Wrap benchmark modes promoted to blocking gates
@@ -259,3 +266,30 @@ criterion stays open for ten slices.
   un-drilled (the `gov_p95` self-test's max branch, invisible behind a fail-fast
   harness) and drilled it — it bites. Slice 52's review **selects Slice 53 = node 3
   (y→row wrap analog)**, folding in D-13.
+- 2026-08-09 — **User chose Option A: Slice 53 = node 3** (y→row wrap analog), the
+  topological next step and the first slice to advance a wrap criterion since slice 50.
+  Two corrections came out of the live re-verification this selection ran against the
+  tree, and both are recorded rather than absorbed silently:
+  (a) the slice-52 review's D-13 fold-in argument — "node 3 would otherwise add a
+  **fourth** copy of the per-axis binary-search body" — **does not hold**. Node 3
+  following node 2's reuse pattern (`compute(_:layout:)` reuses
+  `UniformLineMetrics(lineCount: totalRows, lineHeight: rowHeight)`,
+  `WrapViewportVirtualizer.swift:22`) adds no copy: it reuses `binarySearchLineIndex`
+  and the existing `binarySearchLogicalLine`. D-13 stays open on merit; it is a fold-in
+  candidate for this slice, not a forced one.
+  (b) A fold-in candidate on node 3's **own** axis surfaced in its place:
+  `UniformLineMetrics` (`LineMetricsSource.swift:103`) overrides neither
+  `lineIndex(containingOffset:)` nor `firstLineIndex(withOffsetAtOrAbove:startingAtLine:)`,
+  so wrap compute pays O(log totalRows) on both boundary searches where a uniform axis
+  answers by division — the term behind this map's own "not literally width-independent"
+  correction. Deferred to the node-3 brainstorm as a design question (floating-point
+  edges), not pre-decided here.
+  **D-9** (open P2, born slice 46, ≥ 3 completed slices old and passed over by the
+  slice-52 review's escalation check) was surfaced at selection time and is
+  `deferred(user, 2026-08-09)`: slice 52 converted it from a stale named list into a
+  re-derivable observable (`gov_p95=median|max` per scenario), so the watch is on demand
+  rather than transcribed. **D-17** (P2, one slice old, does not escalate) rides —
+  mitigated by a one-line "do not use `${PIPESTATUS[0]}`" instruction in slice 53's plan;
+  it was re-verified live at selection time and still inverts a failure into a pass under
+  zsh, with `AGENTS.md:642` still recommending it by name. Next inner-loop step:
+  brainstorm node 3.
