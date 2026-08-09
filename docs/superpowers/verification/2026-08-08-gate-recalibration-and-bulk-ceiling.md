@@ -59,9 +59,10 @@ The derive script prints one line per scenario, so the summary is a count over i
 output, not something the script prints itself. `$SWEEP` is that captured sweep:
 
 ```
+$ WORK="$(mktemp -d)"
 $ SWEEP="$WORK/sweep-preharvest.txt"
 $ ./.github/scripts/derive-gate-budgets.sh docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv > "$SWEEP"
-$ echo "median=$(grep -c 'gov_p95=median' "$SWEEP") max=$(grep -c 'gov_p95=max' "$SWEEP") total=$(wc -l < "$SWEEP")"
+$ echo "median=$(grep -c 'gov_p95=median' "$SWEEP") max=$(grep -c 'gov_p95=max' "$SWEEP") total=$(wc -l < "$SWEEP" | tr -d ' ')"
 median=45 max=1 total=46
 $ grep 'gov_p95=max' "$SWEEP"
 line_query|uniform_1k                          n=20  p95[med=24     max=73    ] p99[med=52     max=84    ] budget_p95=220     budget_p99=440     gov_p95=max    margin_p95=3.0x margin_p99=5.2x
@@ -1298,7 +1299,7 @@ tree.
 Two honest caveats, so this is not read as more than it is. First, three hosted samples
 is a small sample of runner variance — the standing protection against a recurrence of
 the aged-out freak is the median-anchored floor terms, not this run. Second, the
-sub-100ns query scenarios (`column_query`, `line_query`, `column_geometry_query`) sit
+sub-microsecond query scenarios (`column_query`, `line_query`, `column_geometry_query`) sit
 near the nanosecond quantization of the clock, so their headroom ratios are coarse; the
 `3x` floor, not this table, is what structurally guarantees them.
 
