@@ -31,9 +31,11 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    narrower width has more rows → a couple more binary-search steps; flat within
    noise, not constant). Criterion 1 is `partial`, not `done`: the *exact*
    width-change reindex is Ω(N), so `done` needs the veneer fork V, not this node.
-3. `pending` — **← next (lean, topological).** y→row inverse query (wrap-aware
-   `lineAt` analog over the visual-row axis). Criterion 3 (next query analog behind
-   node 2).
+3. `pending` — **← next (SELECTED by the Slice 52 review, topological).** y→row
+   inverse query (wrap-aware `lineAt` analog over the visual-row axis). Criterion 3
+   (next query analog behind node 2). Folds in D-13: node 3 would otherwise add a
+   **fourth** copy of the per-axis binary-search body, so consolidation is cheapest
+   here.
 4. `pending` — point→(row, cell) wrap-aware composite. Criterion 3.
 5. `pending` — `--memory-shape` extension to the wrap path. Criterion 2.
 6. `pending` — Wrap benchmark modes promoted to blocking gates
@@ -113,6 +115,23 @@ analog behind node 2); first genuine fork remains node 8 (host order) / fork V.
 Lean is node 3, and this review **selects** it rather than routing — the aging
 defers D-8/D-9 are surfaced for a re-affirmation, but neither is a fork blocking
 the selection.
+
+Map pass 2026-08-09 (Slice 52 review): Slice 52 was the **calibration route** and
+consumed **no map node** — the third slice of that shape, after the process slice 48
+and the debt slice 51. Nothing it shipped touched wrap feasibility, so nodes 3–9 and
+fork V stand unrevised and un-relearned; there is no correction to absorb this pass.
+What it did change is the ground **node 6** stands on: criterion 4 binds future wrap
+gates to the harvest → derive recipe and to the absolute 60 FPS ceiling by reference,
+and slice 52 repaired both inputs — the calibration evidence now includes the last ten
+slices, and a future wrap mode classifies itself into an `AbsoluteCeiling` class
+instead of inheriting a boolean designed before wrap existed. One row to read when
+node 6 arrives: the class-membership pin filters on `isGateable`, so the four
+non-gateable modes (including `wrapCompute`) are classified but **pinned by nothing**
+(review P3 #4) — that inertness ends the moment a wrap mode becomes gateable. Next
+step is **topological** (node 3 = y→row); first genuine fork remains node 8 (host
+order) / fork V. Lean is node 3, and this review **selects** it — the arc cannot
+afford a fourth consecutive no-criterion slice, which is precisely how a brief
+criterion stays open for ten slices.
 
 ## Decision log
 
@@ -222,3 +241,21 @@ the selection.
   ten slices, and a future wrap mode classifies itself into a ceiling class rather than
   inheriting a flag designed before wrap existed. **Node 3 (y→row) remains the lean**
   for the next feature slice.
+- 2026-08-09 — **Slice 52 merged** ([PR #123](https://github.com/maldrakar/swift-text-engine/pull/123),
+  merge `955dec8`; post-merge push run `31307764210` green at step level — 46
+  `gate=pass`, 362/0, 41 lines at `1666666` + 5 at `16666666`, zero `=exempt`; hosted
+  proof PR [#124](https://github.com/maldrakar/swift-text-engine/pull/124)). Calibration
+  route complete: **D-8 discharged** (the item that could not be scheduled without a
+  product target since slice 43), **D-9 amended in place** — shape-transition half
+  discharged by fact, thin-axis half still open but now carrying the rule and the ratio
+  rather than a list, because the single max-governed scenario *moved* in one harvest.
+  27 of 46 budgets moved, 6 tightened; the tightening risk — the one direction no
+  re-derivation can catch — was closed empirically on three hosted samples. Scoreboard
+  unchanged **by design**. New debt: **D-17** (P2 — `${PIPESTATUS[0]}` is un-failable
+  under zsh, invalidating the compliance evidence slice 51's review recorded for D-2)
+  plus four P3s (D-18…D-21). In-slice falsifiability catch: the plan's Task 5 TDD red
+  was *unreachable as written*, and the mutation substituted for it proved strictly
+  more than the planned red would have. This review's audit found one guarantee
+  un-drilled (the `gov_p95` self-test's max branch, invisible behind a fail-fast
+  harness) and drilled it — it bites. Slice 52's review **selects Slice 53 = node 3
+  (y→row wrap analog)**, folding in D-13.
