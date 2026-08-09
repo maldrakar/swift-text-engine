@@ -239,11 +239,14 @@ public struct VisualRowGeometry: Equatable {
     }
 }
 
-/// Result of `ViewportVirtualizer.visualRows`. Generic — its `.rows` payload is the
-/// provider-holding `VisualRowCursor<Metrics>`, so this is the project's first
-/// generic query enum. NOT `Equatable` (the cursor is mutable, non-`Equatable`);
-/// tests pattern-match and compare the drained `[VisualRow]`.
-public enum VisualRowQuery<Metrics: WrapMetricsSource> {
+/// Result of `ViewportVirtualizer.visualRows` — how ONE logical line packs into
+/// visual rows. Named for what it answers, which keeps the axis-query family
+/// consistent (`LineQuery` y→line, `ColumnQuery` x→cell, `PointQuery` (x,y)→both,
+/// and future y→row query): this is a packing result, not a position query.
+/// Generic — its `.rows` payload is the provider-holding `VisualRowCursor<Metrics>`,
+/// so this is the project's first generic query enum. NOT `Equatable` (the cursor is
+/// mutable, non-`Equatable`); tests pattern-match and compare the drained `[VisualRow]`.
+public enum VisualRowPackingQuery<Metrics: WrapMetricsSource> {
     case rows(VisualRowCursor<Metrics>)      // one or more rows (a blank line ⇒ one)
     case failure(ViewportValidationError)    // invalid wrapWidth or malformed metrics
 }

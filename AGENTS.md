@@ -108,7 +108,7 @@ predicate — the provider owns break opportunities; the core owns no Unicode
 tables) and `ViewportVirtualizer.visualRows(inLine:wrapWidth:metrics:)`, which
 validates `wrapWidth` (`> 0`, `+∞` allowed — the equivalence case) and runs the
 same O(1) metrics ladder as `columnAt`, then hands back a generic streaming
-`VisualRowCursor<Metrics>` (wrapped in `VisualRowQuery<Metrics>` — the first
+`VisualRowCursor<Metrics>` (wrapped in `VisualRowPackingQuery<Metrics>` — the first
 generic query enum). The cursor greedily packs one logical line into `VisualRow`s
 in **visual order**: each row ends at the largest legal break-opportunity that
 fits `wrapWidth`, and an unbreakable run wider than `wrapWidth` **overflows**

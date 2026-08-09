@@ -85,7 +85,7 @@ extension ViewportVirtualizer {
         inLine line: Int,
         wrapWidth: Double,
         metrics: Metrics
-    ) -> VisualRowQuery<Metrics> {
+    ) -> VisualRowPackingQuery<Metrics> {
         let count = metrics.columnCount(inLine: line)
         if count < 0 {
             return .failure(.negativeColumnCount)
