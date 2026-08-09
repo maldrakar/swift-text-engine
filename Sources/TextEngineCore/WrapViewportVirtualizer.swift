@@ -5,8 +5,11 @@
 /// `lineCount < 0` deliberately does NOT live here: it is the first check in BOTH
 /// callers, and each caller's *next* check differs (`compute` validates its input,
 /// `visualRowAt` validates `y`). Hoisting it would change `compute`'s shipped error
-/// precedence, which `WrapComputeValidationTests.testLadderOrderLineCountBeforeRowHeight`
-/// pins.
+/// precedence against its input-value checks (`nonFiniteValue`,
+/// `negativeViewportHeight`, `negativeOverscan`) — a pairing no test currently
+/// covers, so this placement is an architectural decision, not a test-enforced one.
+/// (`testLadderOrderLineCountBeforeRowHeight` pins only lineCount-before-rowHeight,
+/// which survives the hoist.)
 enum VisualRowLayoutValidation {
     case failure(ViewportValidationError)
     case empty                            // lineCount == 0
