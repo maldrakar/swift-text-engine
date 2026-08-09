@@ -410,25 +410,41 @@ when it doesn't.
 **The absolute product ceiling** is a *second, distinct* gate axis, added in Slice 43.
 The regression band above asks "slower than recent code?"; the absolute ceiling asks
 "still fast enough for the 60 FPS frame?" — the brief's «превратить "60 FPS" в
-измеримый headless budget». It is `GateLimits.absoluteP99Nanoseconds = 1_000_000_000 /
-60 / 10 = 1_666_666` ns (10% of a 60 FPS frame), **FIXED**: never recalibrated, never
-corpus-derived. On breach the gate reports `reason=budget_absolute_exceeded`, and the
-response is to **fix the code/architecture — never loosen the ceiling** (contrast
-`budget_stale`, which says re-derive the budget). It is checked against **p99 only**
-(a passing p99 implies a passing p95 under a uniform ceiling).
+измеримый headless budget». Both ceilings derive from one constant,
+`GateLimits.frameNanoseconds = 1_000_000_000 / 60 = 16_666_666` ns (a 60 FPS frame):
+`.scrollFrame` is a tenth of it (`1_666_666` ns) and `.discreteAction` is the whole
+frame. Both are **FIXED**: never recalibrated, never corpus-derived. On breach the gate
+reports `reason=budget_absolute_exceeded`, and the response is to **fix the
+code/architecture — never loosen the ceiling** (contrast `budget_stale`, which says
+re-derive the budget). It is checked against **p99 only** (within one mode, p95 <= p99
+within any sample, so a passing p99 implies a passing p95 — the implication does not
+cross modes now that two ceilings exist).
 
-It applies to **frame-hot-path** modes only — viewport compute, incremental recompute
-after a single edit, and every position/geometry query — classified by the exhaustive
-`BenchmarkMode.isFrameHotPath` switch. `bulk_structural_mutation` is **exempt**: a bulk
-multi-line paste / range delete is a discrete user action that may span more than one
-frame, not a scroll-frame op, so its gate line prints `budget_absolute_p99_ns=exempt`
-and it stays gated on its regression budget alone. Two standing tests keep the axes
-coherent: `GateLogicTests` pins the excluded set to exactly
-`{bulk_structural_mutation}`, and `GateFloorTests` pins that **every frame-hot-path
-regression p99 budget stays under the absolute ceiling** — read the binding scenario
-and its margin from that test against the committed budgets, not from a number quoted
-here, which the next re-derivation falsifies. So the runtime absolute gate can never
-redden a clean tree.
+It applies to **every** gated mode — there is no exemption. Each classifies itself
+through the exhaustive `BenchmarkMode.absoluteCeiling` switch into one of two classes:
+`.scrollFrame` (a tenth of a frame) for viewport compute, incremental recompute after a
+single edit, and every position/geometry query; `.discreteAction` (a whole frame) for
+`bulk_structural_mutation`. A scroll frame must not drop, so the headless core is
+rationed to a tenth of it and the rest belongs to shaping, rasterization, and UI. A bulk
+multi-line paste or range delete is a discrete action the user has already accepted a
+pause for, so it may cost a dropped frame, and the core's budget for it is that whole
+frame's work. Every gated line prints its own `budget_absolute_p99_ns` and
+`headroom_absolute_p99`.
+
+**The product target is enforced statically, and knowing where matters.**
+`GateFloorTests` pins every gated regression p99 budget UNDER its class ceiling, and
+`GateLogicTests` pins the `.discreteAction` set to exactly `{bulk_structural_mutation}`
+plus both ceilings to the frame math. Because that floor pin holds, any p99 above a
+class ceiling is also above that mode's regression budget, and `budget_exceeded` is
+evaluated first — so the runtime `budget_absolute_exceeded` branch has no reachable
+inhabitant on a healthy tree. That is the design: when slow drift finally produces a
+re-derived budget at or above a ceiling, the **floor pin** goes red at `swift test`
+time, before the gate steps in the same job run, and that red IS the ceiling firing.
+The runtime reason is defense-in-depth for a tree where the pin was removed or budgets
+were edited without running the suite. Do not go hunting for a hosted
+`budget_absolute_exceeded`; read the binding scenario and its margin from the pin
+against the committed budgets, not from a number quoted here, which the next
+re-derivation falsifies.
 
 **The recipe** is two committed scripts, not a table to copy — harvest fresh
 hosted evidence, then re-derive from it:
@@ -453,6 +469,20 @@ budget_p95 = round_up_2sf(max(8 x median(hosted p95), 3 x max(hosted p95)))
 budget_p99 = round_up_2sf(max(2 x budget_p95, 8 x median(p99), 3 x max(p99)))
 ```
 
+**Take a budget baseline before the harvest, and diff the directions afterwards.**
+Run the sweep once against the corpus *before* appending and keep its
+`budget_p95`/`budget_p99` per scenario; after re-deriving, compare. A budget that
+**loosened** is harmless — the runtime gate compares against this run's latency and
+says `budget_stale` if it drifts too far. A budget that **tightened** is the one that
+reddens a clean tree: an old freak sample aged out of the window (exactly what the
+window is for), and the new budget may sit closer to observed latency than a noisy
+runner can reliably clear. Nothing in the arithmetic catches that — no re-derivation
+runs the benchmark — so the tightened set is the watch-list for the hosted PR-head
+run. Taking the baseline first is the cheap path to it; if you forget, it is still
+recoverable from git rather than lost: `git show <pre-harvest-ref>:<corpus-path> >
+old.tsv`, then `derive-gate-budgets.sh old.tsv` reconstructs it from the corpus as it
+stood before the append.
+
 **`hosted` in the recipe is a trailing window, not full corpus history.** It
 means the most-recent **N=20 distinct runs, keyed on the integer run id** —
 older rows still sit in the corpus but are not counted. The corpus stays
@@ -472,7 +502,16 @@ and the budget it forced can tighten back down. What covers that freak's
 *recurrence*, if it happens again, is the median-anchored floor terms (and,
 on p99, the `2 x budget_p95` floor) — not the `3x`-max term, which is exactly
 what just relaxed. p95 carries only the median term as backup, so it is the
-thin axis to watch.
+thin axis — and
+`derive-gate-budgets.sh` now prints `gov_p95=median|max` beside every budget, so
+which term governs is read rather than recomputed. A budget is median-governed
+exactly when `max / med <= 2.67`, which is why nearly every one of them is; the
+current count belongs in a verification record, not here, since the next harvest
+moves it. The value is in the **flip**, and the two directions differ:
+`median -> max` means a freak sample took over the floor and the budget LOOSENED
+(the runtime gate catches that loudly, as `budget_stale`), while `max -> median`
+means the freak aged out and the budget TIGHTENED — the direction that reddens a
+clean tree, and the one nothing else catches before a hosted run.
 
 The 3x floor covers both statistics because the gate fails on either.
 
@@ -536,7 +575,7 @@ cross-check the *selection*). A red here after a harvest is `budget_stale` — r
 that mode and re-commit; it is not an engine regression. `round_up_2sf` gives natural
 hysteresis, so most small median/max moves round to the same budget and do not trip it.
 
-**When an optimization trips the ceiling, raise the budget — never the
+**When an optimization trips the headroom ceiling, raise the budget — never the
 ceiling.** A genuine speed-up (Slices 29/30 cut `lineAt` from O(log^2 N) to
 O(log N)) or faster hardware will push headroom past the ceiling and turn a
 gate red on a clean tree. That is the ceiling working as designed. Re-derive
@@ -545,8 +584,9 @@ that budget from fresh hosted evidence in the same PR that caused the shift.
 **The three failure reasons are distinct instructions**, and the gate says
 which one applies: `reason=budget_exceeded` means the code got slower — fix
 the code. `reason=budget_stale` means the budget no longer reflects reality —
-re-derive it. `reason=budget_absolute_exceeded` means a frame-hot-path op blew
-the fixed 60 FPS ceiling — fix the code/architecture, never loosen the ceiling.
+re-derive it. `reason=budget_absolute_exceeded` means an op blew the fixed 60 FPS
+ceiling of its class — a tenth of a frame on the scroll path, a whole frame for a
+discrete bulk action — fix the code/architecture, never loosen the ceiling.
 
 ## Development workflow ("slices")
 

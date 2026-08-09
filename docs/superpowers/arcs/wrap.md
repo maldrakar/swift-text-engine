@@ -207,3 +207,18 @@ the selection.
   topological next step, with D-13 as a fold-in candidate; **D-8** is surfaced
   for a user re-affirm-or-schedule (it needs a product target before it can ever
   be scheduled), and D-9's self-healing prediction is now testable and unchecked.
+- 2026-08-08 — **Slice 52 selected and shipped: the calibration route.** The slice-51
+  review's lean was Option A (map node 3, y→row); the **user chose Option C** after
+  live evidence at selection time showed the calibration base was ten slices stale —
+  the corpus unappended since 2026-07-18, zero post-slice-45 runs in the N=20 window.
+  The same call gave **D-8** the product target it had waited on since slice 43 (one
+  whole 60 FPS frame for a discrete action), converting it from "cannot be scheduled"
+  into ordinary work. Slice 52 advances **no wrap criterion** and consumes **no map
+  node**, like slices 48 and 51 — but it is not housekeeping: the wrap brief's fourth
+  criterion binds future wrap gates to *this* recipe («по существующему рецепту
+  калибровки (harvest → derive)») and to the absolute 60 FPS ceiling, so a stale
+  evidence base and a pre-wrap boolean were both de-risking work for a named criterion.
+  After it, a future `wrap_compute` gate calibrates against evidence including the last
+  ten slices, and a future wrap mode classifies itself into a ceiling class rather than
+  inheriting a flag designed before wrap existed. **Node 3 (y→row) remains the lean**
+  for the next feature slice.

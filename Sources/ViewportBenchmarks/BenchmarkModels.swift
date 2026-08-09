@@ -58,23 +58,49 @@ enum GateLimits {
 
     // The absolute PRODUCT ceiling -- a distinct axis from the regression band above.
     // The brief's success criterion is 60 FPS, "p95/p99 latency для пересчёта viewport".
-    // A core frame operation must fit well within a frame, so the ceiling is 10% of a
-    // 60 FPS frame, leaving the remainder for shaping/rasterization/UI outside the
-    // headless core.
+    // Every mode is held to one of two ceilings derived from this frame constant; which
+    // one is AbsoluteCeiling, chosen per mode by BenchmarkMode.absoluteCeiling. There is
+    // no exemption.
     //
     // FIXED: never recalibrated, never corpus-derived. A regression budget is anchored to
-    // a moving median and can be legitimately re-derived looser slice by slice; this
-    // ceiling is the fixed product target that catches the slow drift a regression budget
+    // a moving median and can be legitimately re-derived looser slice by slice; these
+    // ceilings are the fixed product targets that catch the slow drift a regression budget
     // re-derives around. On breach the response is to fix the code/architecture, NEVER to
     // loosen the ceiling (contrast budget_stale, which says re-derive the budget). See
     // AGENTS.md "## Gate budgets".
-    //
-    // Applies to frame-hot-path modes only (BenchmarkMode.isFrameHotPath): bulk multi-line
-    // edits are discrete, possibly multi-frame user actions and are exempt. GateLogicTests
-    // pins this frame math; GateFloorTests pins that every frame-hot-path regression p99
-    // budget stays under this ceiling.
     static let frameNanoseconds: Int64 = 1_000_000_000 / 60          // 16_666_666 (60 FPS)
-    static let absoluteP99Nanoseconds: Int64 = frameNanoseconds / 10 // 1_666_666 (10% of a frame)
+}
+
+// Which absolute PRODUCT ceiling a mode is held to. Two classes, total by
+// construction: an exhaustive switch on BenchmarkMode forces a newly added mode to
+// classify itself, so it can neither silently inherit a ceiling nor silently escape
+// one. There is no exempt case -- a branch with no inhabitants is the same defect as
+// a gate that cannot fail.
+//
+// FIXED, both of them: never recalibrated, never corpus-derived. On breach the
+// response is to fix the code/architecture, NEVER to loosen the ceiling (contrast
+// budget_stale, which says re-derive the budget).
+enum AbsoluteCeiling: Equatable {
+    // A scroll frame must not drop, so every participant is rationed and the headless
+    // core's ration is a tenth: the other 90% belongs to shaping, rasterization, and
+    // UI outside it.
+    case scrollFrame
+
+    // A discrete action -- a bulk multi-line paste or range delete -- is one the user
+    // has already accepted a perceptible pause for, so it MAY cost a dropped frame.
+    // The core's budget for the action it triggered is that whole frame's worth of
+    // work. Note this is NOT "the core may consume 100% of a live frame": the frame in
+    // question is one the product has agreed to drop.
+    case discreteAction
+
+    var p99Nanoseconds: Int64 {
+        switch self {
+        case .scrollFrame:
+            return GateLimits.frameNanoseconds / 10   // 1_666_666
+        case .discreteAction:
+            return GateLimits.frameNanoseconds        // 16_666_666
+        }
+    }
 }
 
 enum GateFailureReason: String {
@@ -116,12 +142,14 @@ struct BenchmarkSummary {
         p99BudgetNanoseconds.map { BenchmarkSummary.headroom(budget: $0, observed: p99Nanoseconds) }
     }
 
-    // The absolute product ceiling's headroom: fixed ceiling / observed p99. Non-optional
-    // (the ceiling always exists) and reuses the zero-observed guard, so p99 == 0 yields
-    // .infinity rather than trapping. Only meaningful for frame-hot-path modes; the output
-    // layer emits it for those and marks the rest exempt.
+    // The absolute product ceiling's headroom: this mode's class ceiling / observed p99.
+    // Non-optional (every mode has a ceiling) and reuses the zero-observed guard, so
+    // p99 == 0 yields .infinity rather than trapping. Meaningful for every mode, and the
+    // output layer emits a number for every gated one -- the two classes differ in the
+    // ceiling divided, not in whether it exists.
     var headroomAbsoluteP99: Double {
-        BenchmarkSummary.headroom(budget: GateLimits.absoluteP99Nanoseconds, observed: p99Nanoseconds)
+        BenchmarkSummary.headroom(
+            budget: mode.absoluteCeiling.p99Nanoseconds, observed: p99Nanoseconds)
     }
 
     // A gate that cannot fail is not a gate. `budgetStale` is what makes an
@@ -139,18 +167,21 @@ struct BenchmarkSummary {
             return .budgetExceeded
         }
 
-        // The absolute PRODUCT ceiling, checked for frame-hot-path modes only (bulk edits
-        // are discrete, possibly multi-frame actions -- exempt). It sits between
-        // budgetExceeded and budgetStale on purpose: across the frame-hot-path set every
-        // regression p99 budget sits under the 1.67ms ceiling (GateFloorTests pins this
-        // against the committed budgets -- read the binding scenario and its margin from
-        // that test, not from a number frozen into this comment), so exceeding the
-        // ceiling always also exceeds the regression budget and a
-        // plain regression already reported budget_exceeded above. This therefore fires
-        // ONLY when the regression budget passes but the frame is blown -- the slow drift a
-        // re-derived regression budget cannot catch. It never masks budget_stale, which
-        // needs a tiny observed (huge headroom) where this check is silent.
-        if mode.isFrameHotPath, p99Nanoseconds > GateLimits.absoluteP99Nanoseconds {
+        // The absolute PRODUCT ceiling, per class (AbsoluteCeiling). Position between
+        // budgetExceeded and budgetStale is deliberate but, on a healthy tree,
+        // unobservable: GateFloorTests pins every gated budget UNDER its class ceiling,
+        // so any p99 above a ceiling is also above that mode's regression budget and the
+        // branch above already returned budgetExceeded. This branch therefore has no
+        // reachable inhabitant while that pin holds -- which is the design, not an
+        // oversight. It is defense-in-depth for a tree where the pin has been removed or
+        // budgets edited without running the suite; the product target itself is enforced
+        // by testEveryGatedBudgetIsUnderItsClassCeiling, at swift test time. Do not go
+        // looking for a hosted budget_absolute_exceeded: the pin fires first, by design.
+        //
+        // The ordering still matters for that degraded tree: inverted, a blown frame
+        // would be reported as a stale budget. It never masks budgetStale, which needs a
+        // tiny observed (huge headroom) where this check is silent.
+        if p99Nanoseconds > mode.absoluteCeiling.p99Nanoseconds {
             return .budgetAbsoluteExceeded
         }
 

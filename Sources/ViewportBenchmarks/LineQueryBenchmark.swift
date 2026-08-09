@@ -18,7 +18,7 @@ func lineQueryScenarios() -> [LineQueryScenario] {
     [
         LineQueryScenario(name: "uniform_1k", providerName: "uniform",
                           lineCount: 1_000, useBalancedTree: false,
-                          p95BudgetNanoseconds: 220, p99BudgetNanoseconds: 440),
+                          p95BudgetNanoseconds: 190, p99BudgetNanoseconds: 440),
         LineQueryScenario(name: "uniform_100k", providerName: "uniform",
                           lineCount: 100_000, useBalancedTree: false,
                           p95BudgetNanoseconds: 280, p99BudgetNanoseconds: 560),
@@ -27,10 +27,10 @@ func lineQueryScenarios() -> [LineQueryScenario] {
                           p95BudgetNanoseconds: 320, p99BudgetNanoseconds: 640),
         LineQueryScenario(name: "balanced_tree_100k", providerName: "balanced_tree",
                           lineCount: 100_000, useBalancedTree: true,
-                          p95BudgetNanoseconds: 1_500, p99BudgetNanoseconds: 3_000),
+                          p95BudgetNanoseconds: 1_700, p99BudgetNanoseconds: 3_400),
         LineQueryScenario(name: "balanced_tree_1m", providerName: "balanced_tree",
                           lineCount: 1_000_000, useBalancedTree: true,
-                          p95BudgetNanoseconds: 1_700, p99BudgetNanoseconds: 3_400),
+                          p95BudgetNanoseconds: 2_100, p99BudgetNanoseconds: 4_200),
     ]
 }
 

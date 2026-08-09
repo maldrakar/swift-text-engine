@@ -28,13 +28,13 @@ func columnGeometryQueryScenarios() -> [ColumnGeometryQueryScenario] {
                                     p95BudgetNanoseconds: 350, p99BudgetNanoseconds: 700),
         ColumnGeometryQueryScenario(name: "uniform_1m", providerName: "uniform",
                                     columnCount: 1_000_000, useVariableAdvance: false,
-                                    p95BudgetNanoseconds: 400, p99BudgetNanoseconds: 800),
+                                    p95BudgetNanoseconds: 390, p99BudgetNanoseconds: 780),
         ColumnGeometryQueryScenario(name: "prefixsum_100k", providerName: "prefixsum",
                                     columnCount: 100_000, useVariableAdvance: true,
-                                    p95BudgetNanoseconds: 730, p99BudgetNanoseconds: 1_500),
+                                    p95BudgetNanoseconds: 820, p99BudgetNanoseconds: 1_700),
         ColumnGeometryQueryScenario(name: "prefixsum_1m", providerName: "prefixsum",
                                     columnCount: 1_000_000, useVariableAdvance: true,
-                                    p95BudgetNanoseconds: 760, p99BudgetNanoseconds: 1_600),
+                                    p95BudgetNanoseconds: 690, p99BudgetNanoseconds: 1_400),
     ]
 }
 

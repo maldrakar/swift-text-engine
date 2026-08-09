@@ -88,23 +88,18 @@ enum BenchmarkMode: CaseIterable {
         }
     }
 
-    // Whether the absolute product ceiling (GateLimits.absoluteP99Nanoseconds) applies to
-    // this mode. Frame-hot-path operations run inside the 60 FPS scroll/keystroke loop --
-    // viewport compute, incremental recompute after a single edit, and every
-    // position/geometry query -- so they must fit well within a frame.
-    // bulk_structural_mutation inserts/removes thousands of lines in one operation (a
-    // large paste or range delete): a discrete user action that may legitimately span
-    // more than one frame, NOT on the scroll path. Its hosted p99 (~570us) and
-    // median-derived regression budgets (3-5.8ms) sit ABOVE a 10%-frame ceiling, so it is
-    // gated on its regression budget only and exempt here.
+    // Which absolute product ceiling this mode is held to. Exhaustive, never a
+    // deny-list -- the same discipline as isGateable.
     //
-    // Exhaustive switch, never a deny-list -- the same discipline as isGateable: a new
-    // mode must classify itself, so it cannot silently inherit the ceiling or silently
-    // escape it. testFrameHotPathExclusionsAreExactlyDocumented pins the excluded set.
-    var isFrameHotPath: Bool {
+    // The four non-gateable modes (rangeOnly, memoryShape, memoryObservation,
+    // wrapCompute) must classify under a total function but never reach the gate, so
+    // their value is inert. Worth knowing: the class-membership pin filters on
+    // isGateable and therefore does NOT cover them. Their class is a compile-time
+    // obligation, not a pinned one -- do not expect a test to catch a wrong choice here.
+    var absoluteCeiling: AbsoluteCeiling {
         switch self {
         case .bulkStructuralMutation:
-            return false
+            return .discreteAction
         case .pipeline,
              .rangeOnly,
              .realisticProvider,
@@ -120,7 +115,7 @@ enum BenchmarkMode: CaseIterable {
              .memoryShape,
              .memoryObservation,
              .wrapCompute:
-            return true
+            return .scrollFrame
         }
     }
 }

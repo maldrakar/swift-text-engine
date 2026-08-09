@@ -206,33 +206,34 @@ final class GateLogicTests: XCTestCase {
         }
     }
 
-    // The absolute ceiling applies to frame-hot-path modes only. Bulk multi-line edits
-    // are a discrete, possibly multi-frame user action, not a scroll-frame op, so they
-    // are exempt. Pin the excluded set so the exemption cannot silently widen: an
-    // exhaustive switch forces a new mode to classify itself, and this asserts the only
-    // gated mode that opts out is bulk_structural_mutation.
-    func testFrameHotPathExclusionsAreExactlyDocumented() {
-        let excluded = Set(
+    // Pin the discrete-action class so it cannot silently widen. The exhaustive switch
+    // forces a new mode to classify itself; this asserts the only GATED mode choosing
+    // the one-frame ceiling is bulk_structural_mutation. Non-gateable modes are out of
+    // scope here by construction -- see the note on absoluteCeiling.
+    func testDiscreteActionClassIsExactlyDocumented() {
+        let discrete = Set(
             BenchmarkMode.allCases
-                .filter { $0.isGateable && !$0.isFrameHotPath }
+                .filter { $0.isGateable && $0.absoluteCeiling == .discreteAction }
                 .map(\.outputName))
-        XCTAssertEqual(excluded, ["bulk_structural_mutation"])
+        XCTAssertEqual(discrete, ["bulk_structural_mutation"])
     }
 
-    // The absolute ceiling is data, not logic: pin it to the frame math so it cannot be
+    // Both ceilings are data, not logic: pin them to the frame math so neither can be
     // silently changed or accidentally corpus-derived. FIXED, never recalibrated.
-    func testAbsoluteCeilingIsTenPercentOfFrame() {
+    func testAbsoluteCeilingsArePinnedToTheFrameMath() {
         XCTAssertEqual(GateLimits.frameNanoseconds, 1_000_000_000 / 60)
         XCTAssertEqual(GateLimits.frameNanoseconds, 16_666_666)
-        XCTAssertEqual(GateLimits.absoluteP99Nanoseconds, GateLimits.frameNanoseconds / 10)
-        XCTAssertEqual(GateLimits.absoluteP99Nanoseconds, 1_666_666)
+        XCTAssertEqual(AbsoluteCeiling.scrollFrame.p99Nanoseconds, GateLimits.frameNanoseconds / 10)
+        XCTAssertEqual(AbsoluteCeiling.scrollFrame.p99Nanoseconds, 1_666_666)
+        XCTAssertEqual(AbsoluteCeiling.discreteAction.p99Nanoseconds, GateLimits.frameNanoseconds)
+        XCTAssertEqual(AbsoluteCeiling.discreteAction.p99Nanoseconds, 16_666_666)
     }
 
     // The reason this slice exists: a frame-hot-path op blows the 60 FPS frame while its
     // (legitimately re-derived, looser) regression budget still PASSES. The product gate
     // must catch it -- this is the slow drift the regression gate re-derives around.
     func testAbsoluteCeilingFiresForFrameHotPathMode() {
-        let obsP99 = GateLimits.absoluteP99Nanoseconds + 1  // one ns over the frame ceiling
+        let obsP99 = AbsoluteCeiling.scrollFrame.p99Nanoseconds + 1  // one ns over the frame ceiling
         let s = summary(
             mode: .structuralMutation,
             p95: 100_000, p99: obsP99,
@@ -240,10 +241,15 @@ final class GateLogicTests: XCTestCase {
         XCTAssertEqual(s.gateFailureReason, .budgetAbsoluteExceeded)
     }
 
-    // The same latency/budget shape on a non-hot-path (bulk) mode must NOT fire it: bulk
-    // is exempt from the frame ceiling and gated on its regression budget alone.
+    // The scroll-frame ceiling must NOT reach bulk. Same latency/budget shape as the
+    // frame-hot-path test above; under the two-class model 1.67 ms is far below bulk's
+    // own 16.67 ms ceiling, so the assertion survives while its meaning changes: not
+    // "bulk has no ceiling" but "bulk is not held to the SCROLL-FRAME ceiling".
+    //
+    // Symbolic on purpose, where its partner uses a literal: pinned to scrollFrame it
+    // is what reddens if bulk is ever dragged back onto the tenth-of-a-frame ceiling.
     func testAbsoluteCeilingDoesNotFireForBulkMode() {
-        let obsP99 = GateLimits.absoluteP99Nanoseconds + 1
+        let obsP99 = AbsoluteCeiling.scrollFrame.p99Nanoseconds + 1
         let s = summary(
             mode: .bulkStructuralMutation,
             p95: 100_000, p99: obsP99,
@@ -251,10 +257,27 @@ final class GateLogicTests: XCTestCase {
         XCTAssertNil(s.gateFailureReason)
     }
 
+    // D-8's substance: bulk gets an absolute ceiling of its own -- one whole 60 FPS
+    // frame -- and blowing it is reported even though the regression budget passes.
+    //
+    // The literal is deliberate and must NOT become
+    // `AbsoluteCeiling.discreteAction.p99Nanoseconds + 1`. Written symbolically the
+    // observation would track the ceiling, so raising the ceiling would raise the
+    // observation with it and this test could never fail. Its job in Decision 8's
+    // bracket is exactly to fail if the ceiling rises above 16_666_667 or disappears.
+    func testAbsoluteCeilingFiresForBulkModeAtItsOwnCeiling() {
+        let obsP99: Int64 = 16_666_667  // one ns over one whole 60 FPS frame
+        let s = summary(
+            mode: .bulkStructuralMutation,
+            p95: 100_000, p99: obsP99,
+            budgetP95: 300_000, budgetP99: obsP99 + 100_000)  // regression budget passes
+        XCTAssertEqual(s.gateFailureReason, .budgetAbsoluteExceeded)
+    }
+
     // budget_exceeded outranks the product reason: code that broke even the regression
     // budget reports the familiar regression failure, not the product one.
     func testBudgetExceededOutranksAbsoluteCeiling() {
-        let obsP99 = GateLimits.absoluteP99Nanoseconds + 1
+        let obsP99 = AbsoluteCeiling.scrollFrame.p99Nanoseconds + 1
         let s = summary(
             mode: .structuralMutation,
             p95: 100_000, p99: obsP99,
@@ -274,7 +297,7 @@ final class GateLogicTests: XCTestCase {
 
     // Frame-hot-path gate output carries the fixed ceiling and its headroom, positioned
     // after headroom_p99 and before gate=. 1666666 / 200000 = 8.33 -> "8.3x".
-    func testGateOutputCarriesAbsoluteCeilingForFrameHotPath() {
+    func testGateOutputCarriesScrollFrameCeiling() {
         let line = formatSummary(
             summary(mode: .structuralMutation, p95: 100_000, p99: 200_000,
                     budgetP95: 300_000, budgetP99: 600_000),
@@ -293,15 +316,16 @@ final class GateLogicTests: XCTestCase {
         XCTAssertTrue(absIndex < gateIndex, line)
     }
 
-    // Bulk is exempt: its gate line says so explicitly (a visible marker, not a silent
-    // omission -- the repo's "no silent caps" discipline) and carries no absolute headroom.
-    func testGateOutputMarksBulkExempt() {
+    // Bulk publishes its own ceiling like every other gated mode. Both assertions
+    // inverted from the exemption era: the line carries a NUMBER, and it carries the
+    // headroom token it previously omitted. 16_666_666 / 900_000 = 18.5x.
+    func testGateOutputCarriesDiscreteActionCeilingForBulk() {
         let line = formatSummary(
             summary(mode: .bulkStructuralMutation, p95: 400_000, p99: 900_000,
                     budgetP95: 2_900_000, budgetP99: 5_800_000),
             includeGate: true)
-        XCTAssertTrue(line.contains(" budget_absolute_p99_ns=exempt"), line)
-        XCTAssertFalse(line.contains("headroom_absolute_p99"), line)
+        XCTAssertTrue(line.contains(" budget_absolute_p99_ns=16666666"), line)
+        XCTAssertTrue(line.contains(" headroom_absolute_p99=18.5x"), line)
         XCTAssertTrue(line.contains(" gate=pass"), line)
     }
 

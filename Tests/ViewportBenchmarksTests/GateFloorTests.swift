@@ -81,9 +81,10 @@ private func corpusExtremes(from text: String, windowSize: Int) -> [String: Corp
 }
 
 // Parse derive-gate-budgets.sh stdout into key -> (p95, p99). Each scenario line is
-// `<key>  n=... p95[...] p99[...] budget_p95=<int> budget_p99=<int> margin...` (the key is
-// %-46s-padded, so field 0 is the key with no embedded spaces, and the two budgets are
-// whitespace-delimited `budget_p9x=<int>` tokens). A line missing either token is skipped:
+// `<key>  n=... p95[...] p99[...] budget_p95=<int> budget_p99=<int> gov_p95=<median|max>
+// margin...` (the key is %-46s-padded, so field 0 is the key with no embedded spaces, and
+// the two budgets are whitespace-delimited `budget_p9x=<int>` tokens). A line missing
+// either budget token is skipped:
 // combined with the "every gated key must be present" assertion in the test, that turns any
 // rename/removal of those output tokens into a loud missing-key failure, not a silent pass --
 // so the test transitively pins the derive script's output shape as well as its arithmetic.
@@ -396,29 +397,31 @@ final class GateFloorTests: XCTestCase {
         }
     }
 
-    // The runtime companion to Decision 4's ordering: the absolute product ceiling is
-    // enforced at runtime for frame-hot-path modes, and this pins the static half -- every
-    // frame-hot-path gated scenario's committed regression p99 budget must sit UNDER the
-    // ceiling. If a budget crossed it, the absolute gate would fire on a clean tree (a
-    // regression budget is >= its own observed latency, so budget < ceiling => observed <
-    // ceiling with room). Bulk is filtered out here exactly as isFrameHotPath filters it
-    // at runtime, so the two agree. The binding scenario is the slowest frame-hot-path p99
-    // budget (currently structural_mutation|1m); its live margin under the ceiling is what
-    // this test enforces, so read the assertion rather than a number that rots here. This is
-    // the check that would have caught the original bulk_structural_mutation batch_4096
-    // collision (its budgets exceeded the ceiling).
-    func testEveryFrameHotPathBudgetIsUnderTheAbsoluteCeiling() {
-        let frameHotPath = everyGatedBudget().filter { $0.mode.isFrameHotPath }
-        XCTAssertFalse(frameHotPath.isEmpty)
+    // THIS TEST IS THE PRODUCT GATE. Under it, the runtime budget_absolute_exceeded
+    // branch is unreachable: a budget below its class ceiling means any p99 above the
+    // ceiling is also above the budget, and budgetExceeded is evaluated first. So the
+    // moment slow drift finally produces a re-derived budget at or above a class
+    // ceiling, THIS is what goes red -- at swift test time, before the gate steps in
+    // the same host job ever run. The runtime reason is defense-in-depth for a tree
+    // where this pin has been removed or budgets were edited without running the suite.
+    //
+    // Read the binding scenario and its margin from the assertion, never from a number
+    // written here: the next re-derivation falsifies it.
+    func testEveryGatedBudgetIsUnderItsClassCeiling() {
+        let budgets = everyGatedBudget()
+        XCTAssertFalse(budgets.isEmpty)
 
-        for budget in frameHotPath {
+        for budget in budgets {
+            let ceiling = budget.mode.absoluteCeiling
             XCTAssertLessThan(
-                budget.p99, GateLimits.absoluteP99Nanoseconds,
-                "\(budget.key): regression p99 budget \(budget.p99) is at or above the "
-                    + "absolute frame ceiling \(GateLimits.absoluteP99Nanoseconds) — the "
-                    + "absolute gate would fire on a clean tree. Reclassify the mode as not "
-                    + "frame-hot-path, raise the ceiling fraction (a conscious product "
-                    + "decision), or accept the op is too slow for a frame.")
+                budget.p99, ceiling.p99Nanoseconds,
+                "\(budget.key): regression p99 budget \(budget.p99) is at or above its "
+                    + "\(ceiling) ceiling of \(ceiling.p99Nanoseconds) ns. This test is the "
+                    + "product gate and this red IS the 60 FPS ceiling firing: fix the code "
+                    + "or the architecture — NEVER loosen the ceiling, and never corpus-derive "
+                    + "it (contrast budget_stale, which does say re-derive). The only other "
+                    + "legitimate response is moving this mode to the other AbsoluteCeiling "
+                    + "class, which is a product decision needing its own argument.")
         }
     }
 }

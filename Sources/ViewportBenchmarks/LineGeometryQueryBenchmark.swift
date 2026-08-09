@@ -35,7 +35,7 @@ func lineGeometryQueryScenarios() -> [LineGeometryQueryScenario] {
                                   p95BudgetNanoseconds: 380, p99BudgetNanoseconds: 760),
         LineGeometryQueryScenario(name: "balanced_tree_100k", providerName: "balanced_tree",
                                   lineCount: 100_000, useBalancedTree: true,
-                                  p95BudgetNanoseconds: 2_400, p99BudgetNanoseconds: 4_800),
+                                  p95BudgetNanoseconds: 3_000, p99BudgetNanoseconds: 6_000),
         LineGeometryQueryScenario(name: "balanced_tree_1m", providerName: "balanced_tree",
                                   lineCount: 1_000_000, useBalancedTree: true,
                                   p95BudgetNanoseconds: 3_400, p99BudgetNanoseconds: 6_800),
