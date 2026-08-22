@@ -5,8 +5,9 @@ This slice shipped `ViewportVirtualizer.visualRowAt(y:layout:)` — the wrap-awa
 (mapping, validation/parity, infinite-width equivalence, round-trip + probe-count
 bound) and the observational, non-gateable `--wrap-row-query` benchmark mode. It
 touches no gated code path: no gate budget, no gate scenario, and no CI workflow file
-changed. Sections 1-9 record the local sweep this task ran directly. Section 10 is a
-pending stub for hosted CI evidence — no PR exists yet.
+changed. Sections 1-9 record the local sweep this task ran directly. Section 10 records the
+hosted CI evidence: its PR-head half (10.1) is filled in from the real logs of run
+`31361526438`; its post-merge half (10.2) stays pending until the branch merges.
 
 ---
 
@@ -537,35 +538,218 @@ Reverted; `git diff` on the mutated file confirmed empty. Post-revert re-run:
 `PASS post-revert (row) -> Executed 12 tests, with 0 failures (0 unexpected)`,
 `PASS post-revert (compute) -> Executed 11 tests, with 0 failures (0 unexpected)`.
 
-## 10. Hosted CI proof — PENDING
+## 10. Hosted CI proof
 
-No PR exists for this slice yet, so hosted evidence cannot be recorded now. This
-section is a placeholder listing exactly what must be pasted in once the PR-head run
-and the post-merge push run both complete, at **step level** (not job-conclusion
-level — a green job can hide a dead `continue-on-error` step):
+Two halves, and only one of them can exist before merge. **10.1 (PR-head) is
+recorded below, from the real logs.** **10.2 (post-merge push) remains PENDING** — it
+is the one open item in AC13.
 
-**Host tests and benchmark gate job**, on both the PR-head run and the post-merge push
-run:
-- The `swift test` step's tail line, with its test count (expected around 396, subject
-  to whatever else lands on `main` before merge).
-- All twelve `gate=pass` lines (synthetic default, `--realistic-provider`,
-  `--variable-height`, `--variable-height-mutation`, `--structural-mutation`,
-  `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
-  `--column-query`, `--column-geometry-query`, `--point-query`,
-  `--point-geometry-query`).
+Everything below is read at **step level**, not job-conclusion level: a green job can
+hide a dead `continue-on-error` step (the Slice 16 trap). The step inventory was
+pulled first, then the printed lines were extracted from the downloaded logs:
 
-**iOS cross-target compile job**, on both runs:
-- The two target compiles (`TextEngineCore` and `TextEngineReferenceProviders`) for
-  iOS device + simulator, both blocking.
+```bash
+gh run view 31361526438 --json jobs \
+  --jq '.jobs[] | {name, conclusion, steps: [.steps[] | {n: .number, name, conclusion}]}'
+gh run view -R maldrakar/swift-text-engine --job <job-id> --log > <job>.log
+```
 
-**WASM cross-target compile job**, on both runs:
-- All four `result=pass … blocking=true` lines (two kinds — `wasm` and
-  `wasm-embedded` — times two packages — `TextEngineCore` and
-  `TextEngineReferenceProviders`).
+### 10.1 PR-head run — RECORDED
 
-Run IDs, timestamps, and the actual printed lines are **not fabricated here** — they
-will be pasted into this section, verbatim, from the real hosted logs once the PR
-exists and both runs complete.
+PR [#126](https://github.com/maldrakar/swift-text-engine/pull/126), head
+`d17d7092f190a519f2e5440b6cb9189a64b1ad3b`, run
+[`31361526438`](https://github.com/maldrakar/swift-text-engine/actions/runs/31361526438),
+event `pull_request`, started `2026-08-10T06:19:19Z`, finished
+`2026-08-10T06:24:14Z`, run conclusion `success`. All three required contexts green.
+
+`d17d709` is the **code-complete** head: the last commit of the implementation, and
+the tree every line below was measured against. The commit that writes this section
+necessarily moves the PR head (AGENTS.md's D-2 rule 3 — a record cannot assert its own
+HEAD), and because the full `BASE...HEAD` diff is not docs-only, that push starts
+another full run rather than a docs-only shortcut. Recording *that* run would move the
+head again, so the regress is cut here: this section pins the run that tested the
+code, and the definitive proof of the merged tree is 10.2's post-merge push run.
+
+**Step inventory.** Every step of all three jobs reports `conclusion=success`. The
+only `skipped` step in each job is `Complete docs-only PR`, and that is the correct
+branch: the detector classified this PR as **not** docs-only in all three jobs, so the
+heavy path ran rather than being skipped past.
+
+```
+mode=docs_only_pr result=not_docs_only docs_only_pr=false file_count=23 non_doc_count=17
+```
+
+No step was skipped other than the docs-only shortcut above, and no step in the
+workflow can swallow a failure: `grep -n continue-on-error .github/workflows/swift-ci.yml`
+returns nothing (exit 1). Step conclusions alone could not establish that — a
+`continue-on-error` step that fails still leaves the job green — so it is checked
+against the workflow source, not inferred from the run.
+
+#### Host tests and benchmark gate (job `93371182818`)
+
+`Run host tests` step, tail (the second line is the empty Swift Testing harness, not
+a failure — see AGENTS.md):
+
+```
+Executed 396 tests, with 0 failures (0 unexpected) in 6.563 (6.563) seconds
+Test run with 0 tests in 0 suites passed after 0.001 seconds.
+```
+
+396 tests, 0 failures — the same count as the local sweep in section 1, so nothing
+landed on `main` between the local run and the hosted one that changed the suite size.
+
+Twelve gate steps ran, all blocking, none `continue-on-error`, printing **46**
+`gate=pass` lines and **zero** `gate=fail`:
+
+| gate step | scenarios |
+|---|---|
+| Run synthetic benchmark gate | 3 |
+| Run variable-height benchmark gate | 3 |
+| Run variable-height mutation benchmark gate | 3 |
+| Run structural mutation benchmark gate | 3 |
+| Run bulk structural mutation benchmark gate | 5 |
+| Run line query benchmark gate | 5 |
+| Run line geometry query benchmark gate | 5 |
+| Run column query benchmark gate | 5 |
+| Run column geometry query benchmark gate | 5 |
+| Run point query benchmark gate | 4 |
+| Run point geometry query benchmark gate | 4 |
+| Run realistic provider benchmark gate | 1 |
+| **total** | **46** |
+
+(The stub this section replaces said "all twelve `gate=pass` lines". Twelve is the
+number of gated *modes* and therefore of gate steps; the number of `gate=pass`
+**lines** is 46, one per gated scenario — the same 46 that `GateFloorTests` pins.)
+
+All 46, verbatim:
+
+```
+mode=pipeline scenario=1k_lines_20_visible_overscan_0 iterations=10000 operations_per_sample=256 p95_ns=1898 p99_ns=1969 failures=0 budget_p95_ns=21000 budget_p99_ns=42000 headroom_p95=11.1x headroom_p99=21.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=846.5x gate=pass checksum=1319670707200
+mode=pipeline scenario=100k_lines_80_visible_overscan_5 iterations=10000 operations_per_sample=256 p95_ns=7952 p99_ns=8075 failures=0 budget_p95_ns=84000 budget_p99_ns=170000 headroom_p95=10.6x headroom_p99=21.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=206.4x gate=pass checksum=570448232307200
+mode=pipeline scenario=1m_lines_200_visible_overscan_50 iterations=10000 operations_per_sample=256 p95_ns=25500 p99_ns=26195 failures=0 budget_p95_ns=280000 budget_p99_ns=560000 headroom_p95=11.0x headroom_p99=21.4x budget_absolute_p99_ns=1666666 headroom_absolute_p99=63.6x gate=pass checksum=18852477646272000
+mode=variable_height provider=prefix_sum scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=547 p99_ns=583 failures=0 budget_p95_ns=4100 budget_p99_ns=8200 headroom_p95=7.5x headroom_p99=14.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=2858.8x gate=pass checksum=231017730560
+mode=variable_height provider=prefix_sum scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=2135 p99_ns=2179 failures=0 budget_p95_ns=14000 budget_p99_ns=28000 headroom_p95=6.6x headroom_p99=12.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=764.9x gate=pass checksum=101209179008000
+mode=variable_height provider=prefix_sum scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=6991 p99_ns=7086 failures=0 budget_p95_ns=46000 budget_p99_ns=92000 headroom_p95=6.6x headroom_p99=13.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=235.2x gate=pass checksum=3536425156727040
+mode=variable_height_mutation provider=fenwick scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=1019 p99_ns=1090 failures=0 budget_p95_ns=6600 budget_p99_ns=14000 headroom_p95=6.5x headroom_p99=12.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=1529.1x gate=pass checksum=196866548667
+mode=variable_height_mutation provider=fenwick scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=3842 p99_ns=4180 failures=0 budget_p95_ns=24000 budget_p99_ns=48000 headroom_p95=6.2x headroom_p99=11.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=398.7x gate=pass checksum=88324286099072
+mode=variable_height_mutation provider=fenwick scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=12722 p99_ns=13317 failures=0 budget_p95_ns=82000 budget_p99_ns=170000 headroom_p95=6.4x headroom_p99=12.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=125.2x gate=pass checksum=3571078666132451
+mode=structural_mutation provider=balanced_tree scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=2021 p99_ns=2098 failures=0 budget_p95_ns=16000 budget_p99_ns=32000 headroom_p95=7.9x headroom_p99=15.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=794.4x gate=pass checksum=200106952336
+mode=structural_mutation provider=balanced_tree scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=8653 p99_ns=8917 failures=0 budget_p95_ns=71000 budget_p99_ns=150000 headroom_p95=8.2x headroom_p99=16.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=186.9x gate=pass checksum=89494497658324
+mode=structural_mutation provider=balanced_tree scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=30232 p99_ns=31320 failures=0 budget_p95_ns=290000 budget_p99_ns=580000 headroom_p95=9.6x headroom_p99=18.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=53.2x gate=pass checksum=3379593298396981
+mode=bulk_structural_mutation provider=balanced_tree scenario=1k_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=1000 p95_ns=6299 p99_ns=6442 failures=0 budget_p95_ns=51000 budget_p99_ns=110000 headroom_p95=8.1x headroom_p99=17.1x budget_absolute_p99_ns=16666666 headroom_absolute_p99=2587.2x gate=pass checksum=82740062444
+mode=bulk_structural_mutation provider=balanced_tree scenario=100k_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=100000 p95_ns=15554 p99_ns=15749 failures=0 budget_p95_ns=130000 budget_p99_ns=260000 headroom_p95=8.4x headroom_p99=16.5x budget_absolute_p99_ns=16666666 headroom_absolute_p99=1058.3x gate=pass checksum=36564666309410
+mode=bulk_structural_mutation provider=balanced_tree scenario=1m_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=1000000 p95_ns=39962 p99_ns=42143 failures=0 budget_p95_ns=450000 budget_p99_ns=900000 headroom_p95=11.3x headroom_p99=21.4x budget_absolute_p99_ns=16666666 headroom_absolute_p99=395.5x gate=pass checksum=1317343499882000
+mode=bulk_structural_mutation provider=balanced_tree scenario=100k_lines_batch_4096 iterations=2000 operations_per_sample=16 line_count=100000 p95_ns=158980 p99_ns=175823 failures=0 budget_p95_ns=1400000 budget_p99_ns=2800000 headroom_p95=8.8x headroom_p99=15.9x budget_absolute_p99_ns=16666666 headroom_absolute_p99=94.8x gate=pass checksum=2285022074625
+mode=bulk_structural_mutation provider=balanced_tree scenario=1m_lines_batch_4096 iterations=2000 operations_per_sample=16 line_count=1000000 p95_ns=189314 p99_ns=197417 failures=0 budget_p95_ns=3000000 budget_p99_ns=6000000 headroom_p95=15.8x headroom_p99=30.4x budget_absolute_p99_ns=16666666 headroom_absolute_p99=84.4x gate=pass checksum=82203678997143
+mode=line_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=44 p99_ns=56 failures=0 budget_p95_ns=190 budget_p99_ns=440 headroom_p95=4.3x headroom_p99=7.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=29761.9x gate=pass checksum=641440000
+mode=line_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=64 p99_ns=79 failures=0 budget_p95_ns=280 budget_p99_ns=560 headroom_p95=4.4x headroom_p99=7.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=21097.0x gate=pass checksum=63985556480
+mode=line_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=64 p99_ns=78 failures=0 budget_p95_ns=320 budget_p99_ns=640 headroom_p95=5.0x headroom_p99=8.2x budget_absolute_p99_ns=1666666 headroom_absolute_p99=21367.5x gate=pass checksum=639841600000
+mode=line_query provider=balanced_tree scenario=balanced_tree_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=141 p99_ns=150 failures=0 budget_p95_ns=1700 budget_p99_ns=3400 headroom_p95=12.1x headroom_p99=22.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=11111.1x gate=pass checksum=63985600000
+mode=line_query provider=balanced_tree scenario=balanced_tree_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=174 p99_ns=188 failures=0 budget_p95_ns=2100 budget_p99_ns=4200 headroom_p95=12.1x headroom_p99=22.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=8865.2x gate=pass checksum=639841547520
+mode=line_geometry_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=54 p99_ns=73 failures=0 budget_p95_ns=250 budget_p99_ns=500 headroom_p95=4.6x headroom_p99=6.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=22831.0x gate=pass checksum=160641440000
+mode=line_geometry_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=80 p99_ns=94 failures=0 budget_p95_ns=340 budget_p99_ns=680 headroom_p95=4.3x headroom_p99=7.2x budget_absolute_p99_ns=1666666 headroom_absolute_p99=17730.5x gate=pass checksum=267505512960
+mode=line_geometry_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=105 p99_ns=115 failures=0 budget_p95_ns=380 budget_p99_ns=760 headroom_p95=3.6x headroom_p99=6.6x budget_absolute_p99_ns=1666666 headroom_absolute_p99=14492.7x gate=pass checksum=799841600000
+mode=line_geometry_query provider=balanced_tree scenario=balanced_tree_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=324 p99_ns=348 failures=0 budget_p95_ns=3000 budget_p99_ns=6000 headroom_p95=9.3x headroom_p99=17.2x budget_absolute_p99_ns=1666666 headroom_absolute_p99=4789.3x gate=pass checksum=223985600000
+mode=line_geometry_query provider=balanced_tree scenario=balanced_tree_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=382 p99_ns=405 failures=0 budget_p95_ns=3400 budget_p99_ns=6800 headroom_p95=8.9x headroom_p99=16.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=4115.2x gate=pass checksum=852321495040
+mode=column_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 p95_ns=45 p99_ns=59 failures=0 budget_p95_ns=200 budget_p99_ns=440 headroom_p95=4.4x headroom_p99=7.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=28248.6x gate=pass checksum=641440000
+mode=column_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 p95_ns=66 p99_ns=86 failures=0 budget_p95_ns=280 budget_p99_ns=560 headroom_p95=4.2x headroom_p99=6.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=19379.8x gate=pass checksum=63985556480
+mode=column_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 p95_ns=64 p99_ns=79 failures=0 budget_p95_ns=320 budget_p99_ns=640 headroom_p95=5.0x headroom_p99=8.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=21097.0x gate=pass checksum=639841600000
+mode=column_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 p95_ns=109 p99_ns=126 failures=0 budget_p95_ns=500 budget_p99_ns=1000 headroom_p95=4.6x headroom_p99=7.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=13227.5x gate=pass checksum=63985600000
+mode=column_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 p95_ns=114 p99_ns=134 failures=0 budget_p95_ns=600 budget_p99_ns=1200 headroom_p95=5.3x headroom_p99=9.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=12437.8x gate=pass checksum=639841560320
+mode=column_geometry_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 p95_ns=59 p99_ns=76 failures=0 budget_p95_ns=260 budget_p99_ns=520 headroom_p95=4.4x headroom_p99=6.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=21929.8x gate=pass checksum=160641440000
+mode=column_geometry_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 p95_ns=80 p99_ns=98 failures=0 budget_p95_ns=350 budget_p99_ns=700 headroom_p95=4.4x headroom_p99=7.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=17006.8x gate=pass checksum=267505512960
+mode=column_geometry_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 p95_ns=78 p99_ns=90 failures=0 budget_p95_ns=390 budget_p99_ns=780 headroom_p95=5.0x headroom_p99=8.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=18518.5x gate=pass checksum=799841600000
+mode=column_geometry_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 p95_ns=111 p99_ns=123 failures=0 budget_p95_ns=820 budget_p99_ns=1700 headroom_p95=7.4x headroom_p99=13.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=13550.1x gate=pass checksum=223985600000
+mode=column_geometry_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 p95_ns=125 p99_ns=145 failures=0 budget_p95_ns=690 budget_p99_ns=1400 headroom_p95=5.5x headroom_p99=9.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=11494.2x gate=pass checksum=839521520640
+mode=point_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=142 p99_ns=179 failures=0 budget_p95_ns=760 budget_p99_ns=1600 headroom_p95=5.4x headroom_p99=8.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=9311.0x gate=pass checksum=64166237440
+mode=point_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=112 p99_ns=128 failures=0 budget_p95_ns=680 budget_p99_ns=1400 headroom_p95=6.1x headroom_p99=10.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=13020.8x gate=pass checksum=640022280960
+mode=point_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=135 p99_ns=153 failures=0 budget_p95_ns=920 budget_p99_ns=1900 headroom_p95=6.8x headroom_p99=12.4x budget_absolute_p99_ns=1666666 headroom_absolute_p99=10893.2x gate=pass checksum=64166280960
+mode=point_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=152 p99_ns=165 failures=0 budget_p95_ns=1100 budget_p99_ns=2200 headroom_p95=7.2x headroom_p99=13.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=10101.0x gate=pass checksum=640022228480
+mode=point_geometry_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=117 p99_ns=133 failures=0 budget_p95_ns=980 budget_p99_ns=2000 headroom_p95=8.4x headroom_p99=15.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=12531.3x gate=pass checksum=4687694617200924928
+mode=point_geometry_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=110 p99_ns=123 failures=0 budget_p95_ns=990 budget_p99_ns=2000 headroom_p95=9.0x headroom_p99=16.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=13550.1x gate=pass checksum=6036755761047907072
+mode=point_geometry_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=164 p99_ns=173 failures=0 budget_p95_ns=1200 budget_p99_ns=2400 headroom_p95=7.3x headroom_p99=13.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=9633.9x gate=pass checksum=1712152282485110528
+mode=point_geometry_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=184 p99_ns=203 failures=0 budget_p95_ns=1300 budget_p99_ns=2600 headroom_p95=7.1x headroom_p99=12.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=8210.2x gate=pass checksum=5915921755926273280
+mode=realistic_provider provider=large_text scenario=100k_lines_10mb_text iterations=5000 operations_per_sample=256 line_count=100000 document_bytes=11200000 line_bytes=112 p95_ns=9553 p99_ns=9683 failures=0 budget_p95_ns=98000 budget_p99_ns=200000 headroom_p95=10.3x headroom_p99=20.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=172.1x gate=pass checksum=756321289736960
+```
+
+Every one is in band on both statistics and under its class ceiling
+(`budget_absolute_p99_ns=1666666` for the eleven `.scrollFrame` modes,
+`16666666` for `bulk_structural_mutation`, the only `.discreteAction` one — the
+distinction slice 52 introduced, visible here on hosted evidence).
+
+The two non-gate diagnostic steps also ran green: `--memory-shape` printed 5
+`invariant=pass` lines and `--memory-observation` 3 `observation=pass` lines.
+
+#### iOS cross-target compile (job `93371182803`)
+
+Both packages, both destinations, all blocking:
+
+```
+target=ios_device package=core result=pass reason=none blocking=true
+target=ios_simulator package=core result=pass reason=none blocking=true
+target=ios_device package=providers result=pass reason=none blocking=true
+target=ios_simulator package=providers result=pass reason=none blocking=true
+```
+
+The WASM kinds print `result=skipped reason=not_requested blocking=false` in this job
+— correct, it runs `--targets ios`; the WASM kinds are proved in their own job below.
+Toolchain on this job: Swift 6.3.3 (the `macos-latest` default), against 6.2.1 in the
+two container jobs.
+
+#### WASM cross-target compile (job `93371182811`)
+
+All four `result=pass … blocking=true` lines — two kinds x two packages:
+
+```
+target=wasm package=core result=pass reason=none blocking=true
+target=wasm_embedded package=core result=pass reason=none blocking=true
+target=wasm package=providers result=pass reason=none blocking=true
+target=wasm_embedded package=providers result=pass reason=none blocking=true
+```
+
+SDK provisioning succeeded on the first attempt, and both kinds resolved against the
+pinned 6.2.1 bundle:
+
+```
+sdk_install_seconds=5 attempts=1
+wasm_sdk_id target=wasm package=core id=swift-6.2.1-RELEASE_wasm
+wasm_sdk_id target=wasm_embedded package=core id=swift-6.2.1-RELEASE_wasm-embedded
+wasm_sdk_id target=wasm package=providers id=swift-6.2.1-RELEASE_wasm
+wasm_sdk_id target=wasm_embedded package=providers id=swift-6.2.1-RELEASE_wasm-embedded
+```
+
+#### AC9 / AC10 — the harvester-inertness barriers, checked on hosted evidence
+
+The local sweep can only show that `--wrap-row-query` is absent from
+`swift-ci.yml`; whether a hosted run emits anything harvestable is a property of the
+run. Measured over all three job logs of this run:
+
+| barrier | check | result |
+|---|---|---|
+| absent from CI | `grep -c wrap_row_query` over all three job logs | 0, 0, 0 |
+| (same, for node 2's mode) | `grep -c wrap_compute` | 0 |
+| prefixed latency tokens | `grep -c 'query_p95_ns='` | 0 |
+| harvestable rows | `grep -o ' p95_ns=' \| wc -l` | 46 — exactly the gated scenarios, no more |
+
+So a harvest of this run would ingest 46 rows and not one wrap row: the mode is inert
+to the calibration chain by absence, and its token shape is never even exercised
+hosted.
+
+Corroborating D-18 in passing: `grep -o 'checksum=' | wc -l` over this job log yields
+**54**, i.e. 46 + 5 `memory_shape` + 3 `memory_observation` — the exact arithmetic
+D-18 records for why a literal `extract_checksums` count is 54 and not 46.
+
+### 10.2 Post-merge push run — PENDING
+
+Cannot exist yet: the branch is not merged. Once PR #126 merges, the post-merge
+`push` run on `main` must be recorded here to the same depth as 10.1 — step
+inventory, the `swift test` tail, the 46 `gate=pass` lines, the iOS job's four
+`blocking=true` lines and the WASM job's four. Per the repo convention, proof that the
+**merged** code is green is anchored in that push run, not in this PR-head run, and it
+is normally recorded in a follow-up docs-only PR.
+
+Run IDs, timestamps, and printed lines in this section are extracted from the real
+hosted logs, never transcribed by hand and never fabricated.
 
 ---
 
@@ -582,7 +766,8 @@ exists and both runs complete.
 | `--memory-shape` | 5/5 `invariant=pass` |
 | `cross-target-compile.sh --self-test` | `self_test=pass`, exit 0 — shell logic only, not portability evidence |
 | 6 falsifiability drills + Task 2's refactor-safety check | all reproduced their predicted red, all cleanly reverted |
-| Hosted CI proof (section 10) | PENDING — no PR yet |
+| Hosted CI proof — PR-head (section 10.1) | green at step level: 396/0, 46 `gate=pass` / 0 `gate=fail` across 12 gate steps, 4 iOS + 4 WASM `blocking=true` |
+| Hosted CI proof — post-merge (section 10.2) | PENDING — branch not merged yet |
 
 No gate moved. No test regressed. No `.swift` file, `Package.swift`, or
 `.github/**` file changed in this task — this is a documentation-only commit.
