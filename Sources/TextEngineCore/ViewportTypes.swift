@@ -204,6 +204,35 @@ public struct ColumnGeometryLocation: Equatable {
     }
 }
 
+/// Where a document `y` lands on the visual-row axis. Names the row in BOTH coordinate
+/// systems the engine speaks: `globalRow` indexes `compute(_:layout:)`'s `VirtualRange`,
+/// while `(logicalLine, rowInLine)` is what `VisualRow` and `DocumentVisualRowCursor`
+/// speak. `Clamp` is reused from `LineLocation` rather than re-declared — the vertical
+/// clamp question is identical on both axes, and a parallel enum would invite drift.
+public struct VisualRowLocation: Equatable {
+    /// Global visual-row index — the same index space as `compute(_:layout:)`'s range.
+    public let globalRow: Int
+    /// The logical line this row belongs to.
+    public let logicalLine: Int
+    /// 0-based index of this row within `logicalLine`.
+    public let rowInLine: Int
+    /// Whether the query landed inside the document or past an edge.
+    public let clamp: LineLocation.Clamp
+
+    public init(globalRow: Int, logicalLine: Int, rowInLine: Int, clamp: LineLocation.Clamp) {
+        self.globalRow = globalRow
+        self.logicalLine = logicalLine
+        self.rowInLine = rowInLine
+        self.clamp = clamp
+    }
+}
+
+public enum VisualRowQuery: Equatable {
+    case row(VisualRowLocation)           // a real visual row was located
+    case empty                            // empty document: lineCount == 0
+    case failure(ViewportValidationError) // invalid input / malformed layout
+}
+
 /// One visual row of a soft-wrapped logical line: a half-open cell span
 /// `[startColumn, endColumn)` with its advance-sum width, in visual order.
 /// Horizontal only — vertical stacking (y/height) is a later node.
@@ -239,11 +268,14 @@ public struct VisualRowGeometry: Equatable {
     }
 }
 
-/// Result of `ViewportVirtualizer.visualRows`. Generic — its `.rows` payload is the
-/// provider-holding `VisualRowCursor<Metrics>`, so this is the project's first
-/// generic query enum. NOT `Equatable` (the cursor is mutable, non-`Equatable`);
-/// tests pattern-match and compare the drained `[VisualRow]`.
-public enum VisualRowQuery<Metrics: WrapMetricsSource> {
+/// Result of `ViewportVirtualizer.visualRows` — how ONE logical line packs into
+/// visual rows. Named for what it answers, which keeps the axis-query family
+/// consistent (`LineQuery` y→line, `ColumnQuery` x→cell, `PointQuery` (x,y)→both,
+/// `VisualRowQuery` y→row): this is a packing result, not a position query.
+/// Generic — its `.rows` payload is the provider-holding `VisualRowCursor<Metrics>`,
+/// so this is the project's first generic query enum. NOT `Equatable` (the cursor is
+/// mutable, non-`Equatable`); tests pattern-match and compare the drained `[VisualRow]`.
+public enum VisualRowPackingQuery<Metrics: WrapMetricsSource> {
     case rows(VisualRowCursor<Metrics>)      // one or more rows (a blank line ⇒ one)
     case failure(ViewportValidationError)    // invalid wrapWidth or malformed metrics
 }

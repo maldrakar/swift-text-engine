@@ -1,10 +1,10 @@
 import XCTest
 import TextEngineCore
 
-/// Drain a `VisualRowQuery`'s cursor into an array, failing the test if it is
+/// Drain a `VisualRowPackingQuery`'s cursor into an array, failing the test if it is
 /// `.failure`. Shared by every packing/equivalence test.
 func collectRows<M: WrapMetricsSource>(
-    _ query: VisualRowQuery<M>,
+    _ query: VisualRowPackingQuery<M>,
     file: StaticString = #filePath,
     line: UInt = #line
 ) -> [VisualRow] {

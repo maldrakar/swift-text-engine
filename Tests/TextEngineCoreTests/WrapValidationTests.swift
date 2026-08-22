@@ -2,7 +2,7 @@ import XCTest
 import TextEngineCore
 
 final class WrapValidationTests: XCTestCase {
-    private func failure<M: WrapMetricsSource>(_ query: VisualRowQuery<M>) -> ViewportValidationError? {
+    private func failure<M: WrapMetricsSource>(_ query: VisualRowPackingQuery<M>) -> ViewportValidationError? {
         if case .failure(let error) = query { return error }
         return nil
     }

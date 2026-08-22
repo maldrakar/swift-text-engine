@@ -108,7 +108,7 @@ predicate — the provider owns break opportunities; the core owns no Unicode
 tables) and `ViewportVirtualizer.visualRows(inLine:wrapWidth:metrics:)`, which
 validates `wrapWidth` (`> 0`, `+∞` allowed — the equivalence case) and runs the
 same O(1) metrics ladder as `columnAt`, then hands back a generic streaming
-`VisualRowCursor<Metrics>` (wrapped in `VisualRowQuery<Metrics>` — the first
+`VisualRowCursor<Metrics>` (wrapped in `VisualRowPackingQuery<Metrics>` — the first
 generic query enum). The cursor greedily packs one logical line into `VisualRow`s
 in **visual order**: each row ends at the largest legal break-opportunity that
 fits `wrapWidth`, and an unbreakable run wider than `wrapWidth` **overflows**
@@ -149,6 +149,24 @@ uniform axis, with the streamed rows one-per-line — the vertical-axis mirror o
 node 1's per-line oracle. Reaching the first buffered row of a multi-row line
 costs the documented O(rowInLine) within-line walk (greedy packing is
 sequential); random access inside one line is a later, separate provider node.
+
+`ViewportVirtualizer.visualRowAt(y:layout:)` is the **y→row layer** (node 3): the
+wrap-aware `lineAt` analog over the visual-row axis. It runs `compute(_:layout:)`'s
+layout ladder — the *same* extracted helper, so the two entry points accept and
+reject exactly the same layouts by construction — then delegates the row-axis search
+to `lineAt` over `UniformLineMetrics(totalRows, rowHeight)` and names the located row
+in **both** coordinate systems: `globalRow` (the index space `compute(_:layout:)`
+ranges over) plus `logicalLine`/`rowInLine` (what `VisualRow` and
+`DocumentVisualRowCursor` speak), with the reused `LineLocation.Clamp`. It adds no
+new search: one row-axis search, one `logicalLine(containingVisualRow:)` search
+(provider-overridable, binary-search default), one O(1) `firstVisualRow` probe —
+`<= ceilLog2(lineCount) + 4` probes on the layout axis, O(1) core memory. Clamped
+queries take **no special case**: both edges flow through the same two provider calls
+as an in-range hit, so unlike the no-wrap axis a clamped query *does* search. At
+`wrapWidth = ∞` (or any width no line exceeds) it is bit-identical to `lineAt` over a
+uniform axis (equivalence oracle). Geometry — the row's cell span, `y`/`height`, and
+within-row fraction — is a later companion, on the `lineAt`→`lineGeometryAt` pattern.
+`--wrap-row-query` is its observational, **non-gateable** benchmark mode.
 
 ## Package layout
 
@@ -243,6 +261,7 @@ swift run -c release ViewportBenchmarks -- --realistic-provider --gate   # reali
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --wrap-compute   # observational wrap compute width-change demo (not gateable)
+swift run -c release ViewportBenchmarks -- --wrap-row-query   # observational wrap y->row query benchmark (not gateable)
 swift run -c release ViewportBenchmarks -- --help            # all flags
 ./.github/scripts/harvest-gate-corpus.sh --limit 40 --corpus <corpus.tsv>   # hosted CI logs -> NEW corpus rows (append half)
 ./.github/scripts/harvest-gate-corpus.sh --self-test         # harvest selection-logic self-test (no network)
@@ -262,7 +281,7 @@ Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
 `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
 `--column-query`, `--column-geometry-query`, `--point-query`,
 `--point-geometry-query`, `--memory-shape`,
-`--memory-observation`, `--wrap-compute`, `--gate`. Only one mode
+`--memory-observation`, `--wrap-compute`, `--wrap-row-query`, `--gate`. Only one mode
 flag at a time. `--gate` is valid with the default pipeline, `--realistic-provider`,
 `--variable-height`, `--variable-height-mutation`, `--structural-mutation`,
 `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
@@ -270,7 +289,7 @@ flag at a time. `--gate` is valid with the default pipeline, `--realistic-provid
 `--point-geometry-query` modes; it is
 **rejected** with
 `--range-only`, `--memory-shape`,
-`--memory-observation`, `--wrap-compute`.
+`--memory-observation`, `--wrap-compute`, `--wrap-row-query`.
 
 Local WASM build (needs a matching Swift SDK installed):
 `swift build --swift-sdk <id> --target TextEngineCore` for both `wasm` and
