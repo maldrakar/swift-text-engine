@@ -7,7 +7,7 @@ bound) and the observational, non-gateable `--wrap-row-query` benchmark mode. It
 touches no gated code path: no gate budget, no gate scenario, and no CI workflow file
 changed. Sections 1-9 record the local sweep this task ran directly. Section 10 records the
 hosted CI evidence: its PR-head half (10.1) is filled in from the real logs of run
-`31361526438`; its post-merge half (10.2) stays pending until the branch merges.
+`32594785647`; its post-merge half (10.2) stays pending until the branch merges.
 
 ---
 
@@ -638,26 +638,42 @@ hide a dead `continue-on-error` step (the Slice 16 trap). The step inventory was
 pulled first, then the printed lines were extracted from the downloaded logs:
 
 ```bash
-gh run view 31361526438 --json jobs \
+gh run view -R maldrakar/swift-text-engine 32594785647 --json jobs \
   --jq '.jobs[] | {name, conclusion, steps: [.steps[] | {n: .number, name, conclusion}]}'
 gh run view -R maldrakar/swift-text-engine --job <job-id> --log > <job>.log
 ```
 
+Every step of all three jobs was checked programmatically for a conclusion outside
+`{success, skipped}` — none exists — rather than the three job conclusions being read
+off the PR page.
+
 ### 10.1 PR-head run — RECORDED
 
 PR [#126](https://github.com/maldrakar/swift-text-engine/pull/126), head
-`d17d7092f190a519f2e5440b6cb9189a64b1ad3b`, run
-[`31361526438`](https://github.com/maldrakar/swift-text-engine/actions/runs/31361526438),
-event `pull_request`, started `2026-08-10T06:19:19Z`, finished
-`2026-08-10T06:24:14Z`, run conclusion `success`. All three required contexts green.
+`2d7e8176d9941c111553047976779a12a4c4a3fd`, run
+[`32594785647`](https://github.com/maldrakar/swift-text-engine/actions/runs/32594785647),
+event `pull_request`, started `2026-08-22T19:48:06Z`, finished
+`2026-08-22T19:54:08Z`, run conclusion `success`. All three required contexts green.
 
-`d17d709` is the **code-complete** head: the last commit of the implementation, and
-the tree every line below was measured against. The commit that writes this section
-necessarily moves the PR head (AGENTS.md's D-2 rule 3 — a record cannot assert its own
-HEAD), and because the full `BASE...HEAD` diff is not docs-only, that push starts
-another full run rather than a docs-only shortcut. Recording *that* run would move the
-head again, so the regress is cut here: this section pins the run that tested the
-code, and the definitive proof of the merged tree is 10.2's post-merge push run.
+`2d7e817` is the **code-complete** head: the last commit that changes anything the
+suite or the gates read (the drill-7 coverage fold-in of section 1.1), and the tree
+every line below was measured against.
+
+Two earlier runs on this branch were also green and are superseded rather than
+retracted — this section names the newest code-complete head, not every run:
+
+| run | head | what it tested | conclusion |
+|---|---|---|---|
+| [`31361526438`](https://github.com/maldrakar/swift-text-engine/actions/runs/31361526438) | `d17d709` | the implementation before review | `success` (396 tests) |
+| [`32591420156`](https://github.com/maldrakar/swift-text-engine/actions/runs/32591420156) | `2333376` | + the first draft of this section | `success` (396 tests) |
+| [`32594785647`](https://github.com/maldrakar/swift-text-engine/actions/runs/32594785647) | `2d7e817` | + the drill-7 fold-in — **recorded below** | `success` (397 tests) |
+
+The regress is real and is cut deliberately: the commit that writes this section moves
+the PR head (AGENTS.md's D-2 rule 3 — a record cannot assert its own HEAD), and because
+the full `BASE...HEAD` diff is not docs-only, that push starts another full run rather
+than a docs-only shortcut. So this section pins the newest run that tested the *code*;
+the docs commit carrying it is proved by 10.2's post-merge push run, which is the
+definitive one.
 
 **Step inventory.** Every step of all three jobs reports `conclusion=success`. The
 only `skipped` step in each job is `Complete docs-only PR`, and that is the correct
@@ -674,20 +690,30 @@ returns nothing (exit 1). Step conclusions alone could not establish that — a
 `continue-on-error` step that fails still leaves the job green — so it is checked
 against the workflow source, not inferred from the run.
 
-#### Host tests and benchmark gate (job `93371182818`)
+#### Host tests and benchmark gate (job `97083928846`)
 
 `Run host tests` step, tail (the second line is the empty Swift Testing harness, not
 a failure — see AGENTS.md):
 
 ```
-Executed 396 tests, with 0 failures (0 unexpected) in 6.563 (6.563) seconds
+Executed 397 tests, with 0 failures (0 unexpected) in 7.287 (7.287) seconds
 Test run with 0 tests in 0 suites passed after 0.001 seconds.
 ```
 
-396 tests, 0 failures — the count as of head `d17d709`, matching the local sweep in
-section 1 and confirming nothing landed on `main` in between that changed the suite
-size. The post-review fold-in (section 1.1, drill 7) takes the branch to 397, so the
-next PR-head run supersedes this line; that is the run 10.2's successor records.
+397 tests, 0 failures — matching the local re-run in section 1.1 exactly, so nothing
+landed on `main` in between that changed the suite size. The `+1` over the two earlier
+runs is the drill-7 fold-in, and it is proved to have *run hosted* rather than merely
+to have been committed:
+
+```
+Test Case 'WrapRowQueryCountTests.testProbeCountIsIndependentOfRowsPerLine' started at 2026-08-22 19:49:04.505
+Test Case 'WrapRowQueryCountTests.testProbeCountIsIndependentOfRowsPerLine' passed (0.017 seconds)
+```
+
+That matters more than the count: the fold-in's fixture is built by running node 1's
+packer at construction time, so "the test exists" and "the test passed on hosted
+Linux x86_64 against a tree built by a different toolchain than the local one" are
+different claims, and the second is the one recorded here.
 
 Twelve gate steps ran, all blocking, none `continue-on-error`, printing **46**
 `gate=pass` lines and **zero** `gate=fail`:
@@ -715,63 +741,72 @@ number of gated *modes* and therefore of gate steps; the number of `gate=pass`
 All 46, verbatim:
 
 ```
-mode=pipeline scenario=1k_lines_20_visible_overscan_0 iterations=10000 operations_per_sample=256 p95_ns=1898 p99_ns=1969 failures=0 budget_p95_ns=21000 budget_p99_ns=42000 headroom_p95=11.1x headroom_p99=21.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=846.5x gate=pass checksum=1319670707200
-mode=pipeline scenario=100k_lines_80_visible_overscan_5 iterations=10000 operations_per_sample=256 p95_ns=7952 p99_ns=8075 failures=0 budget_p95_ns=84000 budget_p99_ns=170000 headroom_p95=10.6x headroom_p99=21.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=206.4x gate=pass checksum=570448232307200
-mode=pipeline scenario=1m_lines_200_visible_overscan_50 iterations=10000 operations_per_sample=256 p95_ns=25500 p99_ns=26195 failures=0 budget_p95_ns=280000 budget_p99_ns=560000 headroom_p95=11.0x headroom_p99=21.4x budget_absolute_p99_ns=1666666 headroom_absolute_p99=63.6x gate=pass checksum=18852477646272000
-mode=variable_height provider=prefix_sum scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=547 p99_ns=583 failures=0 budget_p95_ns=4100 budget_p99_ns=8200 headroom_p95=7.5x headroom_p99=14.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=2858.8x gate=pass checksum=231017730560
-mode=variable_height provider=prefix_sum scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=2135 p99_ns=2179 failures=0 budget_p95_ns=14000 budget_p99_ns=28000 headroom_p95=6.6x headroom_p99=12.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=764.9x gate=pass checksum=101209179008000
-mode=variable_height provider=prefix_sum scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=6991 p99_ns=7086 failures=0 budget_p95_ns=46000 budget_p99_ns=92000 headroom_p95=6.6x headroom_p99=13.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=235.2x gate=pass checksum=3536425156727040
-mode=variable_height_mutation provider=fenwick scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=1019 p99_ns=1090 failures=0 budget_p95_ns=6600 budget_p99_ns=14000 headroom_p95=6.5x headroom_p99=12.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=1529.1x gate=pass checksum=196866548667
-mode=variable_height_mutation provider=fenwick scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=3842 p99_ns=4180 failures=0 budget_p95_ns=24000 budget_p99_ns=48000 headroom_p95=6.2x headroom_p99=11.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=398.7x gate=pass checksum=88324286099072
-mode=variable_height_mutation provider=fenwick scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=12722 p99_ns=13317 failures=0 budget_p95_ns=82000 budget_p99_ns=170000 headroom_p95=6.4x headroom_p99=12.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=125.2x gate=pass checksum=3571078666132451
-mode=structural_mutation provider=balanced_tree scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=2021 p99_ns=2098 failures=0 budget_p95_ns=16000 budget_p99_ns=32000 headroom_p95=7.9x headroom_p99=15.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=794.4x gate=pass checksum=200106952336
-mode=structural_mutation provider=balanced_tree scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=8653 p99_ns=8917 failures=0 budget_p95_ns=71000 budget_p99_ns=150000 headroom_p95=8.2x headroom_p99=16.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=186.9x gate=pass checksum=89494497658324
-mode=structural_mutation provider=balanced_tree scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=30232 p99_ns=31320 failures=0 budget_p95_ns=290000 budget_p99_ns=580000 headroom_p95=9.6x headroom_p99=18.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=53.2x gate=pass checksum=3379593298396981
-mode=bulk_structural_mutation provider=balanced_tree scenario=1k_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=1000 p95_ns=6299 p99_ns=6442 failures=0 budget_p95_ns=51000 budget_p99_ns=110000 headroom_p95=8.1x headroom_p99=17.1x budget_absolute_p99_ns=16666666 headroom_absolute_p99=2587.2x gate=pass checksum=82740062444
-mode=bulk_structural_mutation provider=balanced_tree scenario=100k_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=100000 p95_ns=15554 p99_ns=15749 failures=0 budget_p95_ns=130000 budget_p99_ns=260000 headroom_p95=8.4x headroom_p99=16.5x budget_absolute_p99_ns=16666666 headroom_absolute_p99=1058.3x gate=pass checksum=36564666309410
-mode=bulk_structural_mutation provider=balanced_tree scenario=1m_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=1000000 p95_ns=39962 p99_ns=42143 failures=0 budget_p95_ns=450000 budget_p99_ns=900000 headroom_p95=11.3x headroom_p99=21.4x budget_absolute_p99_ns=16666666 headroom_absolute_p99=395.5x gate=pass checksum=1317343499882000
-mode=bulk_structural_mutation provider=balanced_tree scenario=100k_lines_batch_4096 iterations=2000 operations_per_sample=16 line_count=100000 p95_ns=158980 p99_ns=175823 failures=0 budget_p95_ns=1400000 budget_p99_ns=2800000 headroom_p95=8.8x headroom_p99=15.9x budget_absolute_p99_ns=16666666 headroom_absolute_p99=94.8x gate=pass checksum=2285022074625
-mode=bulk_structural_mutation provider=balanced_tree scenario=1m_lines_batch_4096 iterations=2000 operations_per_sample=16 line_count=1000000 p95_ns=189314 p99_ns=197417 failures=0 budget_p95_ns=3000000 budget_p99_ns=6000000 headroom_p95=15.8x headroom_p99=30.4x budget_absolute_p99_ns=16666666 headroom_absolute_p99=84.4x gate=pass checksum=82203678997143
-mode=line_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=44 p99_ns=56 failures=0 budget_p95_ns=190 budget_p99_ns=440 headroom_p95=4.3x headroom_p99=7.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=29761.9x gate=pass checksum=641440000
-mode=line_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=64 p99_ns=79 failures=0 budget_p95_ns=280 budget_p99_ns=560 headroom_p95=4.4x headroom_p99=7.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=21097.0x gate=pass checksum=63985556480
-mode=line_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=64 p99_ns=78 failures=0 budget_p95_ns=320 budget_p99_ns=640 headroom_p95=5.0x headroom_p99=8.2x budget_absolute_p99_ns=1666666 headroom_absolute_p99=21367.5x gate=pass checksum=639841600000
-mode=line_query provider=balanced_tree scenario=balanced_tree_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=141 p99_ns=150 failures=0 budget_p95_ns=1700 budget_p99_ns=3400 headroom_p95=12.1x headroom_p99=22.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=11111.1x gate=pass checksum=63985600000
-mode=line_query provider=balanced_tree scenario=balanced_tree_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=174 p99_ns=188 failures=0 budget_p95_ns=2100 budget_p99_ns=4200 headroom_p95=12.1x headroom_p99=22.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=8865.2x gate=pass checksum=639841547520
-mode=line_geometry_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=54 p99_ns=73 failures=0 budget_p95_ns=250 budget_p99_ns=500 headroom_p95=4.6x headroom_p99=6.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=22831.0x gate=pass checksum=160641440000
-mode=line_geometry_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=80 p99_ns=94 failures=0 budget_p95_ns=340 budget_p99_ns=680 headroom_p95=4.3x headroom_p99=7.2x budget_absolute_p99_ns=1666666 headroom_absolute_p99=17730.5x gate=pass checksum=267505512960
-mode=line_geometry_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=105 p99_ns=115 failures=0 budget_p95_ns=380 budget_p99_ns=760 headroom_p95=3.6x headroom_p99=6.6x budget_absolute_p99_ns=1666666 headroom_absolute_p99=14492.7x gate=pass checksum=799841600000
-mode=line_geometry_query provider=balanced_tree scenario=balanced_tree_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=324 p99_ns=348 failures=0 budget_p95_ns=3000 budget_p99_ns=6000 headroom_p95=9.3x headroom_p99=17.2x budget_absolute_p99_ns=1666666 headroom_absolute_p99=4789.3x gate=pass checksum=223985600000
-mode=line_geometry_query provider=balanced_tree scenario=balanced_tree_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=382 p99_ns=405 failures=0 budget_p95_ns=3400 budget_p99_ns=6800 headroom_p95=8.9x headroom_p99=16.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=4115.2x gate=pass checksum=852321495040
-mode=column_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 p95_ns=45 p99_ns=59 failures=0 budget_p95_ns=200 budget_p99_ns=440 headroom_p95=4.4x headroom_p99=7.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=28248.6x gate=pass checksum=641440000
-mode=column_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 p95_ns=66 p99_ns=86 failures=0 budget_p95_ns=280 budget_p99_ns=560 headroom_p95=4.2x headroom_p99=6.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=19379.8x gate=pass checksum=63985556480
-mode=column_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 p95_ns=64 p99_ns=79 failures=0 budget_p95_ns=320 budget_p99_ns=640 headroom_p95=5.0x headroom_p99=8.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=21097.0x gate=pass checksum=639841600000
-mode=column_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 p95_ns=109 p99_ns=126 failures=0 budget_p95_ns=500 budget_p99_ns=1000 headroom_p95=4.6x headroom_p99=7.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=13227.5x gate=pass checksum=63985600000
-mode=column_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 p95_ns=114 p99_ns=134 failures=0 budget_p95_ns=600 budget_p99_ns=1200 headroom_p95=5.3x headroom_p99=9.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=12437.8x gate=pass checksum=639841560320
-mode=column_geometry_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 p95_ns=59 p99_ns=76 failures=0 budget_p95_ns=260 budget_p99_ns=520 headroom_p95=4.4x headroom_p99=6.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=21929.8x gate=pass checksum=160641440000
-mode=column_geometry_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 p95_ns=80 p99_ns=98 failures=0 budget_p95_ns=350 budget_p99_ns=700 headroom_p95=4.4x headroom_p99=7.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=17006.8x gate=pass checksum=267505512960
-mode=column_geometry_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 p95_ns=78 p99_ns=90 failures=0 budget_p95_ns=390 budget_p99_ns=780 headroom_p95=5.0x headroom_p99=8.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=18518.5x gate=pass checksum=799841600000
-mode=column_geometry_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 p95_ns=111 p99_ns=123 failures=0 budget_p95_ns=820 budget_p99_ns=1700 headroom_p95=7.4x headroom_p99=13.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=13550.1x gate=pass checksum=223985600000
-mode=column_geometry_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 p95_ns=125 p99_ns=145 failures=0 budget_p95_ns=690 budget_p99_ns=1400 headroom_p95=5.5x headroom_p99=9.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=11494.2x gate=pass checksum=839521520640
-mode=point_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=142 p99_ns=179 failures=0 budget_p95_ns=760 budget_p99_ns=1600 headroom_p95=5.4x headroom_p99=8.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=9311.0x gate=pass checksum=64166237440
-mode=point_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=112 p99_ns=128 failures=0 budget_p95_ns=680 budget_p99_ns=1400 headroom_p95=6.1x headroom_p99=10.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=13020.8x gate=pass checksum=640022280960
-mode=point_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=135 p99_ns=153 failures=0 budget_p95_ns=920 budget_p99_ns=1900 headroom_p95=6.8x headroom_p99=12.4x budget_absolute_p99_ns=1666666 headroom_absolute_p99=10893.2x gate=pass checksum=64166280960
-mode=point_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=152 p99_ns=165 failures=0 budget_p95_ns=1100 budget_p99_ns=2200 headroom_p95=7.2x headroom_p99=13.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=10101.0x gate=pass checksum=640022228480
-mode=point_geometry_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=117 p99_ns=133 failures=0 budget_p95_ns=980 budget_p99_ns=2000 headroom_p95=8.4x headroom_p99=15.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=12531.3x gate=pass checksum=4687694617200924928
-mode=point_geometry_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=110 p99_ns=123 failures=0 budget_p95_ns=990 budget_p99_ns=2000 headroom_p95=9.0x headroom_p99=16.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=13550.1x gate=pass checksum=6036755761047907072
-mode=point_geometry_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=164 p99_ns=173 failures=0 budget_p95_ns=1200 budget_p99_ns=2400 headroom_p95=7.3x headroom_p99=13.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=9633.9x gate=pass checksum=1712152282485110528
-mode=point_geometry_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=184 p99_ns=203 failures=0 budget_p95_ns=1300 budget_p99_ns=2600 headroom_p95=7.1x headroom_p99=12.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=8210.2x gate=pass checksum=5915921755926273280
-mode=realistic_provider provider=large_text scenario=100k_lines_10mb_text iterations=5000 operations_per_sample=256 line_count=100000 document_bytes=11200000 line_bytes=112 p95_ns=9553 p99_ns=9683 failures=0 budget_p95_ns=98000 budget_p99_ns=200000 headroom_p95=10.3x headroom_p99=20.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=172.1x gate=pass checksum=756321289736960
+mode=pipeline scenario=1k_lines_20_visible_overscan_0 iterations=10000 operations_per_sample=256 p95_ns=1329 p99_ns=1402 failures=0 budget_p95_ns=21000 budget_p99_ns=42000 headroom_p95=15.8x headroom_p99=30.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=1188.8x gate=pass checksum=1319670707200
+mode=pipeline scenario=100k_lines_80_visible_overscan_5 iterations=10000 operations_per_sample=256 p95_ns=5624 p99_ns=5734 failures=0 budget_p95_ns=84000 budget_p99_ns=170000 headroom_p95=14.9x headroom_p99=29.6x budget_absolute_p99_ns=1666666 headroom_absolute_p99=290.7x gate=pass checksum=570448232307200
+mode=pipeline scenario=1m_lines_200_visible_overscan_50 iterations=10000 operations_per_sample=256 p95_ns=18566 p99_ns=19027 failures=0 budget_p95_ns=280000 budget_p99_ns=560000 headroom_p95=15.1x headroom_p99=29.4x budget_absolute_p99_ns=1666666 headroom_absolute_p99=87.6x gate=pass checksum=18852477646272000
+mode=variable_height provider=prefix_sum scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=381 p99_ns=404 failures=0 budget_p95_ns=4100 budget_p99_ns=8200 headroom_p95=10.8x headroom_p99=20.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=4125.4x gate=pass checksum=231017730560
+mode=variable_height provider=prefix_sum scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=1351 p99_ns=1397 failures=0 budget_p95_ns=14000 budget_p99_ns=28000 headroom_p95=10.4x headroom_p99=20.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=1193.0x gate=pass checksum=101209179008000
+mode=variable_height provider=prefix_sum scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=4586 p99_ns=4696 failures=0 budget_p95_ns=46000 budget_p99_ns=92000 headroom_p95=10.0x headroom_p99=19.6x budget_absolute_p99_ns=1666666 headroom_absolute_p99=354.9x gate=pass checksum=3536425156727040
+mode=variable_height_mutation provider=fenwick scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=654 p99_ns=679 failures=0 budget_p95_ns=6600 budget_p99_ns=14000 headroom_p95=10.1x headroom_p99=20.6x budget_absolute_p99_ns=1666666 headroom_absolute_p99=2454.6x gate=pass checksum=196866548667
+mode=variable_height_mutation provider=fenwick scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=2630 p99_ns=2687 failures=0 budget_p95_ns=24000 budget_p99_ns=48000 headroom_p95=9.1x headroom_p99=17.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=620.3x gate=pass checksum=88324286099072
+mode=variable_height_mutation provider=fenwick scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=8547 p99_ns=8750 failures=0 budget_p95_ns=82000 budget_p99_ns=170000 headroom_p95=9.6x headroom_p99=19.4x budget_absolute_p99_ns=1666666 headroom_absolute_p99=190.5x gate=pass checksum=3571078666132451
+mode=structural_mutation provider=balanced_tree scenario=1k_lines_20_visible_overscan_0 iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=1207 p99_ns=1231 failures=0 budget_p95_ns=16000 budget_p99_ns=32000 headroom_p95=13.3x headroom_p99=26.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=1353.9x gate=pass checksum=200106952336
+mode=structural_mutation provider=balanced_tree scenario=100k_lines_80_visible_overscan_5 iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=5061 p99_ns=5212 failures=0 budget_p95_ns=71000 budget_p99_ns=150000 headroom_p95=14.0x headroom_p99=28.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=319.8x gate=pass checksum=89494497658324
+mode=structural_mutation provider=balanced_tree scenario=1m_lines_200_visible_overscan_50 iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=29573 p99_ns=30675 failures=0 budget_p95_ns=290000 budget_p99_ns=580000 headroom_p95=9.8x headroom_p99=18.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=54.3x gate=pass checksum=3379593298396981
+mode=bulk_structural_mutation provider=balanced_tree scenario=1k_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=1000 p95_ns=3613 p99_ns=3654 failures=0 budget_p95_ns=51000 budget_p99_ns=110000 headroom_p95=14.1x headroom_p99=30.1x budget_absolute_p99_ns=16666666 headroom_absolute_p99=4561.2x gate=pass checksum=82740062444
+mode=bulk_structural_mutation provider=balanced_tree scenario=100k_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=100000 p95_ns=9199 p99_ns=9520 failures=0 budget_p95_ns=130000 budget_p99_ns=260000 headroom_p95=14.1x headroom_p99=27.3x budget_absolute_p99_ns=16666666 headroom_absolute_p99=1750.7x gate=pass checksum=36564666309410
+mode=bulk_structural_mutation provider=balanced_tree scenario=1m_lines_batch_64 iterations=2000 operations_per_sample=256 line_count=1000000 p95_ns=50329 p99_ns=51834 failures=0 budget_p95_ns=450000 budget_p99_ns=900000 headroom_p95=8.9x headroom_p99=17.4x budget_absolute_p99_ns=16666666 headroom_absolute_p99=321.5x gate=pass checksum=1317343499882000
+mode=bulk_structural_mutation provider=balanced_tree scenario=100k_lines_batch_4096 iterations=2000 operations_per_sample=16 line_count=100000 p95_ns=84943 p99_ns=86076 failures=0 budget_p95_ns=1400000 budget_p99_ns=2800000 headroom_p95=16.5x headroom_p99=32.5x budget_absolute_p99_ns=16666666 headroom_absolute_p99=193.6x gate=pass checksum=2285022074625
+mode=bulk_structural_mutation provider=balanced_tree scenario=1m_lines_batch_4096 iterations=2000 operations_per_sample=16 line_count=1000000 p95_ns=339345 p99_ns=349643 failures=0 budget_p95_ns=3000000 budget_p99_ns=6000000 headroom_p95=8.8x headroom_p99=17.2x budget_absolute_p99_ns=16666666 headroom_absolute_p99=47.7x gate=pass checksum=82203678997143
+mode=line_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=14 p99_ns=18 failures=0 budget_p95_ns=190 budget_p99_ns=440 headroom_p95=13.6x headroom_p99=24.4x budget_absolute_p99_ns=1666666 headroom_absolute_p99=92592.6x gate=pass checksum=641440000
+mode=line_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=25 p99_ns=35 failures=0 budget_p95_ns=280 budget_p99_ns=560 headroom_p95=11.2x headroom_p99=16.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=47619.0x gate=pass checksum=63985556480
+mode=line_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=25 p99_ns=37 failures=0 budget_p95_ns=320 budget_p99_ns=640 headroom_p95=12.8x headroom_p99=17.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=45045.0x gate=pass checksum=639841600000
+mode=line_query provider=balanced_tree scenario=balanced_tree_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=71 p99_ns=91 failures=0 budget_p95_ns=1700 budget_p99_ns=3400 headroom_p95=23.9x headroom_p99=37.4x budget_absolute_p99_ns=1666666 headroom_absolute_p99=18315.0x gate=pass checksum=63985600000
+mode=line_query provider=balanced_tree scenario=balanced_tree_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=96 p99_ns=120 failures=0 budget_p95_ns=2100 budget_p99_ns=4200 headroom_p95=21.9x headroom_p99=35.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=13888.9x gate=pass checksum=639841547520
+mode=line_geometry_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=17 p99_ns=21 failures=0 budget_p95_ns=250 budget_p99_ns=500 headroom_p95=14.7x headroom_p99=23.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=79365.0x gate=pass checksum=160641440000
+mode=line_geometry_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=24 p99_ns=31 failures=0 budget_p95_ns=340 budget_p99_ns=680 headroom_p95=14.2x headroom_p99=21.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=53763.4x gate=pass checksum=267505512960
+mode=line_geometry_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=27 p99_ns=43 failures=0 budget_p95_ns=380 budget_p99_ns=760 headroom_p95=14.1x headroom_p99=17.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=38759.7x gate=pass checksum=799841600000
+mode=line_geometry_query provider=balanced_tree scenario=balanced_tree_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=111 p99_ns=144 failures=0 budget_p95_ns=3000 budget_p99_ns=6000 headroom_p95=27.0x headroom_p99=41.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=11574.1x gate=pass checksum=223985600000
+mode=line_geometry_query provider=balanced_tree scenario=balanced_tree_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=183 p99_ns=224 failures=0 budget_p95_ns=3400 budget_p99_ns=6800 headroom_p95=18.6x headroom_p99=30.4x budget_absolute_p99_ns=1666666 headroom_absolute_p99=7440.5x gate=pass checksum=852321495040
+mode=column_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 p95_ns=14 p99_ns=15 failures=0 budget_p95_ns=200 budget_p99_ns=440 headroom_p95=14.3x headroom_p99=29.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=111111.1x gate=pass checksum=641440000
+mode=column_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 p95_ns=21 p99_ns=26 failures=0 budget_p95_ns=280 budget_p99_ns=560 headroom_p95=13.3x headroom_p99=21.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=64102.5x gate=pass checksum=63985556480
+mode=column_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 p95_ns=24 p99_ns=30 failures=0 budget_p95_ns=320 budget_p99_ns=640 headroom_p95=13.3x headroom_p99=21.3x budget_absolute_p99_ns=1666666 headroom_absolute_p99=55555.5x gate=pass checksum=639841600000
+mode=column_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 p95_ns=36 p99_ns=55 failures=0 budget_p95_ns=500 budget_p99_ns=1000 headroom_p95=13.9x headroom_p99=18.2x budget_absolute_p99_ns=1666666 headroom_absolute_p99=30303.0x gate=pass checksum=63985600000
+mode=column_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 p95_ns=41 p99_ns=60 failures=0 budget_p95_ns=600 budget_p99_ns=1200 headroom_p95=14.6x headroom_p99=20.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=27777.8x gate=pass checksum=639841560320
+mode=column_geometry_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 p95_ns=18 p99_ns=23 failures=0 budget_p95_ns=260 budget_p99_ns=520 headroom_p95=14.4x headroom_p99=22.6x budget_absolute_p99_ns=1666666 headroom_absolute_p99=72463.7x gate=pass checksum=160641440000
+mode=column_geometry_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 p95_ns=24 p99_ns=34 failures=0 budget_p95_ns=350 budget_p99_ns=700 headroom_p95=14.6x headroom_p99=20.6x budget_absolute_p99_ns=1666666 headroom_absolute_p99=49019.6x gate=pass checksum=267505512960
+mode=column_geometry_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 p95_ns=30 p99_ns=44 failures=0 budget_p95_ns=390 budget_p99_ns=780 headroom_p95=13.0x headroom_p99=17.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=37878.8x gate=pass checksum=799841600000
+mode=column_geometry_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 p95_ns=45 p99_ns=64 failures=0 budget_p95_ns=820 budget_p99_ns=1700 headroom_p95=18.2x headroom_p99=26.6x budget_absolute_p99_ns=1666666 headroom_absolute_p99=26041.7x gate=pass checksum=223985600000
+mode=column_geometry_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 p95_ns=51 p99_ns=67 failures=0 budget_p95_ns=690 budget_p99_ns=1400 headroom_p95=13.5x headroom_p99=20.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=24875.6x gate=pass checksum=839521520640
+mode=point_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=32 p99_ns=52 failures=0 budget_p95_ns=760 budget_p99_ns=1600 headroom_p95=23.8x headroom_p99=30.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=32051.3x gate=pass checksum=64166237440
+mode=point_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=35 p99_ns=56 failures=0 budget_p95_ns=680 budget_p99_ns=1400 headroom_p95=19.4x headroom_p99=25.0x budget_absolute_p99_ns=1666666 headroom_absolute_p99=29761.9x gate=pass checksum=640022280960
+mode=point_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=46 p99_ns=74 failures=0 budget_p95_ns=920 budget_p99_ns=1900 headroom_p95=20.0x headroom_p99=25.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=22522.5x gate=pass checksum=64166280960
+mode=point_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=46 p99_ns=62 failures=0 budget_p95_ns=1100 budget_p99_ns=2200 headroom_p95=23.9x headroom_p99=35.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=26881.7x gate=pass checksum=640022228480
+mode=point_geometry_query provider=uniform scenario=uniform_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=46 p99_ns=67 failures=0 budget_p95_ns=980 budget_p99_ns=2000 headroom_p95=21.3x headroom_p99=29.9x budget_absolute_p99_ns=1666666 headroom_absolute_p99=24875.6x gate=pass checksum=4687694617200924928
+mode=point_geometry_query provider=uniform scenario=uniform_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=50 p99_ns=72 failures=0 budget_p95_ns=990 budget_p99_ns=2000 headroom_p95=19.8x headroom_p99=27.8x budget_absolute_p99_ns=1666666 headroom_absolute_p99=23148.1x gate=pass checksum=6036755761047907072
+mode=point_geometry_query provider=prefixsum scenario=prefixsum_100k iterations=5000 operations_per_sample=256 line_count=100000 p95_ns=84 p99_ns=97 failures=0 budget_p95_ns=1200 budget_p99_ns=2400 headroom_p95=14.3x headroom_p99=24.7x budget_absolute_p99_ns=1666666 headroom_absolute_p99=17182.1x gate=pass checksum=1712152282485110528
+mode=point_geometry_query provider=prefixsum scenario=prefixsum_1m iterations=5000 operations_per_sample=256 line_count=1000000 p95_ns=82 p99_ns=98 failures=0 budget_p95_ns=1300 budget_p99_ns=2600 headroom_p95=15.9x headroom_p99=26.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=17006.8x gate=pass checksum=5915921755926273280
+mode=realistic_provider provider=large_text scenario=100k_lines_10mb_text iterations=5000 operations_per_sample=256 line_count=100000 document_bytes=11200000 line_bytes=112 p95_ns=6671 p99_ns=7269 failures=0 budget_p95_ns=98000 budget_p99_ns=200000 headroom_p95=14.7x headroom_p99=27.5x budget_absolute_p99_ns=1666666 headroom_absolute_p99=229.3x gate=pass checksum=756321289736960
 ```
 
-Every one is in band on both statistics and under its class ceiling
-(`budget_absolute_p99_ns=1666666` for the eleven `.scrollFrame` modes,
-`16666666` for `bulk_structural_mutation`, the only `.discreteAction` one — the
-distinction slice 52 introduced, visible here on hosted evidence).
+Every one is in band on both statistics and under its class ceiling: 41 scenarios
+print `budget_absolute_p99_ns=1666666` (the eleven `.scrollFrame` modes) and 5 print
+`16666666` (`bulk_structural_mutation`, the only `.discreteAction` one) — the
+distinction slice 52 introduced, visible here on hosted evidence.
+
+Two further facts fall out of having a second green run on this branch, and both are
+checked rather than assumed. Against run `31361526438` (head `d17d709`), every
+`budget_p95_ns`/`budget_p99_ns` pair and **all 46 `checksum=` values are
+byte-identical**; only the measured latencies move (e.g. `pipeline|1k` p95 1898 →
+1329 ns). So the fold-in changed no budget and perturbed no measured work — the
+checksums are the same numbers folded over the same operations — and the run-to-run
+latency spread on this runner class is visible in the record instead of being
+asserted.
 
 The two non-gate diagnostic steps also ran green: `--memory-shape` printed 5
 `invariant=pass` lines and `--memory-observation` 3 `observation=pass` lines.
 
-#### iOS cross-target compile (job `93371182803`)
+#### iOS cross-target compile (job `97083928817`)
 
 Both packages, both destinations, all blocking:
 
@@ -787,7 +822,7 @@ The WASM kinds print `result=skipped reason=not_requested blocking=false` in thi
 Toolchain on this job: Swift 6.3.3 (the `macos-latest` default), against 6.2.1 in the
 two container jobs.
 
-#### WASM cross-target compile (job `93371182811`)
+#### WASM cross-target compile (job `97083928719`)
 
 All four `result=pass … blocking=true` lines — two kinds x two packages:
 
@@ -824,7 +859,8 @@ run. Measured over all three job logs of this run:
 
 So a harvest of this run would ingest 46 rows and not one wrap row: the mode is inert
 to the calibration chain by absence, and its token shape is never even exercised
-hosted.
+hosted. All four rows measure identically on run `31361526438` as well, so this is a
+property of the branch and not of one run's scheduling.
 
 Corroborating D-18 in passing: `grep -o 'checksum=' | wc -l` over this job log yields
 **54**, i.e. 46 + 5 `memory_shape` + 3 `memory_observation` — the exact arithmetic
@@ -848,7 +884,7 @@ hosted logs, never transcribed by hand and never fabricated.
 
 | Check | Result |
 |---|---|
-| `swift test` (full suite) | green, 397 tests, 0 failures (396 at code-complete head `d17d709`, +1 from the fold-in; baseline before this slice: 362) |
+| `swift test` (full suite) | green, 397 tests, 0 failures (396 before the drill-7 fold-in; baseline before this slice: 362) |
 | `swift build -c release` | green |
 | Foundation-free scan | PASS (empty) |
 | 12 blocking gates | 12/12 `gate=pass`, no scenario failures, all headroom in band |
@@ -858,8 +894,10 @@ hosted logs, never transcribed by hand and never fabricated.
 | `cross-target-compile.sh --self-test` | `self_test=pass`, exit 0 — shell logic only, not portability evidence |
 | 6 falsifiability drills + Task 2's refactor-safety check + drill 7 | all reproduced their predicted red, all cleanly reverted |
 | Post-review coverage fold-in | `testProbeCountIsIndependentOfRowsPerLine` — `totalRows >> lineCount` regime now pinned; suite 396 → 397, no `Sources/` change |
-| Hosted CI proof — PR-head (section 10.1) | green at step level: 396/0, 46 `gate=pass` / 0 `gate=fail` across 12 gate steps, 4 iOS + 4 WASM `blocking=true` |
+| Hosted CI proof — PR-head (section 10.1) | run `32594785647` green at step level: 397/0, 46 `gate=pass` / 0 `gate=fail` across 12 gate steps, 4 iOS + 4 WASM `blocking=true`; budgets and all 46 checksums byte-identical to the earlier green run |
 | Hosted CI proof — post-merge (section 10.2) | PENDING — branch not merged yet |
 
-No gate moved. No test regressed. No `.swift` file, `Package.swift`, or
-`.github/**` file changed in this task — this is a documentation-only commit.
+No gate moved. No test regressed. No budget, corpus, `Package.swift`, or
+`.github/**` file changed anywhere in this slice. Exactly one `.swift` file changed
+after the code was complete — `Tests/TextEngineCoreTests/WrapRowQueryCountTests.swift`,
+the drill-7 coverage fold-in — and it adds a test without touching `Sources/`.
