@@ -63,12 +63,35 @@ final class WrapRowQueryCountTests: XCTestCase {
 
     private static let lineCount = 1_024
     private static let rowHeight = 16.0
+    /// Rows per line in the multi-row fixture below. 8 is arbitrary but > 1 by a margin:
+    /// a per-row cost term has to show up as a multiple, not as a rounding difference.
+    private static let rowsPerLine = 8
 
     private func counting() -> (CountingVisualRowLayout, ProbeCounter) {
         let base = TestVisualRowLayout(
             lines: Array(repeating: (advances: [8.0], breaks: Set<Int>()), count: Self.lineCount),
             rowHeight: Self.rowHeight,
             wrapWidth: .infinity)
+        let counter = ProbeCounter()
+        return (CountingVisualRowLayout(base: base, counter: counter), counter)
+    }
+
+    /// The same document at `totalRows == rowsPerLine * lineCount`, not `== lineCount`.
+    ///
+    /// `counting()` above wraps at `.infinity`, so every line packs to exactly one row
+    /// and the two axes coincide. That fixture is blind by construction to any cost term
+    /// proportional to rows *within* a line: at one row per line there is no such thing
+    /// to be proportional to. Eight cells of advance 8 with a break before each, at
+    /// `wrapWidth: 8`, pack one cell per row — so this fixture holds `lineCount` fixed
+    /// and multiplies the row axis by 8, which is the only way the counter can tell a
+    /// per-line term from a per-row one.
+    private func countingMultiRow() -> (CountingVisualRowLayout, ProbeCounter) {
+        let advances = Array(repeating: 8.0, count: Self.rowsPerLine)
+        let breaks = Set(1..<Self.rowsPerLine)
+        let base = TestVisualRowLayout(
+            lines: Array(repeating: (advances: advances, breaks: breaks), count: Self.lineCount),
+            rowHeight: Self.rowHeight,
+            wrapWidth: 8.0)
         let counter = ProbeCounter()
         return (CountingVisualRowLayout(base: base, counter: counter), counter)
     }
@@ -121,6 +144,50 @@ final class WrapRowQueryCountTests: XCTestCase {
             XCTAssertGreaterThan(counter.totalCalls, 2,
                                  "the no-wrap axis's two-probe clamp constant must NOT hold here")
             XCTAssertLessThanOrEqual(counter.totalCalls, expectedMax, "y=\(y)")
+        }
+    }
+
+    /// The bound stays keyed to `lineCount` when the row axis is eight times longer.
+    ///
+    /// `expectedMax` is `ceilLog2(lineCount) + 4` — never `ceilLog2(totalRows) + 4`,
+    /// which at 8192 rows would allow 17 and hand three probes of slack to a regression.
+    /// The layout axis is searched over LINES; rows within a line must cost nothing on
+    /// it, and the only fixture that can say so is one where the two axes differ. Without
+    /// this test, a term proportional to `rowInLine` is pinned by nothing in the suite —
+    /// only by the observational benchmark's latency, which is not a gate.
+    func testProbeCountIsIndependentOfRowsPerLine() {
+        // Fixture guard, read off the uncounted `base`: if the packing ever stopped
+        // producing 8 rows per line, this test would silently degenerate into a second
+        // copy of the infinity fixture and keep passing while covering nothing.
+        let (guardLayout, _) = countingMultiRow()
+        XCTAssertEqual(guardLayout.base.firstVisualRow(ofLine: Self.lineCount),
+                       Self.rowsPerLine * Self.lineCount,
+                       "fixture must be multi-row, or this test covers nothing")
+
+        // In range and deliberately NOT on its line's first row: global row 5603 is
+        // line 700, row 3 — so a per-`rowInLine` term has three steps to show up in.
+        let globalRow = 700 * Self.rowsPerLine + 3
+        let (layout, counter) = countingMultiRow()
+        guard case .row(let located) = ViewportVirtualizer.visualRowAt(
+            y: Double(globalRow) * Self.rowHeight + 3.0, layout: layout
+        ) else {
+            return XCTFail("expected .row")
+        }
+        XCTAssertEqual(located.globalRow, globalRow)
+        XCTAssertEqual(located.logicalLine, 700)
+        XCTAssertEqual(located.rowInLine, 3, "the query must land INSIDE a line's rows")
+        XCTAssertLessThanOrEqual(counter.totalCalls, expectedMax)
+
+        // Both clamp edges on the same fixture. The bottom edge lands on the last row of
+        // the last line (`rowInLine == rowsPerLine - 1`), the deepest within-line offset
+        // the document has.
+        for y in [-1.0, Double(Self.rowsPerLine * Self.lineCount) * Self.rowHeight + 1.0] {
+            let (clampLayout, clampCounter) = countingMultiRow()
+            guard case .row(let clamped) = ViewportVirtualizer.visualRowAt(y: y, layout: clampLayout) else {
+                return XCTFail("expected .row at y=\(y)")
+            }
+            XCTAssertNotEqual(clamped.clamp, .inRange, "y=\(y) must clamp")
+            XCTAssertLessThanOrEqual(clampCounter.totalCalls, expectedMax, "y=\(y)")
         }
     }
 }

@@ -42,6 +42,24 @@ equivalence tests), Task 6 (1 round-trip + 3 probe-count tests), Task 7 (7 bench
 option/checksum tests — `WrapRowQueryOptionsTests` + `WrapRowQueryChecksumTests`). 0
 failures throughout.
 
+### 1.1 Re-run after the post-review coverage fold-in
+
+A review pass found that `WrapRowQueryCountTests` pinned its bound on **one** fixture,
+wrapped at `.infinity` — one row per line, `totalRows == lineCount`. Drill 7 (section
+9) records the gap and its demonstrated red;
+`testProbeCountIsIndependentOfRowsPerLine` closes it. Re-run of the full suite with
+that test in place:
+
+```
+Executed 397 tests, with 0 failures (0 unexpected) in 5.359 (5.384) seconds
+```
+
+396 → 397, +1 test. No `Sources/` file changed for it — `git status --porcelain`
+showed exactly one modified path,
+`Tests/TextEngineCoreTests/WrapRowQueryCountTests.swift` — so no gate, budget, or
+benchmark number in this record is affected by the fold-in, and sections 2-8 stand as
+recorded.
+
 ## 2. `swift build -c release`
 
 ```bash
@@ -297,11 +315,13 @@ are expected self-test output, not a fault. This is a **shell-logic self-test on
 it compiles nothing and is **not** portability evidence for iOS or WASM. That evidence
 comes from the hosted cross-target compile jobs, recorded (pending) in section 10.
 
-## 9. The six falsifiability drills, plus Task 2 Step 4's refactor-safety check
+## 9. The falsifiability drills, plus Task 2 Step 4's refactor-safety check
 
-Task 2 Step 4's check is recorded first and separately — it is **not** one of the six
-numbered drills; it is a refactor-safety mutation drill on the shared ladder
-extraction itself, run before any of `visualRowAt`'s own tests existed.
+AC12's **six** numbered drills are recorded below unchanged. Two further mutation
+drills sit beside them and are labelled as such: Task 2 Step 4's refactor-safety check
+(first, because it ran before any of `visualRowAt`'s own tests existed) and Drill 7
+(last, because it ran after them, in review). Neither is one of AC12's six; AC12 is
+satisfied by drills 1-6 exactly as specified.
 
 ### Task 2 Step 4 — refactor-safety mutation (not one of the six drills)
 
@@ -538,6 +558,75 @@ Reverted; `git diff` on the mutated file confirmed empty. Post-revert re-run:
 `PASS post-revert (row) -> Executed 12 tests, with 0 failures (0 unexpected)`,
 `PASS post-revert (compute) -> Executed 11 tests, with 0 failures (0 unexpected)`.
 
+### Drill 7 — a per-`rowInLine` cost term (post-review fold-in; `WrapPositionQuery.swift`)
+
+Not one of AC12's six. This is the falsifiability evidence for the coverage fold-in
+recorded in section 1.1, run when the gap was found in review.
+
+**The gap.** `WrapRowQueryCountTests` built every fixture through one helper,
+`counting()`, at `wrapWidth: .infinity` with a single 8.0 advance per line — so every
+line packs to exactly one row and `totalRows == lineCount == 1024`. At one row per
+line there is nothing for a per-row term to be proportional to, so that counter is
+blind to one **by construction**, not by oversight. The `totalRows >> lineCount`
+regime was pinned by nothing in the suite — only by the observational
+`--wrap-row-query` benchmark's latency, which is not a gate and cannot fail a build.
+
+**The fixture that closes it.** `countingMultiRow()`: the same 1024 lines, but eight
+cells of advance 8.0 with a break opportunity before each, at `wrapWidth: 8.0` — one
+cell per row, 8 rows per line, `totalRows = 8192`. `lineCount` is held fixed and only
+the row axis is multiplied, which is the only arrangement in which the counter can
+tell a per-line term from a per-row one. Measured probe counts (temporary
+instrumentation, removed before commit):
+
+```
+PROBE infinity-clamp  y=-1.0       calls=13
+PROBE infinity-clamp  y=16385.0    calls=14
+PROBE multirow-inrange            calls=13   firstVisualRow=13  visualRowCount=0
+PROBE multirow-clamp  y=-1.0       calls=13
+PROBE multirow-clamp  y=131073.0   calls=14
+```
+
+The bound is unchanged and unwidened: `expectedMax = ceilLog2(1024) + 4 = 14`, keyed
+to `lineCount`, **not** to `totalRows` (`ceilLog2(8192) + 4 = 17` would have handed a
+regression three probes of slack). The eight-fold longer row axis costs zero extra
+provider calls, so the new regime is bought for free. `visualRowCount = 0` is worth
+recording too: `visualRowAt` never calls that hook at all — the counter sums both
+provider calls precisely so a scan cannot hide in the one it would otherwise ignore.
+
+**Mutation** — a cost term proportional to rows *within* the line, inserted after the
+`rowInLine` subtraction:
+
+```swift
+let rowInLine = globalRow - layout.firstVisualRow(ofLine: logicalLine)
+// DRILL 7 MUTATION — a cost term proportional to rows WITHIN the line.
+var drill = 0
+for _ in 0..<rowInLine { drill &+= layout.firstVisualRow(ofLine: logicalLine) }
+_ = drill
+```
+
+**Observed** (`swift test --filter WrapRowQueryCountTests`):
+
+```
+Test Case '…testClampedQueriesStillSearchTheLayoutAxis]' passed (0.002 seconds).
+Test Case '…testInRangeQueryIsLogarithmicOnTheLayoutAxis]' passed (0.001 seconds).
+Test Case '…testProbeCountDoesNotGrowLinearlyWithTheDocument]' passed (0.001 seconds).
+WrapRowQueryCountTests.swift:179: error: …testProbeCountIsIndependentOfRowsPerLine] :
+  XCTAssertLessThanOrEqual failed: ("16") is greater than ("14")
+WrapRowQueryCountTests.swift:190: error: …testProbeCountIsIndependentOfRowsPerLine] :
+  XCTAssertLessThanOrEqual failed: ("21") is greater than ("14") - y=131073.0
+Test Case '…testProbeCountIsIndependentOfRowsPerLine]' failed (0.121 seconds).
+	 Executed 4 tests, with 2 failures (0 unexpected) in 0.125 (0.125) seconds
+```
+
+This is the drill's whole point, and both halves are required: **all three** tests on
+the infinity fixture stayed **green** under the mutation, while the new test caught it
+**twice** — at the in-range sample (`rowInLine == 3` → 13 + 3 = 16) and at the bottom
+clamp (`rowInLine == 7` → 14 + 7 = 21). The gap is demonstrated, not argued.
+
+Reverted with `git checkout -- Sources/TextEngineCore/WrapPositionQuery.swift`;
+`git diff --stat -- Sources/` empty afterwards. Post-revert re-run:
+`Executed 4 tests, with 0 failures (0 unexpected)`.
+
 ## 10. Hosted CI proof
 
 Two halves, and only one of them can exist before merge. **10.1 (PR-head) is
@@ -595,8 +684,10 @@ Executed 396 tests, with 0 failures (0 unexpected) in 6.563 (6.563) seconds
 Test run with 0 tests in 0 suites passed after 0.001 seconds.
 ```
 
-396 tests, 0 failures — the same count as the local sweep in section 1, so nothing
-landed on `main` between the local run and the hosted one that changed the suite size.
+396 tests, 0 failures — the count as of head `d17d709`, matching the local sweep in
+section 1 and confirming nothing landed on `main` in between that changed the suite
+size. The post-review fold-in (section 1.1, drill 7) takes the branch to 397, so the
+next PR-head run supersedes this line; that is the run 10.2's successor records.
 
 Twelve gate steps ran, all blocking, none `continue-on-error`, printing **46**
 `gate=pass` lines and **zero** `gate=fail`:
@@ -757,7 +848,7 @@ hosted logs, never transcribed by hand and never fabricated.
 
 | Check | Result |
 |---|---|
-| `swift test` (full suite) | green, 396 tests, 0 failures (baseline before this slice: 362) |
+| `swift test` (full suite) | green, 397 tests, 0 failures (396 at code-complete head `d17d709`, +1 from the fold-in; baseline before this slice: 362) |
 | `swift build -c release` | green |
 | Foundation-free scan | PASS (empty) |
 | 12 blocking gates | 12/12 `gate=pass`, no scenario failures, all headroom in band |
@@ -765,7 +856,8 @@ hosted logs, never transcribed by hand and never fabricated.
 | `--wrap-compute` | smoke run only, not extraction evidence (three reasons recorded) |
 | `--memory-shape` | 5/5 `invariant=pass` |
 | `cross-target-compile.sh --self-test` | `self_test=pass`, exit 0 — shell logic only, not portability evidence |
-| 6 falsifiability drills + Task 2's refactor-safety check | all reproduced their predicted red, all cleanly reverted |
+| 6 falsifiability drills + Task 2's refactor-safety check + drill 7 | all reproduced their predicted red, all cleanly reverted |
+| Post-review coverage fold-in | `testProbeCountIsIndependentOfRowsPerLine` — `totalRows >> lineCount` regime now pinned; suite 396 → 397, no `Sources/` change |
 | Hosted CI proof — PR-head (section 10.1) | green at step level: 396/0, 46 `gate=pass` / 0 `gate=fail` across 12 gate steps, 4 iOS + 4 WASM `blocking=true` |
 | Hosted CI proof — post-merge (section 10.2) | PENDING — branch not merged yet |
 
