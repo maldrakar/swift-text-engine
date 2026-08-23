@@ -7,11 +7,15 @@ harvester authenticated no run's source, so a fork's fabricated `p95_ns=` lines 
 in principle enter the corpus). A third hole, found while reading for D-7, is closed
 in the same slice: the corpus gains a sixth **verdict** column, and both budget
 consumers reject `{budget_exceeded, budget_absolute_exceeded, operation_failures}` at
-read time. Eight falsifiability drills — the spec's seven plus drill 8, added by the
-whole-branch review — are the whole proof for both guards; neither has ever fired
-against a real contaminated run.
+read time. Eleven falsifiability drills — the spec's seven, plus drill 8 from the whole-branch
+review, plus drills 9-11 from a post-implementation validation pass — are the whole
+proof for both guards; neither has ever fired against a real contaminated run. The
+last three matter disproportionately: drills 1-8 all target a decision *function*,
+and the validation pass asked what happens when the function survives and its **call
+site** does not. On the harvester, the answer was that every automated check stayed
+green while a fork's rows entered the corpus (Section 6).
 
-Ten commits on `slice-54-calibration-chain-hardening`, in order:
+Thirteen commits on `slice-54-calibration-chain-hardening`, in order:
 `31c23e1` (amortised measurement helper), `3d67c93` (`--wrap-row-query` onto the
 amortised shape), `03881ba` (`--wrap-compute` amortised, drain de-contaminated,
 reindex repaired), `6652d9e` (Swift corpus reader learns the sixth verdict column),
@@ -27,6 +31,13 @@ sentence and therefore cannot list its own sha. That last commit adds drill 8
 inventory is in
 `.superpowers/sdd/2026-08-23-calibration-chain-hardening/final-fix-report.md`.
 
+Three further commits come from a post-implementation validation pass: `c940e41`
+(test: the harvest loop is driven end to end, so a lost call site reddens),
+`66bbd6e` (refactor: one source for the corpus verdict column, pinned across both
+readers), and `4e700b0` (docs: the call-site drills, the `--dry-run` caveat, and
+D-26's Swift half). They add drills 9-11 and take the suite 407 -> 408; no budget,
+corpus, or engine code is touched, and AC13 was re-checked after them.
+
 ---
 
 ## 1. Scope and acceptance criteria
@@ -39,7 +50,7 @@ inventory is in
 | 4 | PASS — every measurement prints its own `*_operations_per_sample=` token (`query_`/`compute_`/`drain_` > 1, `reindex_` = 1); before/after outputs recorded | Section 3 |
 | 5 | PASS (diff read, not machine-checked, by design) — drain ranges are built before the timed loop; the drain body performs no `compute` | Section 4 |
 | 6 | PASS — `--wrap-compute` prints `scenario=` and `drain_p99_ns=`; both modes keep prefixed latency tokens (no bare `p95_ns=`/`p99_ns=`) | Section 3 |
-| 7 | PASS — `harvest-gate-corpus.sh` rejects a non-source-repo run, fails closed when the source cannot be read, and the `--runs` path obeys the same check | Section 6 (Drill 2), Section 8 |
+| 7 | PASS — `harvest-gate-corpus.sh` rejects a non-source-repo run, fails closed when the source cannot be read, and the `--runs` path obeys the same check. **The call site is guarded too**, not only the decision function: `--self-test` drives the whole script through a stubbed `gh` (drills 9-10) | Section 6 (Drills 2, 9, 10), Section 8 |
 | 8 | PASS — the parser is extracted into `extract_rows()`, its truth table passes under `--self-test`, driven by `swift test` | Section 9 |
 | 9 | PASS — the harvester writes a sixth verdict column on every emitted row; both readers additionally accept legacy five-column rows, which is what the committed corpus consists entirely of | Section 6 (Drill 5), Section 10 |
 | 10 | PASS — a row whose `failures=` is non-zero is recorded as `operation_failures` regardless of its verdict, including a line with no `gate=` at all; drill 7 records the red | Section 6 (Drill 7) |
@@ -48,8 +59,8 @@ inventory is in
 | 13 | PASS — `derive-gate-budgets.sh` output over the committed corpus is byte-identical before and after, all 46 budgets reproduce, the committed corpus file is untouched | Section 7, Section 10 |
 | 14 | PASS — neither wrap mode is gateable (`isGateable`'s `false` arm) or appears in `swift-ci.yml` | Section 10 |
 | 15 | PASS — `AGENTS.md`'s harvest-admissibility sentence and the `budget_stale` paragraph no longer describe a harvest the script refuses; the harvester's usage header carries the sixth column | AGENTS.md edits (this task, Steps 3-6) |
-| 16 | PASS — all seven spec drills recorded with observed red output, plus drill 8 from the whole-branch review | Section 6 |
-| 17 | OPEN — hosted proof at step level (PR-head + post-merge), three jobs, twelve gates, 46 `gate=pass` | Section 11 (left open per controller ruling R2 — discharged in a later step this task does not execute) |
+| 16 | PASS — all seven spec drills recorded with observed red output, plus drill 8 from the whole-branch review and drills 9-11 from the post-implementation validation pass (the two harvester CALL SITES and the Swift reader divergence) | Section 6 |
+| 17 | HALF — PR-head DISCHARGED at step level on `4e700b0` (run `32658632217`): three jobs, twelve gates, **46 `gate=pass` / 0 `gate=fail`**, 408/0, `invariant=pass`, `blocking_failures=0`. Post-merge push run **still open** | Section 11 |
 
 ---
 
@@ -278,7 +289,7 @@ and `amortisedSamples`).
 
 ---
 
-## 6. The drills — seven from the spec, plus drill 8 added in review
+## 6. The drills — seven from the spec, drill 8 from the whole-branch review, drills 9-11 from the validation pass
 
 ### Drill 1 — `amortise`'s division (AC2)
 
@@ -810,8 +821,87 @@ Neither wrap mode is gateable.
 
 ## 11. Hosted proof (AC17)
 
-**Left open.** Per controller ruling R2, this task's scope is Steps 1 through 12 only;
-Step 13 (push the branch, open the PR, wait for the PR-head run, record its step-level
-result, merge, record the post-merge push run's step-level result) is explicitly out of
-scope and was **not executed**. AC17 remains open until that step runs, in a docs-only
-follow-up after the PR discussed in Step 13 merges.
+**PR-head half: DISCHARGED at step level. Post-merge half: still open.**
+
+AC17 asks for step-level proof on **both** the PR-head run and the post-merge run. Those
+are two different claims — the first says the branch is green, the second says the code
+that actually landed on `main` is green — and only the first can be made before the merge.
+This section records the first with its evidence and says plainly that the second is not
+yet made.
+
+### Why there are two PR-head runs
+
+The branch was pushed once at the end of implementation and once again after a
+post-implementation validation pass found and fixed three call-site gaps (drills 9-11,
+Section 6). Both runs are recorded: the first is the tree the implementation ended on, the
+second is the tree that is proposed for merge. **The second is the binding one** — the
+first is kept because dropping it would hide that the branch changed after its first green
+run, which is exactly the kind of omission this record exists to prevent.
+
+| | run 1 | run 2 (binding) |
+|---|---|---|
+| run id | `32654599644` | `32658632217` |
+| head sha | `a1593d1` | `4e700b0` |
+| created | 2026-08-23T17:22:03Z | 2026-08-23T18:37:38Z |
+| event | `pull_request` (PR #129) | `pull_request` (PR #129) |
+| conclusion | success | success |
+
+### Step-level evidence
+
+Job conclusions are recorded but are **not** the proof — a green job can hide a dead
+`continue-on-error` step (the slice-16 trap). The claims below are read out of the step
+logs.
+
+```
+$ gh run view 32658632217 --json jobs --jq '.jobs[] | .name+" -> "+.conclusion'
+Host tests and benchmark gate -> success
+WASM cross-target compile -> success
+iOS cross-target compile -> success
+
+$ gh run view <id> --log > run.log
+$ echo "gate_pass=$(grep -c 'gate=pass' run.log)  gate_fail=$(grep -c 'gate=fail' run.log)"
+$ grep -oE "Executed [0-9]{3,} tests, with [0-9]+ failures" run.log | sort -u
+$ grep -o "invariant=[a-z]*" run.log | sort -u
+$ grep -oE "mode=cross_target_compile_overall .*" run.log | sort -u
+$ grep -oE "mode=docs_only_pr result=[a-z_]+ docs_only_pr=[a-z]+ file_count=[0-9]+ non_doc_count=[0-9]+" run.log | sort -u
+```
+
+| claim | run 1 (`a1593d1`) | run 2 (`4e700b0`) |
+|---|---|---|
+| twelve blocking gates | `gate_pass=46  gate_fail=0` | `gate_pass=46  gate_fail=0` |
+| host suite | `Executed 407 tests, with 0 failures` | `Executed 408 tests, with 0 failures` |
+| `--memory-shape` | `invariant=pass` | `invariant=pass` |
+| cross-target | `blocking_failures=0 exit=0` | `blocking_failures=0 exit=0` |
+| docs-only guard | `result=not_docs_only docs_only_pr=false file_count=14 non_doc_count=8` | identical |
+
+The suite goes 407 -> 408 between the runs: that is
+`testTheTwoCorpusReadersAdmitTheSameRows`, added by the validation pass. **AC13 is
+unaffected and was re-checked** — the 46 committed budgets still re-derive byte-identically
+over the untouched committed corpus, which matters because the validation pass edited
+`GateFloorTests`, a corpus consumer.
+
+Every requested cross-target line is `result=pass reason=none blocking=true` across both
+kinds and both packages (`ios_device`, `ios_simulator`, `wasm`, `wasm_embedded` x
+`core`, `providers`). The `result=skipped reason=not_requested blocking=false` lines that
+also appear are each job declining the *other* job's targets, and are explicitly
+non-blocking. One token in the log reads `mode=docs_only_pr result=infrastructure_failure`
+and is **not** a result: it is the step's own source being echoed by the runner
+(`reason=$1` is unexpanded), and the decision line two rows above it is
+`result=not_docs_only`.
+
+### The guard added this slice ran hosted
+
+`swift test` drives `harvest-gate-corpus.sh --self-test`
+(`ScriptSelfTestTests.swift`), so the new harvest-loop case — the one that reddens when a
+call site is deleted — executed on hosted Linux x86_64, not only on the local macOS host.
+The three tests the validation pass touched or added are visible by name in run 2's log:
+`testTheTwoCorpusReadersAdmitTheSameRows`, `testAdmissibleRowsMatchDeriveScript`,
+`testEveryScriptSelfTestPasses`.
+
+### What is still open
+
+The **post-merge `push` run** on `main`. Nothing here proves the merged code is green; a
+PR-head run proves the branch is. Per this repository's convention that half is discharged
+in a docs-only follow-up PR once #129 merges, recording the push run's id and the same
+step-level readings. Until that lands, AC17 is **half** discharged, and this section says
+so rather than rounding up.
