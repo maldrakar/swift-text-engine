@@ -11,8 +11,28 @@
 #   ./.github/scripts/harvest-gate-corpus.sh [--limit N] [--repo OWNER/NAME]
 #   ./.github/scripts/harvest-gate-corpus.sh --runs 29150501304,29187553818
 #
+# Every candidate's SOURCE repository is checked before its log is fetched: a run whose
+# .head_repository.full_name is not --repo is skipped (skip=foreign_repo), and a run whose
+# source cannot be read is skipped too (skip=provenance_unknown). There is no opt-out --
+# an optional policy is not a policy. The --runs id,id path obeys the same check.
+#
 # Emits corpus rows on stdout (no header), ready to append:
-#   run_id <TAB> mode <TAB> scenario <TAB> p95_ns <TAB> p99_ns
+#   run_id <TAB> mode <TAB> scenario <TAB> p95_ns <TAB> p99_ns <TAB> verdict
+#
+# The sixth column is the ROW'S OWN gate verdict: `pass`, a GateFailureReason raw value, or
+# `none` for a summary line printed without --gate. It is the only place the corpus schema
+# is written down. Readers accept legacy FIVE-column rows -- the committed corpus consists
+# entirely of them -- and treat a missing verdict as admissible.
+#
+# So the corpus file's HEADER LINE stays five columns: it is never rewritten (the corpus is
+# append-only), and after the first post-slice-54 harvest the file legitimately carries a
+# five-column header above mixed five- and six-column rows. Both readers skip line 1, so
+# this is the expected steady state, not schema drift.
+#
+# derive-gate-budgets.sh and GateFloorTests then REFUSE, at read time, rows whose verdict is
+# budget_exceeded, budget_absolute_exceeded or operation_failures: a summary line is printed
+# BEFORE the gate verdict is checked, so a slow sample genuinely reaches a hosted log, and
+# the 3*max term lets one such row set a budget by itself.
 #
 # Two hosted line shapes carry latency, and both are harvested:
 #
@@ -54,6 +74,112 @@ plan_runs() {
       printf 'plan=harvest run=%s\n' "$id"
     fi
   done <<< "$candidates"
+}
+
+# Pure decision over (run id, observed head repository, expected repository).
+#
+# Neither `gh run list --json` nor `gh run view --json` exposes the source repository --
+# both field lists were checked and it is absent. The datum lives at
+# `gh api repos/{owner}/{repo}/actions/runs/{id}` as `.head_repository.full_name`.
+#
+# Rejected alternative: switching candidate selection to the workflow-runs API, which
+# returns ids and sources together in one call. It rewrites the selection path wholesale
+# and the --runs entry path would still need per-run lookups, so the policy would have two
+# implementations. One call per candidate at N <= 40 is not worth a second code path.
+# Likewise rejected: skipping the probe for `event != pull_request` runs, which cannot have
+# a foreign head repository. It buys nothing the --corpus dedup does not already buy, and
+# costs the same second code path.
+admissible_source() {
+  local id="$1" observed="$2" expected="$3"
+  # Fail CLOSED on an unreadable source: that is the one state a fork can manufacture.
+  # `null` is what `gh api --jq` prints for a null field -- it is not a repository name.
+  # A malformed shape (e.g. a JSON error body such as `{"message":"Not Found",...}`,
+  # which `gh api` writes to STDOUT on a non-2xx response, bypassing --jq entirely) is
+  # unknown too, not a foreign name: `owner/name` is the only shape a real
+  # `.head_repository.full_name` ever takes, so anything else did not come from a
+  # successful read and must not be compared to `expected` as if it were one.
+  if [[ -z "$observed" || "$observed" == "null" || ! "$observed" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+    printf 'skip=provenance_unknown run=%s\n' "$id"
+  elif [[ "$observed" != "$expected" ]]; then
+    printf 'skip=foreign_repo run=%s source=%s\n' "$id" "$observed"
+  else
+    printf 'plan=harvest run=%s\n' "$id"
+  fi
+}
+
+# The corpus-row parser: a hosted CI log on stdin, six-column TSV rows on stdout.
+# $1 = run id.
+#
+# Extracted from the network branch (spec Decision 9) so --self-test can drive it over a
+# fixture. Leaving it inline would have made the verdict rule a guard with no way to fail --
+# the exact defect class this slice exists to prevent -- and it retroactively brings the
+# existing five-column parser under test for the first time, including the exact-key rule
+# that keeps the prefixed wrap lines from emitting rows.
+extract_rows() {
+  awk -v run="$1" '
+    # Row-level verdict for one summary line.
+    #
+    # `failures=` OUTRANKS the gate verdict, and that is not belt-and-braces. formatSummary
+    # (BenchmarkSupport.swift) prints failures=N UNCONDITIONALLY, outside its --gate
+    # branch, whereas gate=/reason= appear only on gated steps -- and
+    # the FIRST hosted evidence for a new mode necessarily comes from an ungated step,
+    # because its budget does not exist yet. Reading degeneracy from the verdict alone would
+    # therefore miss it on exactly the line shape node 6 bootstraps with.
+    #
+    # gate=fail with no reason= cannot be produced by formatSummary; if one ever appears,
+    # something is wrong, so it takes the REJECTING verdict rather than the admitting one.
+    function verdict(g, r, f) {
+      if (f != "" && f + 0 != 0) return "operation_failures"
+      if (g == "pass") return "pass"
+      if (g == "fail") return (r != "" ? r : "budget_exceeded")
+      return "none"
+    }
+
+    function emit_pairs(a, b,   x, y, n, m, i) {
+      if (a == "" || b == "") return
+      n = split(a, x, ",")
+      m = split(b, y, ",")
+      if (n != m) return
+      for (i = 1; i <= n; i++)
+        printf "%s\t%s\t%s\t%s\t%s\t%s\n", run, "realistic_provider", "100k_lines_10mb_text", x[i], y[i], "none"
+    }
+
+    # Shape 2 must be tested first: it carries mode= and *_p95_ns_values= but no
+    # bare p95_ns=, so shape 1 would not match it anyway -- the order is for the
+    # reader, not the parser. It comes from a step run WITHOUT --gate, so `none`.
+    /mode=realistic_relative_observation/ {
+      bp95 = ""; bp99 = ""; hp95 = ""; hp99 = ""
+      for (i = 1; i <= NF; i++) {
+        split($i, kv, "=")
+        if (kv[1] == "base_p95_ns_values") bp95 = kv[2]
+        else if (kv[1] == "base_p99_ns_values") bp99 = kv[2]
+        else if (kv[1] == "head_p95_ns_values") hp95 = kv[2]
+        else if (kv[1] == "head_p99_ns_values") hp99 = kv[2]
+      }
+      emit_pairs(bp95, bp99)
+      emit_pairs(hp95, hp99)
+      next
+    }
+
+    # The regex is a cheap line filter; the EXACT key is what decides. That distinction is
+    # what makes the wrap modes inert: `query_p95_ns=37` matches the regex and then fails
+    # kv[1] == "p95_ns", so the line yields no row until node 6 un-prefixes it deliberately.
+    /p95_ns=[0-9]+/ && /p99_ns=[0-9]+/ {
+      mode = ""; scenario = ""; p95 = ""; p99 = ""; gate = ""; reason = ""; failures = ""
+      for (i = 1; i <= NF; i++) {
+        split($i, kv, "=")
+        if (kv[1] == "mode") mode = kv[2]
+        else if (kv[1] == "scenario") scenario = kv[2]
+        else if (kv[1] == "p95_ns") p95 = kv[2]
+        else if (kv[1] == "p99_ns") p99 = kv[2]
+        else if (kv[1] == "gate") gate = kv[2]
+        else if (kv[1] == "reason") reason = kv[2]
+        else if (kv[1] == "failures") failures = kv[2]
+      }
+      if (mode != "" && scenario != "" && p95 != "" && p99 != "")
+        printf "%s\t%s\t%s\t%s\t%s\t%s\n", run, mode, scenario, p95, p99, verdict(gate, reason, failures)
+    }
+  '
 }
 
 # ---------------------------------------------------------------------------
@@ -109,6 +235,181 @@ plan=harvest run=333" "$(plan_runs "111
     "$(plan_runs "111" "$(harvested_run_ids < "$empty")")" \
     "plan_runs treats a header-only corpus as empty"
 
+  # ------------------------------------------------------------------
+  # extract_rows: the parser, previously unreachable from --self-test because it
+  # lived inside the network branch. Putting the new verdict rule there as-is would
+  # have produced a guard with no way to fail -- the defect class this slice exists
+  # to prevent. Extracting it also brings the EXISTING five-column parser under test
+  # for the first time, including the prefixed-token protection both wrap modes rely on.
+  # ------------------------------------------------------------------
+  local logfixture
+  logfixture="$(mktemp)"
+  {
+    # 1. A gated pass line.
+    printf 'mode=line_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=24 p99_ns=54 failures=0 budget_p95_ns=190 budget_p99_ns=440 headroom_p95=7.9x headroom_p99=8.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=30864.1x gate=pass checksum=1\n'
+    # 2. The regression-laundering row: slow, and must never enter the corpus as evidence
+    #    of normal cost. The summary line is printed BEFORE the verdict is checked, so it
+    #    genuinely reaches a hosted log.
+    printf 'mode=line_query provider=uniform scenario=uniform_100k p95_ns=30 p99_ns=60 failures=0 budget_p95_ns=280 budget_p99_ns=560 gate=fail reason=budget_exceeded checksum=2\n'
+    # 3. budget_stale: the sample was FAST. Admitted -- its prescribed fix needs it.
+    printf 'mode=line_query provider=uniform scenario=uniform_1m p95_ns=31 p99_ns=61 failures=0 budget_p95_ns=320 budget_p99_ns=640 gate=fail reason=budget_stale checksum=3\n'
+    # 4. A step run WITHOUT --gate: no gate= token at all. Admitted as `none` -- a new
+    #    mode's first hosted evidence necessarily looks like this, because its budget does
+    #    not exist yet, and rejecting it would make a gate unbootstrappable.
+    printf 'mode=column_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 p95_ns=40 p99_ns=70 failures=0 checksum=4\n'
+    # 5. THE NODE-6 BOOTSTRAP HOLE: no gate= token AND failures=3. Degeneracy must be read
+    #    from failures=, which formatSummary prints unconditionally, or this line -- the
+    #    exact shape node 6's first harvest produces -- is admitted as healthy.
+    printf 'mode=column_query provider=uniform scenario=uniform_100k p95_ns=41 p99_ns=71 failures=3 checksum=5\n'
+    # 6. failures= OUTRANKS the verdict: gate=pass cannot launder a degenerate timing.
+    printf 'mode=point_query provider=uniform scenario=uniform_1k p95_ns=42 p99_ns=72 failures=2 budget_p95_ns=900 budget_p99_ns=1800 gate=pass checksum=6\n'
+    # 7. A wrap_row_query line: PREFIXED latency tokens -> NO ROW. Nothing on the shell side
+    #    pinned this before.
+    printf 'mode=wrap_row_query scenario=uniform_1k total_rows=1000 query_operations_per_sample=256 query_p95_ns=37 query_p99_ns=41 checksum=7\n'
+    # 8. A wrap_compute line, full node-6-ready shape (scenario=, drain_p99_ns=) with the
+    #    latency tokens still prefixed -> NO ROW.
+    printf 'mode=wrap_compute scenario=width_40 width=40 total_rows=200000 compute_operations_per_sample=256 compute_p95_ns=210 compute_p99_ns=260 drain_operations_per_sample=16 drain_p95_ns=4100 drain_p99_ns=5200 reindex_operations_per_sample=1 reindex_ns=61000000\n'
+    # 9. Shape 2, the pre-slice-45 realistic relative observation: 2 base + 2 head -> 4 rows.
+    printf 'mode=realistic_relative_observation base_p95_ns_values=11,12 base_p99_ns_values=21,22 head_p95_ns_values=13,14 head_p99_ns_values=23,24\n'
+    # 10. A real `gh run view --log` line carries a job/step/timestamp prefix. awk scans all
+    #     fields, so the prefix is inert -- pinned rather than assumed.
+    printf 'Host tests and benchmark gate\tSynthetic gate\t2026-08-23T10:00:00Z mode=pipeline provider=uniform scenario=uniform_1k p95_ns=50 p99_ns=80 failures=0 budget_p95_ns=500 budget_p99_ns=1000 gate=pass checksum=10\n'
+    # 11. Beyond the spec truth table, fail-closed: gate=fail with no reason= cannot be
+    #     produced by formatSummary, so if one ever appears something is wrong. Treat it as
+    #     the rejecting verdict rather than admitting it.
+    printf 'mode=pipeline provider=uniform scenario=uniform_100k p95_ns=51 p99_ns=81 failures=0 budget_p95_ns=500 budget_p99_ns=1000 gate=fail checksum=11\n'
+  } > "$logfixture"
+
+  local expected_rows
+  expected_rows="$(
+    printf '999\tline_query\tuniform_1k\t24\t54\tpass\n'
+    printf '999\tline_query\tuniform_100k\t30\t60\tbudget_exceeded\n'
+    printf '999\tline_query\tuniform_1m\t31\t61\tbudget_stale\n'
+    printf '999\tcolumn_query\tuniform_1k\t40\t70\tnone\n'
+    printf '999\tcolumn_query\tuniform_100k\t41\t71\toperation_failures\n'
+    printf '999\tpoint_query\tuniform_1k\t42\t72\toperation_failures\n'
+    printf '999\trealistic_provider\t100k_lines_10mb_text\t11\t21\tnone\n'
+    printf '999\trealistic_provider\t100k_lines_10mb_text\t12\t22\tnone\n'
+    printf '999\trealistic_provider\t100k_lines_10mb_text\t13\t23\tnone\n'
+    printf '999\trealistic_provider\t100k_lines_10mb_text\t14\t24\tnone\n'
+    printf '999\tpipeline\tuniform_1k\t50\t80\tpass\n'
+    printf '999\tpipeline\tuniform_100k\t51\t81\tbudget_exceeded\n'
+  )"
+
+  assert_equal "$expected_rows" "$(extract_rows 999 < "$logfixture")" \
+    "extract_rows: six columns, failures= outranks the verdict, prefixed wrap lines emit nothing"
+
+  rm -f "$logfixture"
+
+  # ------------------------------------------------------------------
+  # admissible_source: the run-level axis. A fork executes its own code and can print
+  # gate=pass beside any number it likes, so no per-row check helps here -- and the
+  # --runs id,id entry path bypassed even the workflow filter, so this was the one
+  # unauthenticated link in a chain carrying twelve blocking budgets.
+  # ------------------------------------------------------------------
+  assert_equal "plan=harvest run=555" \
+    "$(admissible_source 555 'maldrakar/swift-text-engine' 'maldrakar/swift-text-engine')" \
+    "admissible_source admits a run whose head repository is the harvested one"
+
+  assert_equal "skip=foreign_repo run=555 source=attacker/swift-text-engine" \
+    "$(admissible_source 555 'attacker/swift-text-engine' 'maldrakar/swift-text-engine')" \
+    "admissible_source rejects a fork's run and names the source it saw"
+
+  # Fails CLOSED. An unreadable provenance (deleted branch, 404, expired token, rate
+  # limit) is the one state a fork can manufacture, so unknown must mean rejected --
+  # there is deliberately no --allow-failed escape hatch: an optional policy is not one.
+  assert_equal "skip=provenance_unknown run=555" \
+    "$(admissible_source 555 '' 'maldrakar/swift-text-engine')" \
+    "admissible_source fails closed when the source cannot be read"
+
+  # `gh api --jq` prints the four characters `null` for a null field, which is not a
+  # repository name and must not be compared as one.
+  assert_equal "skip=provenance_unknown run=555" \
+    "$(admissible_source 555 'null' 'maldrakar/swift-text-engine')" \
+    "admissible_source treats a null head repository as unknown, not as a foreign name"
+
+  # `gh api` writes the raw JSON error body to STDOUT on a non-2xx response -- it bypasses
+  # --jq entirely -- so a 404/rate-limit/expired-token response can reach here looking
+  # non-empty and non-null. This is the exact blob a live 404 against a nonexistent run
+  # produces. It must map to provenance_unknown, never to foreign_repo: it is not a
+  # well-formed `owner/name`, so it never came from a successful read.
+  assert_equal "skip=provenance_unknown run=1" \
+    "$(admissible_source 1 '{"message":"Not Found","documentation_url":"https://docs.github.com/rest/actions/workflow-runs#get-a-workflow-run","status":"404"}' 'maldrakar/swift-text-engine')" \
+    "admissible_source treats a malformed (non owner/name) source as unknown, not as a foreign name"
+
+  # ------------------------------------------------------------------
+  # The harvest LOOP itself, driven through a stubbed `gh` on PATH.
+  #
+  # Every case above tests a pure FUNCTION. Deleting a function's CALL SITE from the
+  # loop below leaves all of them green -- the guard still exists, still works, and
+  # nothing invokes it. That is the seam-versus-production divergence D-26(b) records
+  # for the derivation's awk filter, one script over, and it is the more dangerous
+  # half of the pair because the two losses are asymmetric: dropping `extract_rows`'
+  # call site emits ZERO rows (loud), while dropping `admissible_source`'s emits MORE
+  # rows (silent) -- a fork's fabricated numbers entering the corpus that carries
+  # twelve blocking budgets.
+  #
+  # So this case must not call admissible_source or extract_rows. Like the production
+  # filter case in derive-gate-budgets.sh --self-test, it invokes the script the way an
+  # operator does and asserts the ROWS that reach stdout.
+  # ------------------------------------------------------------------
+  local stub_dir stub_out stub_err expected_loop_rows expected_loop_skips
+  stub_dir="$(mktemp -d)"
+  stub_out="$(mktemp)"
+  stub_err="$(mktemp)"
+
+  cat > "$stub_dir/gh" <<'STUB'
+#!/usr/bin/env bash
+# Minimal `gh` for the loop self-test. Three candidate runs, exactly one admissible:
+#   2001 -- this repository -> harvested
+#   2002 -- a fork          -> skip=foreign_repo
+#   2003 -- unreadable: a 404 JSON body on STDOUT with a NON-ZERO exit, which is what
+#           real `gh api` does (the body bypasses --jq entirely)
+if [[ "$1" == "run" && "$2" == "list" ]]; then
+  printf '2001\n2002\n2003\n'
+  exit 0
+fi
+if [[ "$1" == "api" ]]; then
+  case "$2" in
+    */runs/2001) printf 'maldrakar/swift-text-engine\n'; exit 0 ;;
+    */runs/2002) printf 'attacker/swift-text-engine\n'; exit 0 ;;
+    */runs/2003) printf '{"message":"Not Found","status":"404"}\n'; exit 1 ;;
+  esac
+  exit 1
+fi
+if [[ "$1" == "run" && "$2" == "view" ]]; then
+  # The SAME log for every run, deliberately: the only thing deciding which rows reach
+  # stdout is then the provenance check. A per-run body would let the assertion pass
+  # because the logs differed rather than because a run was refused.
+  printf 'mode=line_query provider=uniform scenario=uniform_1k p95_ns=24 p99_ns=54 failures=0 budget_p95_ns=190 budget_p99_ns=440 gate=pass checksum=1\n'
+  printf 'mode=wrap_row_query scenario=uniform_1k query_p95_ns=78 query_p99_ns=91 checksum=7\n'
+  exit 0
+fi
+exit 1
+STUB
+  chmod +x "$stub_dir/gh"
+
+  if ! PATH="$stub_dir:$PATH" "$0" --limit 3 --repo maldrakar/swift-text-engine \
+       > "$stub_out" 2> "$stub_err"; then
+    echo "self_test=fail label=the harvest loop exited non-zero under the gh stub"
+    cat "$stub_err"
+    rm -rf "$stub_dir" "$stub_out" "$stub_err"
+    exit 1
+  fi
+
+  # One row, from the one admissible run. The fork's and the unreadable run's identical
+  # log lines must NOT appear, and the prefixed wrap line must contribute nothing.
+  expected_loop_rows="$(printf '2001\tline_query\tuniform_1k\t24\t54\tpass')"
+  assert_equal "$expected_loop_rows" "$(cat "$stub_out")" \
+    "the harvest LOOP emits rows for the admissible run only (the CALL SITE, not just the function)"
+
+  # And both refusals are loud, naming the run and the source that was seen.
+  expected_loop_skips="$(printf 'skip=foreign_repo run=2002 source=attacker/swift-text-engine\nskip=provenance_unknown run=2003')"
+  assert_equal "$expected_loop_skips" "$(cat "$stub_err")" \
+    "the harvest LOOP reports both refusals on stderr"
+
+  rm -rf "$stub_dir" "$stub_out" "$stub_err"
+
   rm -f "$fixture" "$empty"
   echo "self_test=pass"
 }
@@ -163,8 +464,39 @@ plan_runs "$run_ids" "$harvested" | while read -r decision; do
     continue
   fi
 
+  # --dry-run stays NETWORK-FREE: it previews the dedup decision only. The provenance
+  # decision below costs one API call per candidate, which is the thing a dry run exists to
+  # avoid. A dry run therefore over-reports what a real harvest would take.
   if [[ "$dry_run" == 1 ]]; then
     echo "$decision" >&2
+    continue
+  fi
+
+  # Provenance, per run. Placed after the dedup skip and before the log fetch, so a run
+  # already in the corpus still costs ZERO API calls -- the existing property this must not
+  # break. Applied to BOTH entry paths, --runs included: that path bypassed even the
+  # workflow filter, so a caller passing an inadmissible id now gets a loud skip= and no
+  # row (a deliberate behaviour change to a documented flag).
+  #
+  # `< /dev/null` so gh cannot swallow the while-loop's stdin, exactly as the log fetch
+  # below does.
+  #
+  # The exit status is checked EXPLICITLY, not inferred from stdout emptiness: `gh api`
+  # writes the raw JSON error body (e.g. `{"message":"Not Found",...}`) to STDOUT on a
+  # non-2xx response -- it bypasses --jq entirely -- and sends only the human-readable
+  # message to stderr, which the 2>/dev/null below discards. A naive `|| true` therefore
+  # leaves that JSON blob sitting in $source_repo looking non-empty, which used to read as
+  # a foreign name rather than an unreadable one. Forcing source_repo="" on a non-zero exit
+  # makes failure fail-closed regardless of what gh printed. admissible_source's shape
+  # check (owner/name) is the second, independent line of defense if a blob like that ever
+  # reaches it anyway.
+  if ! source_repo="$(gh api "repos/$repo/actions/runs/$id" \
+       --jq '.head_repository.full_name' < /dev/null 2>/dev/null)"; then
+    source_repo=""
+  fi
+  source_decision="$(admissible_source "$id" "$source_repo" "$repo")"
+  if [[ "$source_decision" == skip=* ]]; then
+    echo "$source_decision" >&2
     continue
   fi
 
@@ -172,51 +504,15 @@ plan_runs "$run_ids" "$harvested" | while read -r decision; do
   # lines, must not abort the harvest: skip it loudly and keep going. Without the
   # `|| true` the pipefail on an expired log would kill the whole sweep, and a
   # partial corpus is exactly the failure mode the slice-38 record warns about
-  # ("harvest EVERY available hosted run, not a convenient subset").
+  # ("harvest EVERY available hosted run, not a convenient subset"). Since slice 54
+  # "available" means "available AND admissible": a run whose source repository is not
+  # this one, and a row whose own line reports a slow or degenerate measurement, are
+  # excluded on purpose and said out loud on stderr. That is a policy, not a convenience.
   log="$(gh run view "$id" -R "$repo" --log < /dev/null 2>/dev/null || true)"
   if [[ -z "$log" ]]; then
     echo "warn=log_unavailable run=$id" >&2
     continue
   fi
 
-  printf '%s\n' "$log" | awk -v run="$id" '
-    function emit_pairs(a, b,   x, y, n, m, i) {
-      if (a == "" || b == "") return
-      n = split(a, x, ",")
-      m = split(b, y, ",")
-      if (n != m) return
-      for (i = 1; i <= n; i++)
-        printf "%s\t%s\t%s\t%s\t%s\n", run, "realistic_provider", "100k_lines_10mb_text", x[i], y[i]
-    }
-
-    # Shape 2 must be tested first: it carries mode= and *_p95_ns_values= but no
-    # bare p95_ns=, so shape 1 would not match it anyway -- the order is for the
-    # reader, not the parser.
-    /mode=realistic_relative_observation/ {
-      bp95 = ""; bp99 = ""; hp95 = ""; hp99 = ""
-      for (i = 1; i <= NF; i++) {
-        split($i, kv, "=")
-        if (kv[1] == "base_p95_ns_values") bp95 = kv[2]
-        else if (kv[1] == "base_p99_ns_values") bp99 = kv[2]
-        else if (kv[1] == "head_p95_ns_values") hp95 = kv[2]
-        else if (kv[1] == "head_p99_ns_values") hp99 = kv[2]
-      }
-      emit_pairs(bp95, bp99)
-      emit_pairs(hp95, hp99)
-      next
-    }
-
-    /p95_ns=[0-9]+/ && /p99_ns=[0-9]+/ {
-      mode = ""; scenario = ""; p95 = ""; p99 = ""
-      for (i = 1; i <= NF; i++) {
-        split($i, kv, "=")
-        if (kv[1] == "mode") mode = kv[2]
-        else if (kv[1] == "scenario") scenario = kv[2]
-        else if (kv[1] == "p95_ns") p95 = kv[2]
-        else if (kv[1] == "p99_ns") p99 = kv[2]
-      }
-      if (mode != "" && scenario != "" && p95 != "" && p99 != "")
-        printf "%s\t%s\t%s\t%s\t%s\n", run, mode, scenario, p95, p99
-    }
-  '
+  printf '%s\n' "$log" | extract_rows "$id"
 done

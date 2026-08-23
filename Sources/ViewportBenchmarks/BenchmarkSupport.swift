@@ -28,6 +28,64 @@ func deterministicIndex(sample: Int, multiplier: UInt, modulus: Int) -> Int {
     Int(UInt(bitPattern: sample) &* multiplier % UInt(modulus))
 }
 
+// The division that turns one batched clock read into a per-operation cost.
+//
+// A FREE FUNCTION rather than an inline `/` on purpose (spec Decision 2). ContinuousClock
+// cannot be substituted in a unit test, so a test can pin `amortisedSamples`' structure --
+// the body runs `iterations * operationsPerSample` times, exactly `iterations` samples come
+// back -- but not its arithmetic: a dropped division leaves both of those true and silently
+// restores the defect this slice repairs. Pinned by exact equality in AmortisedSamplesTests.
+//
+// Truncating, matching every gated mode (LineQueryBenchmark.swift:89): an operation cheaper
+// than one clock tick reports 0, not 1.
+func amortise(elapsedNanoseconds: Int64, operationsPerSample: Int) -> Int64 {
+    precondition(operationsPerSample > 0, "operationsPerSample must be > 0")
+    return elapsedNanoseconds / Int64(operationsPerSample)
+}
+
+// One clock read per iteration, `operationsPerSample` operations inside it, divided by
+// `amortise` -- the measurement shape every gated mode uses (LineQueryBenchmark.swift:73-89),
+// extracted so it lives in exactly one place and can be tested there.
+//
+// It serves the WRAP modes only. The twelve gated modes deliberately keep their own loops:
+// any change to them can shift their numbers, and a shift drags a budget re-derivation under
+// the headroom-ceiling rule (spec Non-Goal 1). Routing this through BenchmarkSummary /
+// formatSummary was rejected for the same reason -- that printer is pinned by
+// WorkflowShapeTests and the checksum tests, and it would put harvestability one wrong
+// default away.
+//
+// `body` receives the GLOBAL operation index, so deterministicScrollOffset /
+// deterministicIndex carry over unchanged, and returns an Int folded into `checksum` --
+// which the caller must consume, or a release build is free to delete the measured work.
+// Samples come back unsorted; the caller sorts before `percentile`.
+@available(macOS 13.0, *)
+func amortisedSamples(
+    iterations: Int,
+    operationsPerSample: Int,
+    body: (Int) -> Int
+) -> (samples: [Int64], checksum: Int) {
+    precondition(iterations > 0, "iterations must be > 0")
+    precondition(operationsPerSample > 0, "operationsPerSample must be > 0")
+
+    let clock = ContinuousClock()
+    var samples: [Int64] = []
+    samples.reserveCapacity(iterations)
+    var checksum = 0
+
+    for iteration in 0..<iterations {
+        let start = clock.now
+        for operation in 0..<operationsPerSample {
+            checksum &+= body(iteration * operationsPerSample + operation)
+        }
+        let elapsed = start.duration(to: clock.now)
+        samples.append(
+            amortise(elapsedNanoseconds: nanoseconds(elapsed),
+                     operationsPerSample: operationsPerSample))
+    }
+
+    return (samples, checksum)
+}
+
 @inline(never)
 func runProviderOperation<Source: DocumentLineSource>(
     input: ViewportInput,

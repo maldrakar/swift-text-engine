@@ -260,8 +260,8 @@ swift run -c release ViewportBenchmarks -- --point-geometry-query --gate   # (x,
 swift run -c release ViewportBenchmarks -- --realistic-provider --gate   # realistic 100k/10MB scroll compute blocking CI gate
 swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
-swift run -c release ViewportBenchmarks -- --wrap-compute   # observational wrap compute width-change demo (not gateable)
-swift run -c release ViewportBenchmarks -- --wrap-row-query   # observational wrap y->row query benchmark (not gateable)
+swift run -c release ViewportBenchmarks -- --wrap-compute   # observational wrap compute width-change demo (amortised; not gateable)
+swift run -c release ViewportBenchmarks -- --wrap-row-query   # observational wrap y->row query benchmark (amortised; not gateable)
 swift run -c release ViewportBenchmarks -- --help            # all flags
 ./.github/scripts/harvest-gate-corpus.sh --limit 40 --corpus <corpus.tsv>   # hosted CI logs -> NEW corpus rows (append half)
 ./.github/scripts/harvest-gate-corpus.sh --self-test         # harvest selection-logic self-test (no network)
@@ -290,6 +290,14 @@ flag at a time. `--gate` is valid with the default pipeline, `--realistic-provid
 **rejected** with
 `--range-only`, `--memory-shape`,
 `--memory-observation`, `--wrap-compute`, `--wrap-row-query`.
+
+Both wrap modes measure on the same **amortised** shape as the gated modes —
+`operationsPerSample` operations under one clock read, divided by `amortise`
+(`BenchmarkSupport.swift`) — so their numbers resolve the operation rather than the
+host clock tick. Every measurement prints its own `*_operations_per_sample=` token.
+The one exemption is `--wrap-compute`'s `reindex_ns`, a one-shot O(N) setup whose
+meaning averaging would destroy; it prints `reindex_operations_per_sample=1` so the
+exemption reads as a decision rather than an oversight.
 
 Local WASM build (needs a matching Swift SDK installed):
 `swift build --swift-sdk <id> --target TextEngineCore` for both `wasm` and
@@ -474,7 +482,10 @@ hosted evidence, then re-derive from it:
 #    carries (before fetching their logs) and emits only new ones. Without it the
 #    append re-adds every run inside the --limit window that was harvested before,
 #    and a double-counted run double-weights itself in median() -- the term that
-#    governs most budgets. Preview the decisions with --dry-run.
+#    governs most budgets. Preview the decisions with --dry-run -- but note it is
+#    deliberately NETWORK-FREE, so it previews the dedup decision ONLY and skips the
+#    per-run provenance probe below. A dry run therefore OVER-reports: runs a real
+#    harvest would refuse as foreign or unreadable still show up as plan=harvest.
 ./.github/scripts/harvest-gate-corpus.sh --limit 40 \
   --corpus docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv \
   >> docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv
@@ -548,7 +559,14 @@ the hard way in Slice 39:
   regression**: the new samples raised a floor under an unchanged budget. Re-derive
   that scenario; do not go hunting for a slowdown in the core. (Budgets sitting
   within a few percent of their floor are normal — whenever the `3 x max` term
-  governs, `round_up_2sf` lands just above it *by construction*.)
+  governs, `round_up_2sf` lands just above it *by construction*.) **This holds
+  because a slow sample can no longer set a budget**: a row whose own hosted line
+  reported `budget_exceeded`, `budget_absolute_exceeded` or `operation_failures` is
+  rejected at read time (see **What the harvester admits**). Before Slice 54 nothing
+  downstream read the verdict, and this instruction was indistinguishable from one to
+  launder a regression into a looser budget — the summary line is printed *before* the
+  gate verdict is checked, so a slow sample genuinely reaches the log, and the
+  `3 x max` term lets a single row set a budget by itself.
 
 The corpus is **append-only**, and the run id is its dedup key — one run
 legitimately contributes many rows (a `realistic_provider` run contributes 8), and
@@ -557,12 +575,78 @@ substitute for `--corpus`: it would collapse two genuine repetitions that happen
 to measure the same nanoseconds, and it reorders every row.
 
 **Exactly one CI step may print a given mode's benchmark summary lines.** The
-harvester reads every `p95_ns=` line in a run's log, so a second printing step
+harvester reads every **admissible** `p95_ns=` line in a run's log (see **What the
+harvester admits** below), so a second printing step
 puts two rows per scenario into every future harvest of that run and
 double-weights it in `median()` — the term that governs most budgets. This is a
 different rule from the idempotent `--corpus` dedup above (which is about
 harvesting the *same run* twice): here one run genuinely carries two rows per
 scenario, and no dedup key can tell them apart.
+
+**What the harvester admits.** Two orthogonal axes, checked at two different levels.
+`conclusion` is deliberately **not** one of them.
+
+- **Source, per run.** `harvest-gate-corpus.sh` reads `.head_repository.full_name`
+  from `gh api repos/{owner}/{repo}/actions/runs/{id}` and admits a run only if it
+  equals the harvested repository. A run whose source cannot be read is **rejected**
+  (`skip=provenance_unknown`), not admitted: a fork executes its own code and can
+  print `gate=pass` beside any number it likes, so this axis fails closed. There is
+  no opt-out, and the `--runs id,id` path obeys the same check. The probe sits
+  between the dedup skip and the log fetch, so a run already in the corpus still
+  costs zero API calls. The **loop itself** is covered, not just the decision
+  function: `--self-test` drives the whole script through a stubbed `gh` and asserts
+  the rows that reach stdout, so deleting the call site — which leaves every
+  pure-function case green while a fork's rows enter the corpus — reddens.
+- **Verdict, per row.** Every summary line carries its own `gate=`/`reason=`, and
+  the harvester records it as the corpus's **sixth column**. Both consumers reject a
+  row at read time when that column is one of
+  `{budget_exceeded, budget_absolute_exceeded, operation_failures}` — the
+  measurement was slow or degenerate — and admit everything else. Row-level, not
+  run-level: one failing mode drops its own scenario and keeps its forty-five
+  siblings.
+- **`budget_stale` is admitted.** It means the measurement was *fast* enough that
+  headroom breached its ceiling, and the prescribed response is to re-derive from
+  fresh evidence — which requires harvesting exactly those samples. A filter that
+  dropped them would instruct the operator to re-derive and simultaneously refuse to
+  collect the evidence.
+- **Degeneracy is read from `failures=`, not from the verdict.** `formatSummary`
+  prints `failures=N` unconditionally, **outside** the `--gate` branch, so a row
+  whose `failures=` is non-zero is recorded as `operation_failures` whatever the
+  verdict says — including on a line with no `gate=` at all. That is strictly
+  stronger than reading the verdict: `gateFailureReason` returns `missing_budget`
+  **before** it tests `failureCount`, and `missing_budget` is admitted.
+- **A verdict-less line is admitted** (`none`), and so is a legacy five-column row.
+  A new mode's **first** hosted evidence necessarily comes from a step without
+  `--gate`, because its budget does not exist yet; rejecting those would make a new
+  gate unbootstrappable. The committed corpus is entirely five-column and is never
+  rewritten — the corpus is append-only.
+- **Why not `conclusion`.** A run-level filter discards both directions of a red
+  gate, and one failing mode out of twelve would discard the other forty-five
+  scenarios' sound rows. Audited against this repository's own history: it would
+  have dropped 92 sound rows over a WASM SDK failure — 46 rows each from two runs,
+  and one of those two runs is inside the active N=20 window.
+
+The reject set lives in two languages — `.github/scripts/derive-gate-budgets.sh`
+(`REJECTED_VERDICTS`) and `GateFloorTests.swift` (`rejectedVerdicts`) — pinned
+against each other by `testAdmissibleRowsMatchDeriveScript` over the
+`--admissible-rows` seam. That is the **third** cross-language pin, beside the two
+window pins, and like them it covers agreement, not correctness.
+
+**The rule itself is written twice on the shell side**, in two awk programs sharing
+only the `REJECTED_VERDICTS` string: the `--admissible-rows` seam (which the
+cross-language pin drives) and the derivation's own main awk, **which never calls the
+seam**. Each half has its own guard: the pin covers the seam, and
+`derive-gate-budgets.sh --self-test` covers the production filter by running the full
+derivation over a fixture and failing if a `budget_exceeded` row moves the derived
+budget. The standing residual is that an edit to the rule must land in **both** awk
+programs — changing one leaves the other enforcing the old rule (ledger D-26).
+
+The verdict filter applies **after** windowing, so neither window pin is touched; a
+run whose rows are all rejected still consumes a window slot. Rejections are loud:
+skipped runs print `skip=` and dropped rows print `dropped=<reason> rows=N`, both on
+stderr — and the derivation prints its `dropped=` counts **before** it can exit on
+`error=no_corpus_rows`, so the scenario-emptied-by-rejections case is explained
+rather than silent.
 
 The one time to harvest **without** `--corpus` is when the harvester learns to read
 a *new line shape* (as it did for `realistic_provider`): previously-harvested runs

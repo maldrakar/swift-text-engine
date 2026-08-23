@@ -51,6 +51,44 @@ private struct SingleLineWrap: WrapMetricsSource {
     func canBreak(beforeColumn column: Int, inLine line: Int) -> Bool { column > 0 && column < cells }
 }
 
+// Pure so WrapBenchmarkLineShapeTests can pin the token shape without running the
+// benchmark. Latency tokens stay PREFIXED, so this line emits no corpus row.
+//
+// `scenario=` is new and inert today: both derive-gate-budgets.sh and GateFloorTests
+// group on `mode|scenario`, and this line carried only `width=`, so node 6 would have had
+// nothing to group on. `drain_p99_ns=` is new for the same reason -- no gate can be derived
+// from p95 alone. Adding both here rather than at node 6 lets this slice's extract_rows()
+// truth table cover the wrap_compute line shape end to end, and reduces node 6's flip to
+// un-prefixing.
+func formatWrapComputeLine(
+    widthLabel: String,
+    totalRows: Int,
+    computeOperationsPerSample: Int,
+    computeP95Nanoseconds: Int64,
+    computeP99Nanoseconds: Int64,
+    drainOperationsPerSample: Int,
+    drainP95Nanoseconds: Int64,
+    drainP99Nanoseconds: Int64,
+    reindexNanoseconds: Int64
+) -> String {
+    "mode=wrap_compute scenario=width_\(widthLabel) width=\(widthLabel) total_rows=\(totalRows)"
+        + " compute_operations_per_sample=\(computeOperationsPerSample)"
+        + " compute_p95_ns=\(computeP95Nanoseconds)"
+        + " compute_p99_ns=\(computeP99Nanoseconds)"
+        + " drain_operations_per_sample=\(drainOperationsPerSample)"
+        + " drain_p95_ns=\(drainP95Nanoseconds)"
+        + " drain_p99_ns=\(drainP99Nanoseconds)"
+        // reindex is a ONE-SHOT O(N) setup over 100 000 lines -- the width-change cost this
+        // mode exists to demonstrate -- not a repeatable operation, so averaging it over
+        // repetitions would destroy its meaning (spec Decision 3). The discriminator is
+        // setup-vs-operation, NOT magnitude: `drain` measures in microseconds, as far above
+        // tick granularity as reindex is, and is amortised anyway so node 6 promotes one
+        // shape rather than two. The token is the VALUE 1 rather than absent, so the
+        // exemption reads as a decision and not an oversight. Do not "consolidate" it.
+        + " reindex_operations_per_sample=1"
+        + " reindex_ns=\(reindexNanoseconds)"
+}
+
 @available(macOS 13.0, *)
 func runWrapComputeBenchmarks() -> Bool {
     let lineCount = 100_000
@@ -58,7 +96,21 @@ func runWrapComputeBenchmarks() -> Bool {
     let advance = 1.0
     let rowHeight = 16.0
     let viewportHeight = 800.0
-    let samples = 2_000
+    let iterations = 2_000
+    let computeOperationsPerSample = 256
+    // drain walks the whole buffer per operation, so it takes the smaller count -- the
+    // precedent BulkStructuralMutationBenchmark.swift:66-77 already sets for heavy scenarios.
+    let drainOperationsPerSample = 16
+    // Sized so the pre-built array loses no input diversity against computing the offset
+    // inline: deterministicScrollOffset (BenchmarkSupport.swift) is
+    // `(sample * 37) % 1_000`, and gcd(37, 1 000) = 1, so its period is exactly 1 000 and
+    // 1 000 ranges cover its whole image bijectively.
+    //
+    // A drain sample never replays one range either, but that follows from the INDEXING,
+    // not from this count: the body indexes by the global operation index, so the 16
+    // operations in one sample read 16 CONSECUTIVE indices -- distinct modulo any count
+    // >= 16, whatever it is.
+    let drainRangeCount = 1_000
     let clock = ContinuousClock()
 
     // Wide (∞ -> 1 row/line) to narrow (more rows/line). Compute cost grows only as
@@ -66,43 +118,88 @@ func runWrapComputeBenchmarks() -> Bool {
     let widths: [Double] = [.infinity, 40.0, 10.0]
 
     for width in widths {
-        let reindexElapsed = clock.measure {
-            _ = BenchmarkWrapLayout(lineCount: lineCount, cells: cells, advance: advance, rowHeight: rowHeight, wrapWidth: width)
-        }
-        let layout = BenchmarkWrapLayout(lineCount: lineCount, cells: cells, advance: advance, rowHeight: rowHeight, wrapWidth: width)
+        // The timed construction is BOUND and REUSED. It used to be discarded
+        // (`_ = BenchmarkWrapLayout(...)`) with a second identical layout built for use:
+        // two O(N) passes per width, and the mode's headline measurement was the one
+        // carrying no dead-code guard while the far cheaper drain below did. Binding it
+        // removes the second pass and makes the measured work observably live -- `layout`
+        // is read on the very next line (spec Decision 3).
+        let reindexStart = clock.now
+        let layout = BenchmarkWrapLayout(
+            lineCount: lineCount, cells: cells, advance: advance,
+            rowHeight: rowHeight, wrapWidth: width)
+        let reindexElapsed = reindexStart.duration(to: clock.now)
+
         let totalRows = layout.firstVisualRow(ofLine: layout.lineCount)
         let maxOffset = Double(totalRows) * rowHeight - viewportHeight
 
-        var computeSamples: [Int64] = []
-        var drainSamples: [Int64] = []
-        computeSamples.reserveCapacity(samples)
-        drainSamples.reserveCapacity(samples)
-        for s in 0..<samples {
-            let scroll = deterministicScrollOffset(sample: s, maxOffset: max(0, maxOffset))
-            let input = VariableViewportInput(scrollOffsetY: scroll, viewportHeight: viewportHeight, overscanLinesBefore: 4, overscanLinesAfter: 4)
-            var range = VirtualRange(visibleStart: 0, visibleEndExclusive: 0, bufferStart: 0, bufferEndExclusive: 0, isAtTop: true, isAtBottom: true)
-            let computeElapsed = clock.measure {
-                if case .success(let r) = ViewportVirtualizer.compute(input, layout: layout) { range = r }
-            }
-            computeSamples.append(nanoseconds(computeElapsed))
-            let drainElapsed = clock.measure {
-                var cursor = ViewportVirtualizer.visualRowGeometry(for: range, layout: layout)
-                var sink = 0
-                while let g = cursor.next() { sink &+= g.row.endColumn }
-                if sink == Int.min { print("") }   // prevent dead-code elimination
-            }
-            drainSamples.append(nanoseconds(drainElapsed))
+        func input(forOperation operation: Int) -> VariableViewportInput {
+            VariableViewportInput(
+                scrollOffsetY: deterministicScrollOffset(sample: operation, maxOffset: max(0, maxOffset)),
+                viewportHeight: viewportHeight,
+                overscanLinesBefore: 4,
+                overscanLinesAfter: 4)
         }
+
+        let computeMeasured = amortisedSamples(
+            iterations: iterations, operationsPerSample: computeOperationsPerSample
+        ) { operation in
+            if case .success(let range) = ViewportVirtualizer.compute(input(forOperation: operation), layout: layout) {
+                return range.bufferEndExclusive &- range.bufferStart
+            }
+            return 0
+        }
+
+        // Spec Decision 4: the ranges the drain body walks are built HERE, outside the clock.
+        // Computing one inside the drain body would make drain_p95_ns measure compute+drain,
+        // contradicting the two independent tokens this line prints and gating node 6 on the
+        // wrong quantity. It is also a repair: the old shape ran compute and drain in the same
+        // iteration, so every drain sample was contaminated by what the compute call before it
+        // left in cache and branch predictors, while the two tokens claimed independence.
+        var drainRanges: [VirtualRange] = []
+        drainRanges.reserveCapacity(drainRangeCount)
+        for index in 0..<drainRangeCount {
+            switch ViewportVirtualizer.compute(input(forOperation: index), layout: layout) {
+            case .success(let range):
+                drainRanges.append(range)
+            case .failure:
+                preconditionFailure("wrap compute failed while pre-building the drain ranges")
+            }
+        }
+
+        let drainMeasured = amortisedSamples(
+            iterations: iterations, operationsPerSample: drainOperationsPerSample
+        ) { operation in
+            var cursor = ViewportVirtualizer.visualRowGeometry(
+                for: drainRanges[operation % drainRangeCount], layout: layout)
+            var sink = 0
+            while let geometry = cursor.next() { sink &+= geometry.row.endColumn }
+            return sink
+        }
+
+        var computeSamples = computeMeasured.samples
+        var drainSamples = drainMeasured.samples
         computeSamples.sort()
         drainSamples.sort()
+
+        // Keeps both measured bodies observably live without adding a token to a line the
+        // harvester must keep ignoring -- the same guard the drain body carried before, now
+        // covering compute as well.
+        if computeMeasured.checksum &+ drainMeasured.checksum == Int.min { print("") }
+
         // No Foundation in this target: `String(format:)` is unavailable, so format the
         // (always-integral) finite widths via `Int(_:)` rather than importing Foundation.
         let widthLabel = width.isFinite ? String(Int(width)) : "inf"
-        print("mode=wrap_compute width=\(widthLabel) total_rows=\(totalRows)"
-            + " compute_p95_ns=\(percentile(computeSamples, numerator: 95, denominator: 100))"
-            + " compute_p99_ns=\(percentile(computeSamples, numerator: 99, denominator: 100))"
-            + " drain_p95_ns=\(percentile(drainSamples, numerator: 95, denominator: 100))"
-            + " reindex_ns=\(nanoseconds(reindexElapsed))")
+        print(formatWrapComputeLine(
+            widthLabel: widthLabel,
+            totalRows: totalRows,
+            computeOperationsPerSample: computeOperationsPerSample,
+            computeP95Nanoseconds: percentile(computeSamples, numerator: 95, denominator: 100),
+            computeP99Nanoseconds: percentile(computeSamples, numerator: 99, denominator: 100),
+            drainOperationsPerSample: drainOperationsPerSample,
+            drainP95Nanoseconds: percentile(drainSamples, numerator: 95, denominator: 100),
+            drainP99Nanoseconds: percentile(drainSamples, numerator: 99, denominator: 100),
+            reindexNanoseconds: nanoseconds(reindexElapsed)))
     }
     return true
 }
