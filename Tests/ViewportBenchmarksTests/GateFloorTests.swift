@@ -57,6 +57,24 @@ let rejectedVerdicts: Set<String> = [
 // consists entirely of those, and the corpus is append-only, so they are never rewritten.
 func isAdmissibleVerdict(_ verdict: String) -> Bool { !rejectedVerdicts.contains(verdict) }
 
+// The verdict a corpus row carries, single-sourced across BOTH Swift readers.
+//
+// They are two: `admissibleCorpusRows` (the seam testAdmissibleRowsMatchDeriveScript
+// drives) and `corpusExtremes` (what the floor check actually reads). They wrote this
+// extraction independently and disagreed on the column-count rule -- `>= 6` against
+// `== 6` -- which is the seam-versus-production divergence D-26(b) records on the shell
+// side, one language over. Unreachable today (a harvest writes exactly six columns), and
+// unreachable is not the same as pinned.
+//
+// A legacy five-column row has no verdict and reads as "" -- admitted as unknown, which
+// is what the whole committed corpus depends on. A row WIDER than six is not a shape any
+// harvest produces; it reads as "" here too, and `corpusExtremes` rejects it as malformed
+// separately. That judgement stays there on purpose: this function answers "which verdict
+// does this row carry", not "is this row well-formed".
+func corpusVerdict(_ columns: [Substring]) -> String {
+    columns.count == 6 ? String(columns[5]) : ""
+}
+
 // Corpus text -> the raw rows the derivation admits, header excluded, in input order.
 // VERDICT FILTER ONLY -- windowing is a separate axis, pinned by the two window pins, and
 // the shell seam this is compared against (`--admissible-rows`) does not window either.
@@ -67,7 +85,7 @@ func admissibleCorpusRows(from text: String) -> [String] {
     for (index, line) in text.split(separator: "\n").enumerated() {
         if index == 0 { continue }  // header
         let columns = line.split(separator: "\t", omittingEmptySubsequences: false)
-        let verdict = columns.count >= 6 ? String(columns[5]) : ""
+        let verdict = corpusVerdict(columns)
         if isAdmissibleVerdict(verdict) { admitted.append(String(line)) }
     }
     return admitted
@@ -117,7 +135,7 @@ private func corpusExtremes(from text: String, windowSize: Int) -> [String: Corp
         // (spec Decision 8), exactly as the shell's `cut -f1 | sort -rnu | head` is, so a
         // run whose every row is rejected still consumes a window slot.
         runIDs.append(runID)
-        let verdict = columns.count == 6 ? String(columns[5]) : ""
+        let verdict = corpusVerdict(columns)
         guard isAdmissibleVerdict(verdict) else { continue }
         rows.append(Row(runID: runID, key: "\(columns[1])|\(columns[2])", p95: p95, p99: p99))
     }
@@ -373,6 +391,44 @@ final class GateFloorTests: XCTestCase {
         XCTAssertTrue(isAdmissibleVerdict("missing_budget"))            // valid, merely unjudgeable
         XCTAssertTrue(isAdmissibleVerdict("none"))                      // printed without --gate
         XCTAssertTrue(isAdmissibleVerdict(""))                          // legacy five-column row
+    }
+
+    // The two Swift corpus readers must admit the SAME rows.
+    //
+    // `admissibleCorpusRows` is the seam testAdmissibleRowsMatchDeriveScript drives across
+    // languages; `corpusExtremes` is what the floor check actually reads. Nothing forced
+    // them equal, and they had already drifted once on the column-count rule (`>= 6`
+    // against `== 6`) -- the seam-versus-production shape D-26(b) records for the shell's
+    // two awk programs, one language over. `corpusVerdict` is now their single source, and
+    // this is the test that would notice a second one reappearing: without it, the
+    // cross-language pin could be pinning a rule the floor check does not apply.
+    //
+    // One mode|scenario throughout so `sampleCount` and the row count are comparable, and a
+    // window wider than the run count so nothing here is dropped by age rather than verdict.
+    func testTheTwoCorpusReadersAdmitTheSameRows() {
+        let corpus = """
+        run_id\tmode\tscenario\tp95_ns\tp99_ns\tverdict
+        908\tline_query\tuniform_1k\t20\t40\tpass
+        907\tline_query\tuniform_1k\t21\t41\tbudget_exceeded
+        906\tline_query\tuniform_1k\t22\t42\tbudget_absolute_exceeded
+        905\tline_query\tuniform_1k\t23\t43\toperation_failures
+        904\tline_query\tuniform_1k\t24\t44\tbudget_stale
+        903\tline_query\tuniform_1k\t25\t45\tmissing_budget
+        902\tline_query\tuniform_1k\t26\t46\tnone
+        901\tline_query\tuniform_1k\t27\t47
+        """
+
+        let seamRows = admissibleCorpusRows(from: corpus)
+        let production = corpusExtremes(from: corpus, windowSize: 20)["line_query|uniform_1k"]
+
+        XCTAssertEqual(
+            production?.sampleCount, seamRows.count,
+            "the pinned seam and the floor reader admit different row sets -- the "
+                + "cross-language pin would then be pinning a rule the floor check does "
+                + "not apply")
+
+        // Non-vacuity: neither reader admits everything, nor nothing.
+        XCTAssertEqual(seamRows.count, 5, "pass, budget_stale, missing_budget, none, legacy")
     }
 
     // Pins the ONE documented N across languages. derive-gate-budgets.sh computes the
