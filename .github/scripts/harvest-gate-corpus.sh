@@ -11,6 +11,11 @@
 #   ./.github/scripts/harvest-gate-corpus.sh [--limit N] [--repo OWNER/NAME]
 #   ./.github/scripts/harvest-gate-corpus.sh --runs 29150501304,29187553818
 #
+# Every candidate's SOURCE repository is checked before its log is fetched: a run whose
+# .head_repository.full_name is not --repo is skipped (skip=foreign_repo), and a run whose
+# source cannot be read is skipped too (skip=provenance_unknown). There is no opt-out --
+# an optional policy is not a policy. The --runs id,id path obeys the same check.
+#
 # Emits corpus rows on stdout (no header), ready to append:
 #   run_id <TAB> mode <TAB> scenario <TAB> p95_ns <TAB> p99_ns <TAB> verdict
 #
@@ -64,6 +69,32 @@ plan_runs() {
       printf 'plan=harvest run=%s\n' "$id"
     fi
   done <<< "$candidates"
+}
+
+# Pure decision over (run id, observed head repository, expected repository).
+#
+# Neither `gh run list --json` nor `gh run view --json` exposes the source repository --
+# both field lists were checked and it is absent. The datum lives at
+# `gh api repos/{owner}/{repo}/actions/runs/{id}` as `.head_repository.full_name`.
+#
+# Rejected alternative: switching candidate selection to the workflow-runs API, which
+# returns ids and sources together in one call. It rewrites the selection path wholesale
+# and the --runs entry path would still need per-run lookups, so the policy would have two
+# implementations. One call per candidate at N <= 40 is not worth a second code path.
+# Likewise rejected: skipping the probe for `event != pull_request` runs, which cannot have
+# a foreign head repository. It buys nothing the --corpus dedup does not already buy, and
+# costs the same second code path.
+admissible_source() {
+  local id="$1" observed="$2" expected="$3"
+  # Fail CLOSED on an unreadable source: that is the one state a fork can manufacture.
+  # `null` is what `gh api --jq` prints for a null field -- it is not a repository name.
+  if [[ -z "$observed" || "$observed" == "null" ]]; then
+    printf 'skip=provenance_unknown run=%s\n' "$id"
+  elif [[ "$observed" != "$expected" ]]; then
+    printf 'skip=foreign_repo run=%s source=%s\n' "$id" "$observed"
+  else
+    printf 'plan=harvest run=%s\n' "$id"
+  fi
 }
 
 # The corpus-row parser: a hosted CI log on stdin, six-column TSV rows on stdout.
@@ -260,6 +291,33 @@ plan=harvest run=333" "$(plan_runs "111
 
   rm -f "$logfixture"
 
+  # ------------------------------------------------------------------
+  # admissible_source: the run-level axis. A fork executes its own code and can print
+  # gate=pass beside any number it likes, so no per-row check helps here -- and the
+  # --runs id,id entry path bypassed even the workflow filter, so this was the one
+  # unauthenticated link in a chain carrying twelve blocking budgets.
+  # ------------------------------------------------------------------
+  assert_equal "plan=harvest run=555" \
+    "$(admissible_source 555 'maldrakar/swift-text-engine' 'maldrakar/swift-text-engine')" \
+    "admissible_source admits a run whose head repository is the harvested one"
+
+  assert_equal "skip=foreign_repo run=555 source=attacker/swift-text-engine" \
+    "$(admissible_source 555 'attacker/swift-text-engine' 'maldrakar/swift-text-engine')" \
+    "admissible_source rejects a fork's run and names the source it saw"
+
+  # Fails CLOSED. An unreadable provenance (deleted branch, 404, expired token, rate
+  # limit) is the one state a fork can manufacture, so unknown must mean rejected --
+  # there is deliberately no --allow-failed escape hatch: an optional policy is not one.
+  assert_equal "skip=provenance_unknown run=555" \
+    "$(admissible_source 555 '' 'maldrakar/swift-text-engine')" \
+    "admissible_source fails closed when the source cannot be read"
+
+  # `gh api --jq` prints the four characters `null` for a null field, which is not a
+  # repository name and must not be compared as one.
+  assert_equal "skip=provenance_unknown run=555" \
+    "$(admissible_source 555 'null' 'maldrakar/swift-text-engine')" \
+    "admissible_source treats a null head repository as unknown, not as a foreign name"
+
   rm -f "$fixture" "$empty"
   echo "self_test=pass"
 }
@@ -314,8 +372,28 @@ plan_runs "$run_ids" "$harvested" | while read -r decision; do
     continue
   fi
 
+  # --dry-run stays NETWORK-FREE: it previews the dedup decision only. The provenance
+  # decision below costs one API call per candidate, which is the thing a dry run exists to
+  # avoid. A dry run therefore over-reports what a real harvest would take.
   if [[ "$dry_run" == 1 ]]; then
     echo "$decision" >&2
+    continue
+  fi
+
+  # Provenance, per run. Placed after the dedup skip and before the log fetch, so a run
+  # already in the corpus still costs ZERO API calls -- the existing property this must not
+  # break. Applied to BOTH entry paths, --runs included: that path bypassed even the
+  # workflow filter, so a caller passing an inadmissible id now gets a loud skip= and no
+  # row (a deliberate behaviour change to a documented flag).
+  #
+  # `< /dev/null` so gh cannot swallow the while-loop's stdin, exactly as the log fetch
+  # below does. `|| true` turns any gh failure into an empty source, which admissible_source
+  # rejects -- fail-closed by construction rather than by a second branch.
+  source_repo="$(gh api "repos/$repo/actions/runs/$id" \
+    --jq '.head_repository.full_name' < /dev/null 2>/dev/null || true)"
+  source_decision="$(admissible_source "$id" "$source_repo" "$repo")"
+  if [[ "$source_decision" == skip=* ]]; then
+    echo "$source_decision" >&2
     continue
   fi
 
