@@ -29,6 +29,50 @@ func mostRecentRunIDs(_ ids: [Int64], limit: Int) -> Set<Int64> {
     Set(Set(ids).sorted(by: >).prefix(limit))
 }
 
+// The verdict values the derivation REFUSES. Classified by what happened to the
+// MEASUREMENT, not by whether the gate passed: `budget_exceeded` and
+// `budget_absolute_exceeded` mean the sample was SLOW -- the regression-laundering case,
+// where one bad row sets a looser budget through the 3x-max term and
+// testEveryCommittedBudgetReproducesFromCorpus then REQUIRES that looser budget to be
+// committed. `operation_failures` means the timed path was degenerate, so the number
+// measures nothing.
+//
+// `budget_stale` is admitted ON PURPOSE. It means the measurement was FAST enough that
+// headroom breached its ceiling, and AGENTS.md's prescribed response is "re-derive from
+// fresh hosted evidence" -- which requires harvesting exactly these rows. A filter that
+// dropped them would instruct the operator to re-derive and simultaneously refuse to
+// collect the evidence.
+//
+// Pinned byte-for-byte against REJECTED_VERDICTS in .github/scripts/derive-gate-budgets.sh
+// by testAdmissibleRowsMatchDeriveScript -- the third cross-language pin, beside the two
+// window pins. That pin covers AGREEMENT, not correctness: if both sides gain the same
+// wrong entry, nothing notices.
+let rejectedVerdicts: Set<String> = [
+    "budget_exceeded",
+    "budget_absolute_exceeded",
+    "operation_failures",
+]
+
+// An EMPTY verdict is a legacy five-column row, admitted as "unknown": the committed corpus
+// consists entirely of those, and the corpus is append-only, so they are never rewritten.
+func isAdmissibleVerdict(_ verdict: String) -> Bool { !rejectedVerdicts.contains(verdict) }
+
+// Corpus text -> the raw rows the derivation admits, header excluded, in input order.
+// VERDICT FILTER ONLY -- windowing is a separate axis, pinned by the two window pins, and
+// the shell seam this is compared against (`--admissible-rows`) does not window either.
+// Returns the lines verbatim so the cross-language comparison is over bytes, not over a
+// re-parse that could paper over a field-splitting disagreement.
+func admissibleCorpusRows(from text: String) -> [String] {
+    var admitted: [String] = []
+    for (index, line) in text.split(separator: "\n").enumerated() {
+        if index == 0 { continue }  // header
+        let columns = line.split(separator: "\t", omittingEmptySubsequences: false)
+        let verdict = columns.count >= 6 ? String(columns[5]) : ""
+        if isAdmissibleVerdict(verdict) { admitted.append(String(line)) }
+    }
+    return admitted
+}
+
 private struct CorpusExtremes {
     var maxP95: Int64 = 0
     var maxP99: Int64 = 0
@@ -57,14 +101,24 @@ private func corpusExtremes(from text: String, windowSize: Int) -> [String: Corp
     for (index, line) in text.split(separator: "\n").enumerated() {
         if index == 0 { continue }  // header
         let columns = line.split(separator: "\t", omittingEmptySubsequences: false)
-        guard columns.count == 5,
+        // Five OR six: five is a legacy row (the committed corpus is entirely legacy), six
+        // carries the verdict every harvest now writes. Requiring exactly six would redden
+        // on the committed corpus itself; requiring exactly five would redden the moment a
+        // harvested row lands -- which is what forced this reader to learn the column
+        // BEFORE the harvester started writing it (spec Decision 6).
+        guard columns.count == 5 || columns.count == 6,
               let runID = Int64(columns[0]),
               let p95 = Int64(columns[3]),
               let p99 = Int64(columns[4]) else {
             XCTFail("malformed corpus row \(index + 1): \(line)")
             continue
         }
+        // The run id is recorded BEFORE the verdict filter: the window is verdict-blind
+        // (spec Decision 8), exactly as the shell's `cut -f1 | sort -rnu | head` is, so a
+        // run whose every row is rejected still consumes a window slot.
         runIDs.append(runID)
+        let verdict = columns.count == 6 ? String(columns[5]) : ""
+        guard isAdmissibleVerdict(verdict) else { continue }
         rows.append(Row(runID: runID, key: "\(columns[1])|\(columns[2])", p95: p95, p99: p99))
     }
 
@@ -270,6 +324,55 @@ final class GateFloorTests: XCTestCase {
         let all = corpusExtremes(from: corpus, windowSize: 10)["line_query|uniform_1k"]
         XCTAssertEqual(all?.maxP95, 999)
         XCTAssertEqual(all?.maxP99, 999)
+    }
+
+    // The corpus schema's sixth column, and the back-compatibility claim, in one fixture.
+    //
+    // Five-column rows are LEGACY: the committed corpus consists entirely of them, and no
+    // harvest produces them any more. An absent verdict means "unknown", which is admitted --
+    // rejecting them would discard the whole corpus. Drill 5 mutates the reader to require
+    // exactly six columns; the legacy row here is what reddens.
+    //
+    // The rejected rows still contribute their run ids to the WINDOW (spec Decision 8): the
+    // verdict filter applies to row admission, after windowing, so neither window pin is
+    // touched. Run 500 below is rejected on both its rows yet still occupies a window slot.
+    func testSixColumnRowsAreReadAndFilteredByVerdict() {
+        let corpus = """
+        run_id\tmode\tscenario\tp95_ns\tp99_ns\tverdict
+        500\tline_query\tuniform_1k\t900\t900\tbudget_exceeded
+        500\tline_query\tuniform_1k\t901\t901\toperation_failures
+        400\tline_query\tuniform_1k\t32\t64\tpass
+        300\tline_query\tuniform_1k\t31\t62\tbudget_stale
+        200\tline_query\tuniform_1k\t30\t60\tmissing_budget
+        100\tline_query\tuniform_1k\t29\t58\tnone
+        50\tline_query\tuniform_1k\t28\t56
+        """
+
+        // Window of 10 covers every run: what is dropped is dropped by VERDICT, not by age.
+        let all = corpusExtremes(from: corpus, windowSize: 10)["line_query|uniform_1k"]
+        XCTAssertEqual(all?.maxP95, 32, "a budget_exceeded row must not set the observed max")
+        XCTAssertEqual(all?.maxP99, 64)
+        XCTAssertEqual(all?.sampleCount, 5, "pass, budget_stale, missing_budget, none, legacy")
+
+        // Window of 2 keeps runs {500, 400}. Run 500's rows are both rejected, so it
+        // consumes a slot and contributes nothing -- the accepted cost in Decision 8.
+        let windowed = corpusExtremes(from: corpus, windowSize: 2)["line_query|uniform_1k"]
+        XCTAssertEqual(windowed?.maxP95, 32)
+        XCTAssertEqual(windowed?.sampleCount, 1)
+    }
+
+    // The reject set itself, stated as a truth table so that adding or removing a case is a
+    // deliberate edit against a list, not a silent set-literal change. Classified by what
+    // happened to the MEASUREMENT, not by whether the gate passed.
+    func testRejectSetIsExactlyThreeReasons() {
+        XCTAssertEqual(rejectedVerdicts.count, 3)
+        XCTAssertFalse(isAdmissibleVerdict("budget_exceeded"))         // slow
+        XCTAssertFalse(isAdmissibleVerdict("budget_absolute_exceeded")) // slow, above the 60 FPS ceiling
+        XCTAssertFalse(isAdmissibleVerdict("operation_failures"))       // degenerate timed path
+        XCTAssertTrue(isAdmissibleVerdict("budget_stale"))              // FAST -- its fix NEEDS this data
+        XCTAssertTrue(isAdmissibleVerdict("missing_budget"))            // valid, merely unjudgeable
+        XCTAssertTrue(isAdmissibleVerdict("none"))                      // printed without --gate
+        XCTAssertTrue(isAdmissibleVerdict(""))                          // legacy five-column row
     }
 
     // Pins the ONE documented N across languages. derive-gate-budgets.sh computes the
