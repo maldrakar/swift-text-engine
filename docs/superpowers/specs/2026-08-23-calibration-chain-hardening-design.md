@@ -34,11 +34,25 @@ direction:
   (it does not discriminate: `drain` is equally far above tick granularity), and now
   also repairs the measurement site's missing dead-code guard and duplicated O(N)
   construction.
-- **Problem's before-claim became structural** (integer tick multiples, N of N)
+- **Problem's before-claim became structural** (integer tick multiples, 20 of 20)
   rather than a transcribed pair of numbers, which a re-run had already falsified.
 - **Audit** names its join key, which is not the one the obvious command returns.
 - **Documentation Updates** was aimed at two `AGENTS.md` passages that do not exist;
   the real contradictions are named instead.
+
+**Validated 2026-08-23**, immediately after the amendments above. All six of the
+review's substantive findings reproduce against the tree — including the
+`.missingBudget`-before-`failureCount` ordering (`BenchmarkModels.swift:160-163`)
+that makes the `failures=` rule strictly stronger than the verdict. Three of its
+factual claims did **not**, and are corrected here rather than left for the plan to
+inherit: the Audit table kept the wrong host-job counts (2/2/13; verified 2/3/12)
+and explained them with a run-level/host-job disagreement that does not exist — the
+only two disagreements are the WASM-red pair; the tick-multiple denominator "13 of
+13" reproduces under no reading (20 printed, 15 distinct, 12 distinct excluding
+`reindex`) and is now derived from the output shape; and Decision 3's transcribed
+`drain` range had already drifted by one sweep. None of the three changes direction,
+and all three sat inside claims this spec makes falsifiable — which is how they were
+found.
 
 ## Source Context
 
@@ -68,19 +82,30 @@ convincingly.
 Every gated mode instead runs `operationsPerSample = 256` operations under one
 clock read and divides (`LineQueryBenchmark.swift:73-89`). Measured locally in
 release, **every** value the two modes print lands within 1 ns of an integer
-multiple of the host clock tick (≈41.667 ns on Apple silicon; 13 of 13 values over
-one sweep), while the gated siblings this query belongs beside measure 17-94 ns —
+multiple of the host clock tick (≈41.667 ns on Apple silicon; **20 of 20** values
+over one sweep), while the gated siblings this query belongs beside measure 17-94 ns —
 below one tick. A budget derived from these numbers would be a budget on clock
 overhead.
 
 The falsifiable before-claim is that **structural** one — integer tick multiples —
 and not any particular pair of numbers. Which scenario happens to collapse to
 `p95 == p99` moves between sweeps: the slice-53 review recorded `uniform_1k` doing
-so; a re-run while fixing this design had `uniform_1k` at 167/208 and
-`clamped_100k` at 83/84 instead. Both observations are the same defect, but only
-the tick-multiple property is stable enough to assert in a document. Per this
+so; re-runs while fixing this design had `uniform_1k` at 167/208 and then 167/209,
+with `clamped_100k` at 83/84 instead. Both observations are the same defect, but
+only the tick-multiple property is stable enough to assert in a document. Per this
 repository's own lesson that a transcribed measurement rots, the sweep's actual
 numbers belong in the verification record, not here.
+
+**The denominator is derived from the output shape, not from the sweep**, which is
+what makes it re-runnable: `--wrap-row-query` prints 2 latency values per scenario
+over 4 scenarios, and `--wrap-compute` prints 4 per width (`compute_p95`,
+`compute_p99`, `drain_p95`, `reindex`) over 3 widths — 8 + 12 = **20**. Counting
+*distinct* values instead yields 15, or 12 excluding `reindex`, and those counts
+move between sweeps as values coincide; an earlier draft of this section asserted
+one of them and did not reproduce. The check is over all 20 printed values,
+`reindex` included — it too is a tick multiple, which is expected and is not
+evidence of the defect, since a one-shot O(N) setup is quantised like anything
+else.
 
 **D-7 — the harvester authenticates nothing.** Run selection is
 `gh run list --workflow swift-ci.yml --limit N --json databaseId`
@@ -126,21 +151,26 @@ gh api repos/{owner}/{repo}/actions/runs/{id}/jobs \
   --jq '.jobs[] | select(.name == "Host tests and benchmark gate") | .conclusion'
 ```
 
-because that is the only job printing harvestable lines. The two WASM-red runs have
-a **green** host job and sit in row 1; one run that is `cancelled` at run level has
-a failed host job and sits in row 3. Recorded so the audit is re-runnable rather
-than merely asserted.
+because that is the only job printing harvestable lines. Recorded so the audit is
+re-runnable rather than merely asserted.
+
+The two keys disagree on **exactly two** of the seventeen non-success runs, and in
+one direction only: `29701547123` and `29701333581` are `failure` at run level with
+a **green** host job, because the WASM job is what went red. Every other run agrees
+with itself. The disagreement is therefore not a curiosity — those two runs carry 92
+of the 113 corpus rows this table accounts for, and a run-keyed audit misfiles all
+92.
 
 | host job conclusion | runs | corpus rows |
 |---|---|---|
 | `success` (run red on WASM) | 2 | **92** (46 + 46), one inside the active N=20 window |
-| `cancelled` | 2 | **21** (12 + 9), both outside the window |
-| `failure` | 13 | **0** — all from the 27.4M era, older than the harvest recipe itself |
+| `cancelled` | 3 | **21** (12 + 9 + 0), all outside the window |
+| `failure` | 12 | **0** — all from the 27.4M era, older than the harvest recipe itself |
 
 Three results, each of which changed the design:
 
 1. **The corpus is clean.** No row traces to a `gate=fail reason=budget_exceeded`
-   line. The thirteen runs with a failed host job contributed nothing, because they
+   line. The twelve runs with a failed host job contributed nothing, because they
    predate the recipe. So there is nothing to clean, and the append-only dilemma
    never arises.
 2. **No fork has ever run CI** — 279 of 279 runs are `maldrakar/swift-text-engine`.
@@ -228,10 +258,14 @@ over 100 000 lines — it is the width-change cost the mode exists to demonstrat
 and averaging it over repetitions would destroy its meaning.
 
 Magnitude is deliberately **not** offered as the discriminator, because it does not
-discriminate: measured locally, `drain` runs 4.75-16.4 us — 114-393 ticks, as far
-above tick granularity as `reindex_ns` is. What separates them is that one is a
+discriminate: `drain` measures in the **microsecond** range, two orders of magnitude
+above the tick and as far above tick granularity as `reindex_ns` is. (The sweep's
+actual numbers belong in the verification record and not here — an earlier draft of
+this decision transcribed a range that a re-run had already moved, which is the
+lesson Problem states two sections above.) What separates them is that one is a
 repeatable operation and the other is a setup. Amortising `drain` therefore buys
-almost nothing in resolution (one clock read is ~0.3% of a 16 us measurement); it is
+almost nothing in resolution — one clock read is a fraction of a percent of a
+microsecond-scale measurement — and it is
 amortised for **uniformity of shape**, so node 6 promotes one shape rather than two
 and no future reader has to guess why two measurements in one mode are built
 differently. Stating this here matters because the rejected rationale is the
@@ -588,9 +622,11 @@ positive instance of either defect, so these are the entire proof:
 **Before/after evidence for D-23.** The claim recorded is the structural one from
 Problem: **every** value the two modes print today lies within 1 ns of an integer
 multiple of the host tick, and the repaired shape prints values the old shape is
-arithmetically incapable of producing. The check is stated as a ratio ("N of N
-values are tick multiples before; M of N after"), not as a list of numbers, because
-which scenario collapses to `p95 == p99` varies between sweeps. Both full outputs go
+arithmetically incapable of producing. The check is stated as a ratio ("20 of 20
+values are tick multiples before; M of 20 after"), not as a list of numbers, because
+which scenario collapses to `p95 == p99` varies between sweeps. The denominator is
+20 by the output shape (Problem), not by the sweep, so the check re-runs; a count of
+*distinct* values would not. Both full outputs go
 in the verification record; no threshold is predicted here.
 
 **Before/after evidence for Decision 4.** The `drain_p95_ns` numbers are recorded on
