@@ -463,6 +463,63 @@ with one scoped re-review remaining.
 
 ---
 
+### Drills 9-11 — the CALL SITES (added by the post-implementation validation pass)
+
+Drills 1-8 all target a decision *function*. A validation pass asked the next question —
+what happens if the function survives and its **call site** does not — and found the
+harvester answered it badly.
+
+**Drill 9 — delete the `admissible_source` call site** from the harvest loop (the five
+lines between the log fetch and the dedup skip). Observed **before** the repair:
+
+```
+$ bash .github/scripts/harvest-gate-corpus.sh --self-test
+self_test=pass
+$ swift test
+Executed 407 tests, with 0 failures
+$ PATH="<stub gh>:$PATH" bash .github/scripts/harvest-gate-corpus.sh --limit 3
+1001<TAB>line_query<TAB>uniform_1k<TAB>24<TAB>54<TAB>pass      <- this repository
+1002<TAB>line_query<TAB>uniform_1k<TAB>24<TAB>54<TAB>pass      <- A FORK
+1003<TAB>line_query<TAB>uniform_1k<TAB>24<TAB>54<TAB>pass      <- provenance UNREADABLE
+```
+
+Every automated check in the repository green, and a fork's numbers in the corpus that
+carries twelve blocking budgets. This is the seam-versus-production divergence D-26(b)
+records for the derivation's awk filter — the one the whole-branch review caught and fixed
+with drill 8 — recurring one script over, on the axis where the failure is *silent*: losing
+`extract_rows`' call site emits zero rows, losing this one emits **more**.
+
+**The repair** is drill 8's move on the harvest side: a `--self-test` case that invokes the
+script the way an operator does, with a stubbed `gh` serving one admissible run, one fork,
+and one 404 (JSON body on stdout, non-zero exit, as real `gh api` does), asserting the rows
+that reach stdout. The same log is served for all three runs on purpose, so a passing
+assertion can only mean a run was refused, never that the logs differed.
+
+Observed **after** the repair:
+
+| drill | mutation | result |
+|---|---|---|
+| 9  | delete the `admissible_source` call site | `self_test=fail label=the harvest LOOP emits rows for the admissible run only (the CALL SITE, not just the function)`, exit 1 |
+| 10 | delete the `extract_rows` call site (pipe the log to `/dev/null`) | same label, exit 1 — one case covers both call sites |
+
+**Drill 11 — the Swift analog.** The two Swift readers extracted the verdict column
+independently and disagreed on the column-count rule (`>= 6` in `admissibleCorpusRows`, the
+seam the cross-language pin drives; `== 6` in `corpusExtremes`, what the floor check reads).
+Unreachable today — a harvest writes exactly six columns — and unreachable is not pinned.
+`corpusVerdict` is now the single source. Mutating one reader to stop reading the column:
+
+```
+Executed 408 tests, with 3 failures
+  testTheTwoCorpusReadersAdmitTheSameRows: ("Optional(5)") is not equal to ("Optional(8)")
+  testTheTwoCorpusReadersAdmitTheSameRows: ("8") is not equal to ("5")
+  testAdmissibleRowsMatchDeriveScript:     the shell admitted 5, Swift 8
+```
+
+Green tree after all three repairs: `swift test` **408/0**, all four `--self-test` exit 0,
+the 46 committed budgets still byte-identical over the committed corpus.
+
+---
+
 ## 7. Drill 6 end-to-end (AC13)
 
 ```

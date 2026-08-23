@@ -482,7 +482,10 @@ hosted evidence, then re-derive from it:
 #    carries (before fetching their logs) and emits only new ones. Without it the
 #    append re-adds every run inside the --limit window that was harvested before,
 #    and a double-counted run double-weights itself in median() -- the term that
-#    governs most budgets. Preview the decisions with --dry-run.
+#    governs most budgets. Preview the decisions with --dry-run -- but note it is
+#    deliberately NETWORK-FREE, so it previews the dedup decision ONLY and skips the
+#    per-run provenance probe below. A dry run therefore OVER-reports: runs a real
+#    harvest would refuse as foreign or unreadable still show up as plan=harvest.
 ./.github/scripts/harvest-gate-corpus.sh --limit 40 \
   --corpus docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv \
   >> docs/superpowers/verification/2026-07-12-gate-budget-corpus.tsv
@@ -590,7 +593,10 @@ scenario, and no dedup key can tell them apart.
   print `gate=pass` beside any number it likes, so this axis fails closed. There is
   no opt-out, and the `--runs id,id` path obeys the same check. The probe sits
   between the dedup skip and the log fetch, so a run already in the corpus still
-  costs zero API calls.
+  costs zero API calls. The **loop itself** is covered, not just the decision
+  function: `--self-test` drives the whole script through a stubbed `gh` and asserts
+  the rows that reach stdout, so deleting the call site — which leaves every
+  pure-function case green while a fork's rows enter the corpus — reddens.
 - **Verdict, per row.** Every summary line carries its own `gate=`/`reason=`, and
   the harvester records it as the corpus's **sixth column**. Both consumers reject a
   row at read time when that column is one of
