@@ -337,6 +337,79 @@ plan=harvest run=333" "$(plan_runs "111
     "$(admissible_source 1 '{"message":"Not Found","documentation_url":"https://docs.github.com/rest/actions/workflow-runs#get-a-workflow-run","status":"404"}' 'maldrakar/swift-text-engine')" \
     "admissible_source treats a malformed (non owner/name) source as unknown, not as a foreign name"
 
+  # ------------------------------------------------------------------
+  # The harvest LOOP itself, driven through a stubbed `gh` on PATH.
+  #
+  # Every case above tests a pure FUNCTION. Deleting a function's CALL SITE from the
+  # loop below leaves all of them green -- the guard still exists, still works, and
+  # nothing invokes it. That is the seam-versus-production divergence D-26(b) records
+  # for the derivation's awk filter, one script over, and it is the more dangerous
+  # half of the pair because the two losses are asymmetric: dropping `extract_rows`'
+  # call site emits ZERO rows (loud), while dropping `admissible_source`'s emits MORE
+  # rows (silent) -- a fork's fabricated numbers entering the corpus that carries
+  # twelve blocking budgets.
+  #
+  # So this case must not call admissible_source or extract_rows. Like the production
+  # filter case in derive-gate-budgets.sh --self-test, it invokes the script the way an
+  # operator does and asserts the ROWS that reach stdout.
+  # ------------------------------------------------------------------
+  local stub_dir stub_out stub_err expected_loop_rows expected_loop_skips
+  stub_dir="$(mktemp -d)"
+  stub_out="$(mktemp)"
+  stub_err="$(mktemp)"
+
+  cat > "$stub_dir/gh" <<'STUB'
+#!/usr/bin/env bash
+# Minimal `gh` for the loop self-test. Three candidate runs, exactly one admissible:
+#   2001 -- this repository -> harvested
+#   2002 -- a fork          -> skip=foreign_repo
+#   2003 -- unreadable: a 404 JSON body on STDOUT with a NON-ZERO exit, which is what
+#           real `gh api` does (the body bypasses --jq entirely)
+if [[ "$1" == "run" && "$2" == "list" ]]; then
+  printf '2001\n2002\n2003\n'
+  exit 0
+fi
+if [[ "$1" == "api" ]]; then
+  case "$2" in
+    */runs/2001) printf 'maldrakar/swift-text-engine\n'; exit 0 ;;
+    */runs/2002) printf 'attacker/swift-text-engine\n'; exit 0 ;;
+    */runs/2003) printf '{"message":"Not Found","status":"404"}\n'; exit 1 ;;
+  esac
+  exit 1
+fi
+if [[ "$1" == "run" && "$2" == "view" ]]; then
+  # The SAME log for every run, deliberately: the only thing deciding which rows reach
+  # stdout is then the provenance check. A per-run body would let the assertion pass
+  # because the logs differed rather than because a run was refused.
+  printf 'mode=line_query provider=uniform scenario=uniform_1k p95_ns=24 p99_ns=54 failures=0 budget_p95_ns=190 budget_p99_ns=440 gate=pass checksum=1\n'
+  printf 'mode=wrap_row_query scenario=uniform_1k query_p95_ns=78 query_p99_ns=91 checksum=7\n'
+  exit 0
+fi
+exit 1
+STUB
+  chmod +x "$stub_dir/gh"
+
+  if ! PATH="$stub_dir:$PATH" "$0" --limit 3 --repo maldrakar/swift-text-engine \
+       > "$stub_out" 2> "$stub_err"; then
+    echo "self_test=fail label=the harvest loop exited non-zero under the gh stub"
+    cat "$stub_err"
+    rm -rf "$stub_dir" "$stub_out" "$stub_err"
+    exit 1
+  fi
+
+  # One row, from the one admissible run. The fork's and the unreadable run's identical
+  # log lines must NOT appear, and the prefixed wrap line must contribute nothing.
+  expected_loop_rows="$(printf '2001\tline_query\tuniform_1k\t24\t54\tpass')"
+  assert_equal "$expected_loop_rows" "$(cat "$stub_out")" \
+    "the harvest LOOP emits rows for the admissible run only (the CALL SITE, not just the function)"
+
+  # And both refusals are loud, naming the run and the source that was seen.
+  expected_loop_skips="$(printf 'skip=foreign_repo run=2002 source=attacker/swift-text-engine\nskip=provenance_unknown run=2003')"
+  assert_equal "$expected_loop_skips" "$(cat "$stub_err")" \
+    "the harvest LOOP reports both refusals on stderr"
+
+  rm -rf "$stub_dir" "$stub_out" "$stub_err"
+
   rm -f "$fixture" "$empty"
   echo "self_test=pass"
 }
