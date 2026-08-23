@@ -12,7 +12,17 @@
 #   ./.github/scripts/harvest-gate-corpus.sh --runs 29150501304,29187553818
 #
 # Emits corpus rows on stdout (no header), ready to append:
-#   run_id <TAB> mode <TAB> scenario <TAB> p95_ns <TAB> p99_ns
+#   run_id <TAB> mode <TAB> scenario <TAB> p95_ns <TAB> p99_ns <TAB> verdict
+#
+# The sixth column is the ROW'S OWN gate verdict: `pass`, a GateFailureReason raw value, or
+# `none` for a summary line printed without --gate. It is the only place the corpus schema
+# is written down. Readers accept legacy FIVE-column rows -- the committed corpus consists
+# entirely of them -- and treat a missing verdict as admissible.
+#
+# derive-gate-budgets.sh and GateFloorTests then REFUSE, at read time, rows whose verdict is
+# budget_exceeded, budget_absolute_exceeded or operation_failures: a summary line is printed
+# BEFORE the gate verdict is checked, so a slow sample genuinely reaches a hosted log, and
+# the 3*max term lets one such row set a budget by itself.
 #
 # Two hosted line shapes carry latency, and both are harvested:
 #
@@ -54,6 +64,81 @@ plan_runs() {
       printf 'plan=harvest run=%s\n' "$id"
     fi
   done <<< "$candidates"
+}
+
+# The corpus-row parser: a hosted CI log on stdin, six-column TSV rows on stdout.
+# $1 = run id.
+#
+# Extracted from the network branch (spec Decision 9) so --self-test can drive it over a
+# fixture. Leaving it inline would have made the verdict rule a guard with no way to fail --
+# the exact defect class this slice exists to prevent -- and it retroactively brings the
+# existing five-column parser under test for the first time, including the exact-key rule
+# that keeps the prefixed wrap lines from emitting rows.
+extract_rows() {
+  awk -v run="$1" '
+    # Row-level verdict for one summary line.
+    #
+    # `failures=` OUTRANKS the gate verdict, and that is not belt-and-braces. formatSummary
+    # prints failures=N UNCONDITIONALLY, outside the --gate branch
+    # (BenchmarkSupport.swift:103), whereas gate=/reason= appear only on gated steps -- and
+    # the FIRST hosted evidence for a new mode necessarily comes from an ungated step,
+    # because its budget does not exist yet. Reading degeneracy from the verdict alone would
+    # therefore miss it on exactly the line shape node 6 bootstraps with.
+    #
+    # gate=fail with no reason= cannot be produced by formatSummary; if one ever appears,
+    # something is wrong, so it takes the REJECTING verdict rather than the admitting one.
+    function verdict(g, r, f) {
+      if (f != "" && f + 0 != 0) return "operation_failures"
+      if (g == "pass") return "pass"
+      if (g == "fail") return (r != "" ? r : "budget_exceeded")
+      return "none"
+    }
+
+    function emit_pairs(a, b,   x, y, n, m, i) {
+      if (a == "" || b == "") return
+      n = split(a, x, ",")
+      m = split(b, y, ",")
+      if (n != m) return
+      for (i = 1; i <= n; i++)
+        printf "%s\t%s\t%s\t%s\t%s\t%s\n", run, "realistic_provider", "100k_lines_10mb_text", x[i], y[i], "none"
+    }
+
+    # Shape 2 must be tested first: it carries mode= and *_p95_ns_values= but no
+    # bare p95_ns=, so shape 1 would not match it anyway -- the order is for the
+    # reader, not the parser. It comes from a step run WITHOUT --gate, so `none`.
+    /mode=realistic_relative_observation/ {
+      bp95 = ""; bp99 = ""; hp95 = ""; hp99 = ""
+      for (i = 1; i <= NF; i++) {
+        split($i, kv, "=")
+        if (kv[1] == "base_p95_ns_values") bp95 = kv[2]
+        else if (kv[1] == "base_p99_ns_values") bp99 = kv[2]
+        else if (kv[1] == "head_p95_ns_values") hp95 = kv[2]
+        else if (kv[1] == "head_p99_ns_values") hp99 = kv[2]
+      }
+      emit_pairs(bp95, bp99)
+      emit_pairs(hp95, hp99)
+      next
+    }
+
+    # The regex is a cheap line filter; the EXACT key is what decides. That distinction is
+    # what makes the wrap modes inert: `query_p95_ns=37` matches the regex and then fails
+    # kv[1] == "p95_ns", so the line yields no row until node 6 un-prefixes it deliberately.
+    /p95_ns=[0-9]+/ && /p99_ns=[0-9]+/ {
+      mode = ""; scenario = ""; p95 = ""; p99 = ""; gate = ""; reason = ""; failures = ""
+      for (i = 1; i <= NF; i++) {
+        split($i, kv, "=")
+        if (kv[1] == "mode") mode = kv[2]
+        else if (kv[1] == "scenario") scenario = kv[2]
+        else if (kv[1] == "p95_ns") p95 = kv[2]
+        else if (kv[1] == "p99_ns") p99 = kv[2]
+        else if (kv[1] == "gate") gate = kv[2]
+        else if (kv[1] == "reason") reason = kv[2]
+        else if (kv[1] == "failures") failures = kv[2]
+      }
+      if (mode != "" && scenario != "" && p95 != "" && p99 != "")
+        printf "%s\t%s\t%s\t%s\t%s\t%s\n", run, mode, scenario, p95, p99, verdict(gate, reason, failures)
+    }
+  '
 }
 
 # ---------------------------------------------------------------------------
@@ -108,6 +193,72 @@ plan=harvest run=333" "$(plan_runs "111
   assert_equal "plan=harvest run=111" \
     "$(plan_runs "111" "$(harvested_run_ids < "$empty")")" \
     "plan_runs treats a header-only corpus as empty"
+
+  # ------------------------------------------------------------------
+  # extract_rows: the parser, previously unreachable from --self-test because it
+  # lived inside the network branch. Putting the new verdict rule there as-is would
+  # have produced a guard with no way to fail -- the defect class this slice exists
+  # to prevent. Extracting it also brings the EXISTING five-column parser under test
+  # for the first time, including the prefixed-token protection both wrap modes rely on.
+  # ------------------------------------------------------------------
+  local logfixture
+  logfixture="$(mktemp)"
+  {
+    # 1. A gated pass line.
+    printf 'mode=line_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 line_count=1000 p95_ns=24 p99_ns=54 failures=0 budget_p95_ns=190 budget_p99_ns=440 headroom_p95=7.9x headroom_p99=8.1x budget_absolute_p99_ns=1666666 headroom_absolute_p99=30864.1x gate=pass checksum=1\n'
+    # 2. The regression-laundering row: slow, and must never enter the corpus as evidence
+    #    of normal cost. The summary line is printed BEFORE the verdict is checked, so it
+    #    genuinely reaches a hosted log.
+    printf 'mode=line_query provider=uniform scenario=uniform_100k p95_ns=30 p99_ns=60 failures=0 budget_p95_ns=280 budget_p99_ns=560 gate=fail reason=budget_exceeded checksum=2\n'
+    # 3. budget_stale: the sample was FAST. Admitted -- its prescribed fix needs it.
+    printf 'mode=line_query provider=uniform scenario=uniform_1m p95_ns=31 p99_ns=61 failures=0 budget_p95_ns=320 budget_p99_ns=640 gate=fail reason=budget_stale checksum=3\n'
+    # 4. A step run WITHOUT --gate: no gate= token at all. Admitted as `none` -- a new
+    #    mode's first hosted evidence necessarily looks like this, because its budget does
+    #    not exist yet, and rejecting it would make a gate unbootstrappable.
+    printf 'mode=column_query provider=uniform scenario=uniform_1k iterations=5000 operations_per_sample=256 p95_ns=40 p99_ns=70 failures=0 checksum=4\n'
+    # 5. THE NODE-6 BOOTSTRAP HOLE: no gate= token AND failures=3. Degeneracy must be read
+    #    from failures=, which formatSummary prints unconditionally, or this line -- the
+    #    exact shape node 6's first harvest produces -- is admitted as healthy.
+    printf 'mode=column_query provider=uniform scenario=uniform_100k p95_ns=41 p99_ns=71 failures=3 checksum=5\n'
+    # 6. failures= OUTRANKS the verdict: gate=pass cannot launder a degenerate timing.
+    printf 'mode=point_query provider=uniform scenario=uniform_1k p95_ns=42 p99_ns=72 failures=2 budget_p95_ns=900 budget_p99_ns=1800 gate=pass checksum=6\n'
+    # 7. A wrap_row_query line: PREFIXED latency tokens -> NO ROW. Nothing on the shell side
+    #    pinned this before.
+    printf 'mode=wrap_row_query scenario=uniform_1k total_rows=1000 query_operations_per_sample=256 query_p95_ns=37 query_p99_ns=41 checksum=7\n'
+    # 8. A wrap_compute line, full node-6-ready shape (scenario=, drain_p99_ns=) with the
+    #    latency tokens still prefixed -> NO ROW.
+    printf 'mode=wrap_compute scenario=width_40 width=40 total_rows=200000 compute_operations_per_sample=256 compute_p95_ns=210 compute_p99_ns=260 drain_operations_per_sample=16 drain_p95_ns=4100 drain_p99_ns=5200 reindex_operations_per_sample=1 reindex_ns=61000000\n'
+    # 9. Shape 2, the pre-slice-45 realistic relative observation: 2 base + 2 head -> 4 rows.
+    printf 'mode=realistic_relative_observation base_p95_ns_values=11,12 base_p99_ns_values=21,22 head_p95_ns_values=13,14 head_p99_ns_values=23,24\n'
+    # 10. A real `gh run view --log` line carries a job/step/timestamp prefix. awk scans all
+    #     fields, so the prefix is inert -- pinned rather than assumed.
+    printf 'Host tests and benchmark gate\tSynthetic gate\t2026-08-23T10:00:00Z mode=pipeline provider=uniform scenario=uniform_1k p95_ns=50 p99_ns=80 failures=0 budget_p95_ns=500 budget_p99_ns=1000 gate=pass checksum=10\n'
+    # 11. Beyond the spec truth table, fail-closed: gate=fail with no reason= cannot be
+    #     produced by formatSummary, so if one ever appears something is wrong. Treat it as
+    #     the rejecting verdict rather than admitting it.
+    printf 'mode=pipeline provider=uniform scenario=uniform_100k p95_ns=51 p99_ns=81 failures=0 budget_p95_ns=500 budget_p99_ns=1000 gate=fail checksum=11\n'
+  } > "$logfixture"
+
+  local expected_rows
+  expected_rows="$(
+    printf '999\tline_query\tuniform_1k\t24\t54\tpass\n'
+    printf '999\tline_query\tuniform_100k\t30\t60\tbudget_exceeded\n'
+    printf '999\tline_query\tuniform_1m\t31\t61\tbudget_stale\n'
+    printf '999\tcolumn_query\tuniform_1k\t40\t70\tnone\n'
+    printf '999\tcolumn_query\tuniform_100k\t41\t71\toperation_failures\n'
+    printf '999\tpoint_query\tuniform_1k\t42\t72\toperation_failures\n'
+    printf '999\trealistic_provider\t100k_lines_10mb_text\t11\t21\tnone\n'
+    printf '999\trealistic_provider\t100k_lines_10mb_text\t12\t22\tnone\n'
+    printf '999\trealistic_provider\t100k_lines_10mb_text\t13\t23\tnone\n'
+    printf '999\trealistic_provider\t100k_lines_10mb_text\t14\t24\tnone\n'
+    printf '999\tpipeline\tuniform_1k\t50\t80\tpass\n'
+    printf '999\tpipeline\tuniform_100k\t51\t81\tbudget_exceeded\n'
+  )"
+
+  assert_equal "$expected_rows" "$(extract_rows 999 < "$logfixture")" \
+    "extract_rows: six columns, failures= outranks the verdict, prefixed wrap lines emit nothing"
+
+  rm -f "$logfixture"
 
   rm -f "$fixture" "$empty"
   echo "self_test=pass"
@@ -172,51 +323,15 @@ plan_runs "$run_ids" "$harvested" | while read -r decision; do
   # lines, must not abort the harvest: skip it loudly and keep going. Without the
   # `|| true` the pipefail on an expired log would kill the whole sweep, and a
   # partial corpus is exactly the failure mode the slice-38 record warns about
-  # ("harvest EVERY available hosted run, not a convenient subset").
+  # ("harvest EVERY available hosted run, not a convenient subset"). Since slice 54
+  # "available" means "available AND admissible": a run whose source repository is not
+  # this one, and a row whose own line reports a slow or degenerate measurement, are
+  # excluded on purpose and said out loud on stderr. That is a policy, not a convenience.
   log="$(gh run view "$id" -R "$repo" --log < /dev/null 2>/dev/null || true)"
   if [[ -z "$log" ]]; then
     echo "warn=log_unavailable run=$id" >&2
     continue
   fi
 
-  printf '%s\n' "$log" | awk -v run="$id" '
-    function emit_pairs(a, b,   x, y, n, m, i) {
-      if (a == "" || b == "") return
-      n = split(a, x, ",")
-      m = split(b, y, ",")
-      if (n != m) return
-      for (i = 1; i <= n; i++)
-        printf "%s\t%s\t%s\t%s\t%s\n", run, "realistic_provider", "100k_lines_10mb_text", x[i], y[i]
-    }
-
-    # Shape 2 must be tested first: it carries mode= and *_p95_ns_values= but no
-    # bare p95_ns=, so shape 1 would not match it anyway -- the order is for the
-    # reader, not the parser.
-    /mode=realistic_relative_observation/ {
-      bp95 = ""; bp99 = ""; hp95 = ""; hp99 = ""
-      for (i = 1; i <= NF; i++) {
-        split($i, kv, "=")
-        if (kv[1] == "base_p95_ns_values") bp95 = kv[2]
-        else if (kv[1] == "base_p99_ns_values") bp99 = kv[2]
-        else if (kv[1] == "head_p95_ns_values") hp95 = kv[2]
-        else if (kv[1] == "head_p99_ns_values") hp99 = kv[2]
-      }
-      emit_pairs(bp95, bp99)
-      emit_pairs(hp95, hp99)
-      next
-    }
-
-    /p95_ns=[0-9]+/ && /p99_ns=[0-9]+/ {
-      mode = ""; scenario = ""; p95 = ""; p99 = ""
-      for (i = 1; i <= NF; i++) {
-        split($i, kv, "=")
-        if (kv[1] == "mode") mode = kv[2]
-        else if (kv[1] == "scenario") scenario = kv[2]
-        else if (kv[1] == "p95_ns") p95 = kv[2]
-        else if (kv[1] == "p99_ns") p99 = kv[2]
-      }
-      if (mode != "" && scenario != "" && p95 != "" && p99 != "")
-        printf "%s\t%s\t%s\t%s\t%s\n", run, mode, scenario, p95, p99
-    }
-  '
+  printf '%s\n' "$log" | extract_rows "$id"
 done
