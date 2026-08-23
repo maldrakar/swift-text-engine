@@ -557,7 +557,7 @@ the hard way in Slice 39:
   that scenario; do not go hunting for a slowdown in the core. (Budgets sitting
   within a few percent of their floor are normal — whenever the `3 x max` term
   governs, `round_up_2sf` lands just above it *by construction*.) **This holds
-  because a slow sample can no longer enter the corpus**: a row whose own hosted line
+  because a slow sample can no longer set a budget**: a row whose own hosted line
   reported `budget_exceeded`, `budget_absolute_exceeded` or `operation_failures` is
   rejected at read time (see **What the harvester admits**). Before Slice 54 nothing
   downstream read the verdict, and this instruction was indistinguishable from one to
