@@ -447,6 +447,60 @@ final class GateFloorTests: XCTestCase {
         }
     }
 
+    // The THIRD cross-language pin, beside testWindowConstantMatchesDeriveScript (the
+    // window's N) and testWindowSelectionMatchesDeriveScript (the window's selection).
+    // Those two cross-check WHICH ROWS are in scope; this one cross-checks WHICH ROWS ARE
+    // ADMITTED. The reject set now lives in awk and in Swift, and nothing but this forces
+    // them equal -- a divergence would mean the budget swift test re-derives is not the
+    // budget the operator re-derives from the same corpus.
+    //
+    // Compared as raw LINES, not as re-parsed values: a field-splitting disagreement between
+    // awk's -F'\t' and Swift's split(separator: "\t") would survive a value comparison.
+    func testAdmissibleRowsMatchDeriveScript() throws {
+        let scriptURL = repositoryRoot()
+            .appendingPathComponent(".github/scripts/derive-gate-budgets.sh")
+
+        // One row per verdict value the corpus can carry, plus a legacy five-column row.
+        // Distinct run ids so nothing here depends on the window (this seam does not window).
+        let corpus = """
+        run_id\tmode\tscenario\tp95_ns\tp99_ns\tverdict
+        901\tline_query\tuniform_1k\t10\t20\tpass
+        902\tline_query\tuniform_1k\t11\t21\tbudget_exceeded
+        903\tline_query\tuniform_1k\t12\t22\tbudget_absolute_exceeded
+        904\tline_query\tuniform_1k\t13\t23\toperation_failures
+        905\tline_query\tuniform_1k\t14\t24\tbudget_stale
+        906\tline_query\tuniform_1k\t15\t25\tmissing_budget
+        907\tline_query\tuniform_1k\t16\t26\tnone
+        908\tline_query\tuniform_1k\t17\t27
+        """
+
+        let env = URL(fileURLWithPath: "/usr/bin/env")
+        let result = try runProcess(
+            env, ["bash", scriptURL.path, "--admissible-rows"], stdin: corpus + "\n")
+
+        XCTAssertEqual(
+            result.exitCode, 0,
+            "derive-gate-budgets.sh --admissible-rows exited \(result.exitCode); "
+                + "stderr: \(result.stderr)")
+
+        let shellRows = result.stdout.split(separator: "\n").map(String.init)
+        XCTAssertEqual(
+            shellRows, admissibleCorpusRows(from: corpus),
+            "shell REJECTED_VERDICTS and Swift rejectedVerdicts disagree — the two corpus "
+                + "consumers would derive different budgets from the same corpus; re-run "
+                + "`.github/scripts/derive-gate-budgets.sh --self-test`")
+
+        // Non-vacuity in BOTH directions. Without these, a seam that admitted everything
+        // (or nothing) would pass as long as Swift did the same thing.
+        XCTAssertEqual(shellRows.count, 5, "pass, budget_stale, missing_budget, none, legacy")
+        XCTAssertTrue(
+            shellRows.contains { $0.hasSuffix("\tbudget_stale") },
+            "budget_stale must be ADMITTED: its prescribed fix is to re-derive from it")
+        XCTAssertFalse(
+            shellRows.contains { $0.hasSuffix("\tbudget_exceeded") },
+            "budget_exceeded must be REJECTED: it is the regression-laundering row")
+    }
+
     // The arithmetic analog of the two window pins. Those cross-check the window SELECTION
     // (which run ids) against Swift; this cross-checks the DERIVATION ARITHMETIC (8xmedian /
     // 3xmax / round_up_2sf, plus the p99 2xbudget_p95 floor) by asserting every committed budget

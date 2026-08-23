@@ -25,6 +25,32 @@ set -euo pipefail
 # top-of-file `WINDOW=<int>` assignment: that test reads it by line prefix.
 WINDOW=20
 
+# The verdict values this derivation REFUSES, as the corpus's sixth column records them.
+# Classified by what happened to the MEASUREMENT: budget_exceeded and
+# budget_absolute_exceeded mean the sample was SLOW (the regression-laundering case -- one
+# such row can set a budget by itself through the 3*max term); operation_failures means the
+# timed path was degenerate. budget_stale is ADMITTED on purpose: it means the sample was
+# FAST, and the prescribed response to it is to re-derive from exactly these rows.
+# A legacy five-column row has no verdict and is admitted as "unknown".
+#
+# Pinned byte-for-byte against `rejectedVerdicts` in GateFloorTests.swift by
+# testAdmissibleRowsMatchDeriveScript, over the --admissible-rows seam below. Keep this a
+# bare top-of-file space-separated assignment.
+REJECTED_VERDICTS="budget_exceeded budget_absolute_exceeded operation_failures"
+
+# Corpus on stdin (WITH header) -> the rows this derivation admits, verbatim, in order.
+# VERDICT FILTER ONLY: windowing is a separate axis (Decision 8 -- the verdict filter runs
+# AFTER windowing, so neither window pin is touched, and a run whose rows are all rejected
+# still consumes a window slot). $6 is empty for a five-column legacy row, which is why the
+# empty case is tested explicitly rather than left to the substring search.
+admissible_rows() {
+  awk -F'\t' -v rejected=" $REJECTED_VERDICTS " '
+    NR == 1 { next }
+    $6 == "" { print; next }
+    index(rejected, " " $6 " ") == 0 { print }
+  '
+}
+
 # Corpus on stdin (WITH header) -> its N most-recent distinct run ids, newest first.
 # `sort -rnu` = reverse numeric unique: GitHub databaseId is monotonic with run
 # creation, so numeric-descending IS recency-descending. This is the exact window
@@ -97,6 +123,28 @@ run_self_test() {
   assert_equal "max" "$(gov_of 'column_query|outlier')" \
     "gov_p95=max when 3*max > 8*med"
 
+  # The reject set, at the seam the Swift pin drives. Kept here as well so a shell-only
+  # change (someone editing REJECTED_VERDICTS without running swift test) still fails.
+  local verdict_fixture
+  verdict_fixture="$(mktemp)"
+  {
+    printf 'run_id\tmode\tscenario\tp95_ns\tp99_ns\tverdict\n'
+    printf '901\tline_query\tuniform_1k\t10\t20\tpass\n'
+    printf '902\tline_query\tuniform_1k\t11\t21\tbudget_exceeded\n'
+    printf '903\tline_query\tuniform_1k\t12\t22\tbudget_stale\n'
+    printf '904\tline_query\tuniform_1k\t13\t23\n'
+  } > "$verdict_fixture"
+
+  local expected_admitted
+  expected_admitted="$(
+    printf '901\tline_query\tuniform_1k\t10\t20\tpass\n'
+    printf '903\tline_query\tuniform_1k\t12\t22\tbudget_stale\n'
+    printf '904\tline_query\tuniform_1k\t13\t23\n'
+  )"
+  assert_equal "$expected_admitted" "$(admissible_rows < "$verdict_fixture")" \
+    "admissible_rows drops budget_exceeded, keeps budget_stale and legacy rows"
+  rm -f "$verdict_fixture"
+
   echo "self_test=pass"
 }
 
@@ -114,12 +162,21 @@ if [[ "${1:-}" == "--window-run-ids" ]]; then
   exit 0
 fi
 
+# Test seam mirroring --window-run-ids: exposes the exact verdict filter the derivation
+# applies at read time, so GateFloorTests.testAdmissibleRowsMatchDeriveScript can pin it to
+# the Swift reader. Reads the corpus (WITH header) on stdin. Delegates -- it duplicates none
+# of the rule.
+if [[ "${1:-}" == "--admissible-rows" ]]; then
+  admissible_rows
+  exit 0
+fi
+
 corpus="${1:?usage: derive-gate-budgets.sh <corpus.tsv> [mode ...]}"
 shift || true
 
 modes="$(printf '%s' "$*" | tr '-' '_')"
 
-awk -F'\t' -v modes="$modes" '
+awk -F'\t' -v modes="$modes" -v rejected=" $REJECTED_VERDICTS " '
 function ru2(x,   e, n) {          # round up to 2 significant figures
   if (x <= 0) return 0
   e = 1
@@ -137,6 +194,14 @@ function med(arr, n,   i, j, t) {  # lower median of a 1..n array, sorts in plac
 FNR == NR { KEEP[$1] = 1; next }   # first file: the windowed run ids
 !($1 in KEEP) { next }             # skip the corpus header (id "run_id" is not in KEEP) and out-of-window rows
 {
+  # Read-time verdict filter (spec Decision 6): the corpus is append-only full history, and
+  # what is COUNTED is decided here, exactly as the N=20 window already is. A rejected row is
+  # a sample whose own hosted line said the measurement was slow or degenerate; admitting it
+  # would let one bad run set a looser budget through the 3*max term, and
+  # testEveryCommittedBudgetReproducesFromCorpus would then REQUIRE that loosened budget to
+  # be committed for swift test to go green.
+  if ($6 != "" && index(rejected, " " $6 " ") > 0) { dropped[$6]++; next }
+
   seen[$2] = 1
   if (modes != "" && index(" " modes " ", " " $2 " ") == 0) next
   matched[$2] = 1
@@ -160,6 +225,16 @@ END {
       }
     }
   }
+
+  # Rejections are LOUD (spec Decision 12): silent filtering produces a corpus that looks
+  # complete and is not. stderr, so stdout stays byte-identical for a corpus with nothing to
+  # drop -- which is every corpus until the first post-slice-54 harvest lands. Emission order
+  # is awk hash order; these are diagnostics, not a parsed format.
+  #
+  # NOTE: no apostrophes anywhere inside this awk program -- it is single-quoted in the
+  # shell, so one would terminate the quote and break the script.
+  for (r in dropped)
+    printf "dropped=%s rows=%d\n", r, dropped[r] > "/dev/stderr"
 
   for (k in n) {
     cnt = n[k]
