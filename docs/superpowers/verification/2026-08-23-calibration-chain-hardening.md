@@ -60,7 +60,7 @@ corpus, or engine code is touched, and AC13 was re-checked after them.
 | 14 | PASS — neither wrap mode is gateable (`isGateable`'s `false` arm) or appears in `swift-ci.yml` | Section 10 |
 | 15 | PASS — `AGENTS.md`'s harvest-admissibility sentence and the `budget_stale` paragraph no longer describe a harvest the script refuses; the harvester's usage header carries the sixth column | AGENTS.md edits (this task, Steps 3-6) |
 | 16 | PASS — all seven spec drills recorded with observed red output, plus drill 8 from the whole-branch review and drills 9-11 from the post-implementation validation pass (the two harvester CALL SITES and the Swift reader divergence) | Section 6 |
-| 17 | HALF — PR-head DISCHARGED at step level on `4e700b0` (run `32658632217`): three jobs, twelve gates, **46 `gate=pass` / 0 `gate=fail`**, 408/0, `invariant=pass`, `blocking_failures=0`. Post-merge push run **still open** | Section 11 |
+| 17 | PASS — step-level proof on **both** halves. PR-head: run `32658632217` (`4e700b0`). Post-merge: push run `32660537137` on `e97791f`, the merge commit of PR #129. Each: three jobs, twelve gates, **46 `gate=pass` / 0 `gate=fail`**, 408/0, `invariant=pass`, `blocking_failures=0`, zero failure tokens; the merged tree is verified to carry the slice's artifacts | Section 11 |
 
 ---
 
@@ -821,13 +821,13 @@ Neither wrap mode is gateable.
 
 ## 11. Hosted proof (AC17)
 
-**PR-head half: DISCHARGED at step level. Post-merge half: still open.**
+**DISCHARGED at step level — both halves.**
 
 AC17 asks for step-level proof on **both** the PR-head run and the post-merge run. Those
 are two different claims — the first says the branch is green, the second says the code
-that actually landed on `main` is green — and only the first can be made before the merge.
-This section records the first with its evidence and says plainly that the second is not
-yet made.
+that actually landed on `main` is green — and only the second can be made after the merge,
+which is why this record was written in two passes. Both are now recorded with their
+evidence below.
 
 ### Why there are two PR-head runs
 
@@ -840,9 +840,9 @@ first green run, which is exactly the kind of omission this record exists to pre
 
 Commits after `4e700b0` are this section itself, and they cannot name the run of the commit
 that contains them — the same regress the commit list at the top of this record notes. It
-terminates in the post-merge follow-up (below), which names the push run of the merged tree
-from outside it. Until then, "binding" means the last commit that changed code, not the tip
-of the branch.
+terminated in the post-merge section below, written from a branch cut after the merge, which
+names the merged tree's push run from outside it. In this table "binding" therefore means
+the last commit that changed **code**, not the tip of the branch.
 
 | | run 1 | run 2 (binding) |
 |---|---|---|
@@ -904,10 +904,87 @@ The three tests the validation pass touched or added are visible by name in run 
 `testTheTwoCorpusReadersAdmitTheSameRows`, `testAdmissibleRowsMatchDeriveScript`,
 `testEveryScriptSelfTestPasses`.
 
-### What is still open
+### Post-merge push run — the merged code
 
-The **post-merge `push` run** on `main`. Nothing here proves the merged code is green; a
-PR-head run proves the branch is. Per this repository's convention that half is discharged
-in a docs-only follow-up PR once #129 merges, recording the push run's id and the same
-step-level readings. Until that lands, AC17 is **half** discharged, and this section says
-so rather than rounding up.
+A PR-head run proves the branch is green. This one proves that what actually landed on
+`main` is, which is the claim AC17 exists for and the only one a reader can act on.
+
+| | value |
+|---|---|
+| run id | `32660537137` |
+| event | `push` (branch `main`) |
+| head sha | `e97791fb6f4303a6fbba8a09844c7810a5aee7c9` — the merge commit of PR #129 |
+| created | 2026-08-23T19:13:03Z |
+| conclusion | success |
+
+```
+$ gh run view 32660537137 --json headSha,event,conclusion,jobs \
+    --jq '"sha=\(.headSha) event=\(.event) conclusion=\(.conclusion)", (.jobs[] | "  \(.name) -> \(.conclusion)")'
+sha=e97791fb6f4303a6fbba8a09844c7810a5aee7c9 event=push conclusion=success
+  WASM cross-target compile -> success
+  Host tests and benchmark gate -> success
+  iOS cross-target compile -> success
+```
+
+Step-level readings, by the same commands used on the PR-head runs:
+
+| claim | reading |
+|---|---|
+| twelve blocking gates | `gate_pass=46  gate_fail=0` |
+| host suite | `Executed 408 tests, with 0 failures` |
+| `--memory-shape` | `invariant=pass` |
+| cross-target | `mode=cross_target_compile_overall blocking_failures=0 exit=0` |
+| failure tokens anywhere in the log | `0` (`self_test=fail`, `gate=fail`, `error:`, `XCTAssert… failed`) |
+
+The docs-only detector correctly declines to short-circuit a push:
+
+```
+mode=docs_only_pr event=push result=not_pull_request docs_only_pr=false
+```
+
+emitted by all three jobs. That is the intended shape — the detector's fast path is a
+*PR* concern, and `push` runs the heavy path unconditionally. (`AGENTS.md` notes that
+docs-only pushes to `main` may skip Swift CI entirely via `push.paths-ignore`; this push
+carried Swift and script changes, so the workflow started and the detector then declined
+the short-circuit on event grounds.)
+
+### The proof is anchored to the merged tree, not to the branch
+
+A green push run is necessary but not sufficient: it proves *some* tree is green. These
+checks read the slice's own artifacts out of `origin/main` itself, so the run above is
+anchored to code that is demonstrably present:
+
+```
+$ git show origin/main:.github/scripts/harvest-gate-corpus.sh \
+    | grep -c "admissible_source\|the harvest LOOP emits rows"
+17
+$ git show origin/main:Tests/ViewportBenchmarksTests/GateFloorTests.swift \
+    | grep -c "corpusVerdict\|testTheTwoCorpusReadersAdmitTheSameRows"
+5
+$ git show origin/main:Sources/ViewportBenchmarks/BenchmarkSupport.swift \
+    | grep -c "amortisedSamples\|func amortise"
+3
+```
+
+And the three tests the validation pass added or touched are visible **by name in the push
+run's log**, so the guards did not merely land — they executed on hosted Linux x86_64
+against the merged tree: `testTheTwoCorpusReadersAdmitTheSameRows`,
+`testAdmissibleRowsMatchDeriveScript`, `testEveryScriptSelfTestPasses`. The first of those
+is what carries the suite from 407 to 408 across the four runs below.
+
+AC13 holds across the merge: the merge commit touches no corpus row
+(`git diff --quiet e97791f~1 e97791f -- <corpus>` exits 0).
+
+### The four runs
+
+| run | sha | event | jobs | gates | suite |
+|---|---|---|---|---|---|
+| `32654599644` | `a1593d1` | pull_request | 3/3 | 46 pass / 0 fail | 407 / 0 |
+| `32658632217` | `4e700b0` | pull_request | 3/3 | 46 pass / 0 fail | 408 / 0 |
+| `32659890321` | `16da857` | pull_request | 3/3 | 46 pass / 0 fail | 408 / 0 |
+| `32660537137` | `e97791f` | **push (main)** | 3/3 | 46 pass / 0 fail | 408 / 0 |
+
+All four: `invariant=pass`, `blocking_failures=0 exit=0`, zero failure tokens. AC17 is
+now fully discharged, and the sha regress noted above terminates here — this section is
+written from a branch cut *after* the merge, so it can name the merged tree's run without
+containing it.
