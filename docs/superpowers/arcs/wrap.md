@@ -49,18 +49,21 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    by division — the exact term behind this map's "not literally width-independent"
    correction. Floating-point edges make it a design question for the brainstorm, not a
    drive-by.
-4. `pending` — **← lean for the next *feature* slice (topological)**; slice 54 took the
-   calibration-chain route instead (user call, 2026-08-23), so this node is selected but not
-   yet consumed. point→(row, cell) wrap-aware composite.
+4. `pending` — **← SELECTED by the slice-54 review (topological)**; deferred once already
+   (slice 54 took the calibration-chain route by user call, 2026-08-23), so this node is one
+   slice overdue. point→(row, cell) wrap-aware composite.
    Criterion 3, and its last enumerated analog. Composes node 3's `visualRowAt` with the
    existing within-line column query the way `pointAt` composes `lineAt` with `columnAt` —
    no new search. Fold-in home for **D-24** (the row-axis dispatch is pinned by nothing —
-   drill C leaves 397/0 green while bypassing it) and **D-25**; plausibly **D-13**.
+   drill C leaves 397/0 green while bypassing it), **D-29** (MANDATORY under the skill's
+   falsifiability rule — the only slice-54 guarantee with no recorded red; a counting
+   layout wrapper asserts the `--wrap-compute` drain body invokes `compute` zero times)
+   and **D-25**; plausibly **D-13**.
 5. `pending` — `--memory-shape` extension to the wrap path. Criterion 2.
 6. `pending` — Wrap benchmark modes promoted to blocking gates
    (harvest → derive). Criterion 4. Likely splits per mode, as the first
-   arc's gate promotions did. **Both of its inputs are being repaired ahead of it in
-   slice 54** (D-23: the wrap modes measure one operation per `clock.measure` and print
+   arc's gate promotions did. **Both of its inputs were repaired ahead of it in
+   slice 54 (`done`)** (D-23: the wrap modes measure one operation per `clock.measure` and print
    tick-quantised numbers; D-7: the harvester selects rows by run id with no
    conclusion/event/fork check) — because `harvest → derive` never re-measures and never
    re-authenticates, so neither defect is repairable *after* this node's first harvest.
@@ -173,6 +176,25 @@ first genuine fork remains node 8 (host order) / fork V. Lean is node 4, and thi
 **selects** it — the competing option was node 5 (criterion 2, the only wrap criterion
 with no evidence at all), rejected on sequencing: `--memory-shape` should be extended
 once, over a complete wrap query surface, not twice.
+
+Map pass 2026-08-23 (Slice 54 review): Slice 54 took the **calibration route** and consumed
+**no map node** — the fifth slice of that shape, after the process slice 48, the debt slice 51
+and the calibration slice 52. Nothing it shipped touched wrap feasibility, so nodes 4-9 and
+fork V stand unrevised and un-relearned; there is no correction to absorb this pass. What it
+changed is the ground **node 6** stands on, for the third consecutive time (52: the recipe's
+evidence and the absolute ceiling; 53: recorded the timing defect as D-23; 54: repaired the
+timing and authenticated the evidence). Node 6's two named inputs are now sound: the wrap
+modes measure the operation rather than the host tick, and the harvester admits only this
+repository's runs and refuses rows whose own line reports a slow or degenerate measurement.
+Two rows node 6 gains from this slice: **D-30** (`reindex_ns` carries no `p95_ns`/`p99_ns`,
+so the width-change cost — criterion 1's own quantity — is structurally unharvestable through
+`harvest -> derive`) and **D-28** (`amortisedSamples` claims to be the gated modes' shape and
+nothing pins it, which is exactly the assumption node 6's derived budgets rest on); they join
+D-20/D-21 on that node's reading list. Next step is **topological** (node 4 = point→(row,
+cell), the last analog on criterion 3's list); first genuine fork remains node 8 (host order)
+/ fork V. Lean is node 4, and this review **selects** it — it was already selected by the
+slice-53 review and deferred by user call at slice 54's selection, so it is one slice overdue,
+and the arc cannot afford consecutive no-criterion slices.
 
 ## Decision log
 
@@ -386,3 +408,22 @@ once, over a complete wrap query surface, not twice.
   row is a `[startColumn, endColumn)` span with its own left edge — so node 4 must settle x
   rebasing and whether a clamp lands on the row's edge or the line's. That is what makes node 4
   more than a mechanical composition.
+- 2026-08-23 — Slice 54 merged ([PR #129](https://github.com/maldrakar/swift-text-engine/pull/129),
+  `e97791f`; post-merge hosted proof [PR #130](https://github.com/maldrakar/swift-text-engine/pull/130),
+  push run `32660537137`). Its post-slice review **selects node 4** (point→(row, cell)) — a
+  topological step, not a fork, so the review selects rather than routing; the user can override.
+  Node 4 was already selected by the slice-53 review and deferred once by user call, so it is one
+  slice overdue. Recommended fold-ins: **D-24** (P2, born on node 4's own axis), **D-29**
+  (MANDATORY — the only slice-54 guarantee with no recorded red) and **D-25**; **D-13** only if
+  the brainstorm finds it rides on merit.
+  Rejected alternatives, with reasons kept: **node 6** (gate promotion) — its mechanism is finally
+  sound, but node 4 adds a third wrap benchmark mode by symmetry, so promoting first means node 6
+  splits or repeats; **an infrastructure slice** for D-27 — real but newborn and not escalated, and
+  it would be the arc's sixth no-criterion slice after slice 54 was already one.
+  Two items the next reviews must not let age: **D-27** (P2, born this review — ten of twelve
+  blocking gate steps have unpinned shape; `|| true` on one leaves `swift test` 408/0) should be
+  scheduled by slice 56; **D-17** (P2, born slice 52, re-observed live at this review) **escalates
+  at the next review**. **D-9** is on its second consecutive re-affirmation and the review states
+  the argument rather than re-deferring silently: the `gov_p95=median|max` observable substitutes
+  for a stale *list*, not for a *fix*, and a one-line assertion should fold into the next
+  calibration-touching slice or be deferred a third time explicitly.
