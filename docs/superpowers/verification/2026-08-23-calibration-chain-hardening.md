@@ -834,9 +834,15 @@ yet made.
 The branch was pushed once at the end of implementation and once again after a
 post-implementation validation pass found and fixed three call-site gaps (drills 9-11,
 Section 6). Both runs are recorded: the first is the tree the implementation ended on, the
-second is the tree that is proposed for merge. **The second is the binding one** — the
-first is kept because dropping it would hide that the branch changed after its first green
-run, which is exactly the kind of omission this record exists to prevent.
+second is the last tree carrying **non-documentation** changes. **The second is the binding
+one** — the first is kept because dropping it would hide that the branch changed after its
+first green run, which is exactly the kind of omission this record exists to prevent.
+
+Commits after `4e700b0` are this section itself, and they cannot name the run of the commit
+that contains them — the same regress the commit list at the top of this record notes. It
+terminates in the post-merge follow-up (below), which names the push run of the merged tree
+from outside it. Until then, "binding" means the last commit that changed code, not the tip
+of the branch.
 
 | | run 1 | run 2 (binding) |
 |---|---|---|
