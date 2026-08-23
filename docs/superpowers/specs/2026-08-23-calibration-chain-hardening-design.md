@@ -623,10 +623,16 @@ positive instance of either defect, so these are the entire proof:
 Problem: **every** value the two modes print today lies within 1 ns of an integer
 multiple of the host tick, and the repaired shape prints values the old shape is
 arithmetically incapable of producing. The check is stated as a ratio ("20 of 20
-values are tick multiples before; M of 20 after"), not as a list of numbers, because
-which scenario collapses to `p95 == p99` varies between sweeps. The denominator is
-20 by the output shape (Problem), not by the sweep, so the check re-runs; a count of
-*distinct* values would not. Both full outputs go
+values are tick multiples before; M of 23 after"), not as a list of numbers, because
+which scenario collapses to `p95 == p99` varies between sweeps. **Both** denominators
+come from the output shape (Problem), not from the sweep, so the check re-runs; a
+count of *distinct* values would not.
+
+The two denominators differ, and that is this slice's own doing: the repair adds
+`drain_p99_ns=` to `--wrap-compute` (AC6), taking it from 4 printed values per width
+to 5, so the total goes `8 + 3 x 4 = 20` before to `8 + 3 x 5 = 23` after. Deriving
+each side from the shape it actually has is the point — a denominator carried across
+the repair would be wrong by exactly the token the repair adds. Both full outputs go
 in the verification record; no threshold is predicted here.
 
 **Before/after evidence for Decision 4.** The `drain_p95_ns` numbers are recorded on
