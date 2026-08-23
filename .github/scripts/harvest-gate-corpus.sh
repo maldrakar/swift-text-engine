@@ -88,7 +88,12 @@ admissible_source() {
   local id="$1" observed="$2" expected="$3"
   # Fail CLOSED on an unreadable source: that is the one state a fork can manufacture.
   # `null` is what `gh api --jq` prints for a null field -- it is not a repository name.
-  if [[ -z "$observed" || "$observed" == "null" ]]; then
+  # A malformed shape (e.g. a JSON error body such as `{"message":"Not Found",...}`,
+  # which `gh api` writes to STDOUT on a non-2xx response, bypassing --jq entirely) is
+  # unknown too, not a foreign name: `owner/name` is the only shape a real
+  # `.head_repository.full_name` ever takes, so anything else did not come from a
+  # successful read and must not be compared to `expected` as if it were one.
+  if [[ -z "$observed" || "$observed" == "null" || ! "$observed" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
     printf 'skip=provenance_unknown run=%s\n' "$id"
   elif [[ "$observed" != "$expected" ]]; then
     printf 'skip=foreign_repo run=%s source=%s\n' "$id" "$observed"
@@ -318,6 +323,15 @@ plan=harvest run=333" "$(plan_runs "111
     "$(admissible_source 555 'null' 'maldrakar/swift-text-engine')" \
     "admissible_source treats a null head repository as unknown, not as a foreign name"
 
+  # `gh api` writes the raw JSON error body to STDOUT on a non-2xx response -- it bypasses
+  # --jq entirely -- so a 404/rate-limit/expired-token response can reach here looking
+  # non-empty and non-null. This is the exact blob a live 404 against a nonexistent run
+  # produces. It must map to provenance_unknown, never to foreign_repo: it is not a
+  # well-formed `owner/name`, so it never came from a successful read.
+  assert_equal "skip=provenance_unknown run=1" \
+    "$(admissible_source 1 '{"message":"Not Found","documentation_url":"https://docs.github.com/rest/actions/workflow-runs#get-a-workflow-run","status":"404"}' 'maldrakar/swift-text-engine')" \
+    "admissible_source treats a malformed (non owner/name) source as unknown, not as a foreign name"
+
   rm -f "$fixture" "$empty"
   echo "self_test=pass"
 }
@@ -387,10 +401,21 @@ plan_runs "$run_ids" "$harvested" | while read -r decision; do
   # row (a deliberate behaviour change to a documented flag).
   #
   # `< /dev/null` so gh cannot swallow the while-loop's stdin, exactly as the log fetch
-  # below does. `|| true` turns any gh failure into an empty source, which admissible_source
-  # rejects -- fail-closed by construction rather than by a second branch.
-  source_repo="$(gh api "repos/$repo/actions/runs/$id" \
-    --jq '.head_repository.full_name' < /dev/null 2>/dev/null || true)"
+  # below does.
+  #
+  # The exit status is checked EXPLICITLY, not inferred from stdout emptiness: `gh api`
+  # writes the raw JSON error body (e.g. `{"message":"Not Found",...}`) to STDOUT on a
+  # non-2xx response -- it bypasses --jq entirely -- and sends only the human-readable
+  # message to stderr, which the 2>/dev/null below discards. A naive `|| true` therefore
+  # leaves that JSON blob sitting in $source_repo looking non-empty, which used to read as
+  # a foreign name rather than an unreadable one. Forcing source_repo="" on a non-zero exit
+  # makes failure fail-closed regardless of what gh printed. admissible_source's shape
+  # check (owner/name) is the second, independent line of defense if a blob like that ever
+  # reaches it anyway.
+  if ! source_repo="$(gh api "repos/$repo/actions/runs/$id" \
+       --jq '.head_repository.full_name' < /dev/null 2>/dev/null)"; then
+    source_repo=""
+  fi
   source_decision="$(admissible_source "$id" "$source_repo" "$repo")"
   if [[ "$source_decision" == skip=* ]]; then
     echo "$source_decision" >&2
