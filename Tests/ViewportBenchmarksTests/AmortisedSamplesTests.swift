@@ -52,10 +52,12 @@ final class AmortisedSamplesTests: XCTestCase {
         XCTAssertEqual(seen, Array(0..<12))
     }
 
-    // Samples come back UNSORTED and one-per-iteration: percentile() requires a sorted
-    // array, and the caller is the one that sorts. Pinned so the helper never starts
-    // sorting on its own and leaves callers double-sorting a copy.
-    func testSamplesAreOnePerIterationAndNotSortedByTheHelper() {
+    // One sample per iteration -- the cardinality percentile() is handed after the caller
+    // sorts. The helper also returns them UNSORTED, and this test does NOT assert that:
+    // four near-equal live timings cannot distinguish a sorted array from an unsorted one,
+    // so no assertion here could fail if the helper started sorting. The name claims only
+    // what is checked.
+    func testOneSampleIsReturnedPerIteration() {
         let measured = amortisedSamples(iterations: 4, operationsPerSample: 1) { _ in 0 }
         XCTAssertEqual(measured.samples.count, 4)
     }

@@ -24,6 +24,11 @@
 # is written down. Readers accept legacy FIVE-column rows -- the committed corpus consists
 # entirely of them -- and treat a missing verdict as admissible.
 #
+# So the corpus file's HEADER LINE stays five columns: it is never rewritten (the corpus is
+# append-only), and after the first post-slice-54 harvest the file legitimately carries a
+# five-column header above mixed five- and six-column rows. Both readers skip line 1, so
+# this is the expected steady state, not schema drift.
+#
 # derive-gate-budgets.sh and GateFloorTests then REFUSE, at read time, rows whose verdict is
 # budget_exceeded, budget_absolute_exceeded or operation_failures: a summary line is printed
 # BEFORE the gate verdict is checked, so a slow sample genuinely reaches a hosted log, and
@@ -115,8 +120,8 @@ extract_rows() {
     # Row-level verdict for one summary line.
     #
     # `failures=` OUTRANKS the gate verdict, and that is not belt-and-braces. formatSummary
-    # prints failures=N UNCONDITIONALLY, outside the --gate branch
-    # (BenchmarkSupport.swift:103), whereas gate=/reason= appear only on gated steps -- and
+    # (BenchmarkSupport.swift) prints failures=N UNCONDITIONALLY, outside its --gate
+    # branch, whereas gate=/reason= appear only on gated steps -- and
     # the FIRST hosted evidence for a new mode necessarily comes from an ungated step,
     # because its budget does not exist yet. Reading degeneracy from the verdict alone would
     # therefore miss it on exactly the line shape node 6 bootstraps with.

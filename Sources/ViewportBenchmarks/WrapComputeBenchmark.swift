@@ -101,10 +101,15 @@ func runWrapComputeBenchmarks() -> Bool {
     // drain walks the whole buffer per operation, so it takes the smaller count -- the
     // precedent BulkStructuralMutationBenchmark.swift:66-77 already sets for heavy scenarios.
     let drainOperationsPerSample = 16
-    // deterministicScrollOffset is periodic with period 1 000 (BenchmarkSupport.swift), so
-    // 1 000 pre-built ranges cover its entire image exactly. Sized independently of
-    // drainOperationsPerSample -- and 1 000 is not a multiple of 16 -- so no drain sample
-    // ever replays one range sixteen times.
+    // Sized so the pre-built array loses no input diversity against computing the offset
+    // inline: deterministicScrollOffset (BenchmarkSupport.swift) is
+    // `(sample * 37) % 1_000`, and gcd(37, 1 000) = 1, so its period is exactly 1 000 and
+    // 1 000 ranges cover its whole image bijectively.
+    //
+    // A drain sample never replays one range either, but that follows from the INDEXING,
+    // not from this count: the body indexes by the global operation index, so the 16
+    // operations in one sample read 16 CONSECUTIVE indices -- distinct modulo any count
+    // >= 16, whatever it is.
     let drainRangeCount = 1_000
     let clock = ContinuousClock()
 

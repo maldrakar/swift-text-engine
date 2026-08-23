@@ -7,17 +7,25 @@ harvester authenticated no run's source, so a fork's fabricated `p95_ns=` lines 
 in principle enter the corpus). A third hole, found while reading for D-7, is closed
 in the same slice: the corpus gains a sixth **verdict** column, and both budget
 consumers reject `{budget_exceeded, budget_absolute_exceeded, operation_failures}` at
-read time. Seven falsifiability drills are the whole proof for both guards — neither
-has ever fired against a real contaminated run.
+read time. Eight falsifiability drills — the spec's seven plus drill 8, added by the
+whole-branch review — are the whole proof for both guards; neither has ever fired
+against a real contaminated run.
 
-Eight commits on `slice-54-calibration-chain-hardening`, in order:
+Ten commits on `slice-54-calibration-chain-hardening`, in order:
 `31c23e1` (amortised measurement helper), `3d67c93` (`--wrap-row-query` onto the
 amortised shape), `03881ba` (`--wrap-compute` amortised, drain de-contaminated,
 reindex repaired), `6652d9e` (Swift corpus reader learns the sixth verdict column),
 `112815c` (derivation applies the reject set, third cross-language pin), `7ffbd95`
 (`extract_rows()` extracted, writes the verdict column), `8ced3e1` (run-source
 provenance, failing closed), `4c042ad` (fix: provenance capture gated on `gh api`'s
-real exit status, not stdout emptiness — see the note at the end of section 8).
+real exit status, not stdout emptiness — see the note at the end of section 8),
+`7d3e082` (docs: the `AGENTS.md` `budget_stale` paragraph stated the wrong mechanism
+— a review correction), and the whole-branch-review fix wave, which carries this
+sentence and therefore cannot list its own sha. That last commit adds drill 8
+(section 6), moves the derivation's `dropped=` reporting ahead of its
+`no_corpus_rows` exit, and corrects four comments and one test name; its full
+inventory is in
+`.superpowers/sdd/2026-08-23-calibration-chain-hardening/final-fix-report.md`.
 
 ---
 
@@ -35,12 +43,12 @@ real exit status, not stdout emptiness — see the note at the end of section 8)
 | 8 | PASS — the parser is extracted into `extract_rows()`, its truth table passes under `--self-test`, driven by `swift test` | Section 9 |
 | 9 | PASS — the harvester writes a sixth verdict column on every emitted row; both readers additionally accept legacy five-column rows, which is what the committed corpus consists entirely of | Section 6 (Drill 5), Section 10 |
 | 10 | PASS — a row whose `failures=` is non-zero is recorded as `operation_failures` regardless of its verdict, including a line with no `gate=` at all; drill 7 records the red | Section 6 (Drill 7) |
-| 11 | PASS — `derive-gate-budgets.sh` and `GateFloorTests` apply the identical reject set, pinned by `testAdmissibleRowsMatchDeriveScript`; drills 3 and 4 record reds in both directions | Section 6 (Drills 3, 4) |
+| 11 | PASS — `derive-gate-budgets.sh` and `GateFloorTests` apply the identical reject set, pinned by `testAdmissibleRowsMatchDeriveScript`; drills 3 and 4 record reds in both directions, and drill 8 (added in review) records the red of the **production** filter, which the seam-based pin does not reach | Section 6 (Drills 3, 4, 8) |
 | 12 | PASS — the Swift reader accepts five-or-six-column rows; drill 5 records the red that proves it | Section 6 (Drill 5) |
 | 13 | PASS — `derive-gate-budgets.sh` output over the committed corpus is byte-identical before and after, all 46 budgets reproduce, the committed corpus file is untouched | Section 7, Section 10 |
 | 14 | PASS — neither wrap mode is gateable (`isGateable`'s `false` arm) or appears in `swift-ci.yml` | Section 10 |
 | 15 | PASS — `AGENTS.md`'s harvest-admissibility sentence and the `budget_stale` paragraph no longer describe a harvest the script refuses; the harvester's usage header carries the sixth column | AGENTS.md edits (this task, Steps 3-6) |
-| 16 | PASS — all seven drills recorded with observed red output | Section 6 |
+| 16 | PASS — all seven spec drills recorded with observed red output, plus drill 8 from the whole-branch review | Section 6 |
 | 17 | OPEN — hosted proof at step level (PR-head + post-merge), three jobs, twelve gates, 46 `gate=pass` | Section 11 (left open per controller ruling R2 — discharged in a later step this task does not execute) |
 
 ---
@@ -270,7 +278,7 @@ and `amortisedSamples`).
 
 ---
 
-## 6. The seven drills
+## 6. The drills — seven from the spec, plus drill 8 added in review
 
 ### Drill 1 — `amortise`'s division (AC2)
 
@@ -406,6 +414,52 @@ rows the mutation targets, nothing else changed:
 Restored from backup; `diff` against the pre-drill backup was empty (byte-identical),
 confirmed independently of "the self-test passes again" (which alone would not rule out
 a different still-mutated file).
+
+### Drill 8 — the PRODUCTION verdict filter (AC11, added by the whole-branch review)
+
+Not one of the spec's seven. The review demonstrated that the reject rule is written
+**twice** in `derive-gate-budgets.sh` — in `admissible_rows()` (the `--admissible-rows`
+seam) and in the main awk that actually derives budgets — and that **the derivation
+never calls `admissible_rows`**. Deleting only the production line left every
+automated check in the repository green: `--self-test` exercised the seam, the
+cross-language pin passed because the seam was still correct, and
+`testEveryCommittedBudgetReproducesFromCorpus` passed because the committed corpus is
+entirely five-column so output was byte-identical — while a laundered row loosened a
+budget by four orders of magnitude. Drills 3 and 4 pin the seam; nothing pinned the
+filter that runs.
+
+The fix is a `run_self_test()` case that drives the **full derivation** (`"$0"
+"$production_fixture"`, the way an operator invokes it — deliberately **not**
+`--admissible-rows`) over a six-column fixture whose fourth row is
+`804 line_query uniform_1k 1000000 2000000 budget_exceeded`. The three admitted rows
+give `8 * median(20, 24, 30) = 192 > 3 * max = 90`, so `budget_p95 = 200`; admitting
+the fourth makes `3 * max` govern at `3 000 000`. The case asserts the derived
+**budget**, not a zero exit, and asserts the `dropped=` stderr line names its reason.
+
+Mutation (delete the production filter line from the main awk):
+
+```
+  if ($6 != "" && index(rejected, " " $6 " ") > 0) { dropped[$6]++; next }
+```
+
+Observed red (`./.github/scripts/derive-gate-budgets.sh --self-test`, exit 1):
+
+```
+self_test=fail label=the derivation ITSELF drops budget_exceeded (admitting it would read 3000000)
+  expected: [200]
+  actual:   [3000000]
+```
+
+Restored from `/tmp/slice54-fix/derive-backup.sh`; `diff` against that backup was
+empty (byte-identical), and the self-test then printed `self_test=pass` (exit 0). The
+15 000x gap between expected and actual is the point: no rounding or near-miss can
+make this case pass with the filter gone.
+
+The **residual is recorded rather than removed** (ledger D-26b): the rule still lives
+in two awk programs sharing only `REJECTED_VERDICTS`. Collapsing them — feeding the
+main awk from `<(admissible_rows < "$corpus")` — was the review's preferred fix and
+was rejected as too invasive for a branch whose value rests on AC13 byte-identity,
+with one scoped re-review remaining.
 
 ---
 

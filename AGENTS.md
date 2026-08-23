@@ -617,17 +617,30 @@ scenario, and no dedup key can tell them apart.
 - **Why not `conclusion`.** A run-level filter discards both directions of a red
   gate, and one failing mode out of twelve would discard the other forty-five
   scenarios' sound rows. Audited against this repository's own history: it would
-  have dropped 92 sound rows over a WASM SDK failure, one of them inside the active
-  N=20 window.
+  have dropped 92 sound rows over a WASM SDK failure — 46 rows each from two runs,
+  and one of those two runs is inside the active N=20 window.
 
 The reject set lives in two languages — `.github/scripts/derive-gate-budgets.sh`
 (`REJECTED_VERDICTS`) and `GateFloorTests.swift` (`rejectedVerdicts`) — pinned
 against each other by `testAdmissibleRowsMatchDeriveScript` over the
 `--admissible-rows` seam. That is the **third** cross-language pin, beside the two
-window pins, and like them it covers agreement, not correctness. The verdict filter
-applies **after** windowing, so neither window pin is touched; a run whose rows are
-all rejected still consumes a window slot. Rejections are loud: skipped runs print
-`skip=` and dropped rows print `dropped=<reason> rows=N`, both on stderr.
+window pins, and like them it covers agreement, not correctness.
+
+**The rule itself is written twice on the shell side**, in two awk programs sharing
+only the `REJECTED_VERDICTS` string: the `--admissible-rows` seam (which the
+cross-language pin drives) and the derivation's own main awk, **which never calls the
+seam**. Each half has its own guard: the pin covers the seam, and
+`derive-gate-budgets.sh --self-test` covers the production filter by running the full
+derivation over a fixture and failing if a `budget_exceeded` row moves the derived
+budget. The standing residual is that an edit to the rule must land in **both** awk
+programs — changing one leaves the other enforcing the old rule (ledger D-26).
+
+The verdict filter applies **after** windowing, so neither window pin is touched; a
+run whose rows are all rejected still consumes a window slot. Rejections are loud:
+skipped runs print `skip=` and dropped rows print `dropped=<reason> rows=N`, both on
+stderr — and the derivation prints its `dropped=` counts **before** it can exit on
+`error=no_corpus_rows`, so the scenario-emptied-by-rejections case is explained
+rather than silent.
 
 The one time to harvest **without** `--corpus` is when the harvester learns to read
 a *new line shape* (as it did for `realistic_provider`): previously-harvested runs

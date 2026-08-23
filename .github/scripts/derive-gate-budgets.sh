@@ -145,6 +145,53 @@ run_self_test() {
     "admissible_rows drops budget_exceeded, keeps budget_stale and legacy rows"
   rm -f "$verdict_fixture"
 
+  # The SAME rule, driven through the FULL derivation -- the code path an operator runs.
+  #
+  # This case exists because the reject rule is written TWICE, in two awk programs sharing
+  # only the REJECTED_VERDICTS constant: admissible_rows above (the seam
+  # testAdmissibleRowsMatchDeriveScript pins across languages) and the main awk below, which
+  # never calls admissible_rows. Deleting only the main awk filter line left EVERY automated
+  # check in this repository green -- --self-test passed because it exercised the seam, the
+  # cross-language pin passed because the seam was still correct, and
+  # testEveryCommittedBudgetReproducesFromCorpus passed because the committed corpus is
+  # entirely five-column so its output was byte-identical -- while a laundered
+  # budget_exceeded row loosened a budget by four orders of magnitude. So this case must not
+  # touch --admissible-rows: it invokes the script the way the recipe does, over a corpus
+  # file, and asserts the derived BUDGET rather than a zero exit.
+  local production_fixture production_stderr
+  production_fixture="$(mktemp)"
+  production_stderr="$(mktemp)"
+  trap "rm -f '$fixture' '$production_fixture' '$production_stderr'" EXIT
+  {
+    printf 'run_id\tmode\tscenario\tp95_ns\tp99_ns\tverdict\n'
+    printf '801\tline_query\tuniform_1k\t20\t40\tpass\n'
+    printf '802\tline_query\tuniform_1k\t24\t44\tbudget_stale\n'
+    printf '803\tline_query\tuniform_1k\t30\t50\n'
+    # Absurd on purpose. Admitted, this single row governs through 3*max and takes
+    # budget_p95 from 200 to 3000000 -- a 15 000x move, so the assertion below cannot pass
+    # by rounding or by a near-miss.
+    printf '804\tline_query\tuniform_1k\t1000000\t2000000\tbudget_exceeded\n'
+  } > "$production_fixture"
+
+  local production_out
+  if ! production_out="$("$0" "$production_fixture" 2> "$production_stderr")"; then
+    echo "self_test=fail label=production_filter_derivation_exited"
+    cat "$production_stderr"
+    exit 1
+  fi
+
+  budget_p95_of() { printf '%s\n' "$production_out" | awk -v k="$1" '$1 == k {
+    for (i = 1; i <= NF; i++) if ($i ~ /^budget_p95=/) { split($i, a, "="); print a[2] } }'; }
+
+  # 8*median(20,24,30) = 192 beats 3*max = 90, so the admitted rows alone yield 200.
+  assert_equal "200" "$(budget_p95_of 'line_query|uniform_1k')" \
+    "the derivation ITSELF drops budget_exceeded (admitting it would read 3000000)"
+
+  # And the drop is loud, naming its reason (spec Decision 12): a filter nobody can see
+  # firing is how a scenario silently loses its evidence.
+  assert_equal "dropped=budget_exceeded rows=1" "$(cat "$production_stderr")" \
+    "the derivation reports the dropped row on stderr, by reason"
+
   echo "self_test=pass"
 }
 
@@ -211,6 +258,22 @@ FNR == NR { KEEP[$1] = 1; next }   # first file: the windowed run ids
   p99[k, n[k]] = $5
 }
 END {
+  # Rejections are LOUD (spec Decision 12): silent filtering produces a corpus that looks
+  # complete and is not. stderr, so stdout stays byte-identical for a corpus with nothing to
+  # drop -- which is every corpus until the first post-slice-54 harvest lands. Emission order
+  # is awk hash order; these are diagnostics, not a parsed format.
+  #
+  # FIRST in END, ahead of the no_corpus_rows check below, and that order is the point: a
+  # rejected row never reaches seen[], so a mode whose every windowed row was rejected exits
+  # through that check -- and printing the counts afterwards would print them never. The one
+  # case the spec names these counts as the explanation for is exactly the case that exits
+  # early.
+  #
+  # NOTE: no apostrophes anywhere inside this awk program -- it is single-quoted in the
+  # shell, so one would terminate the quote and break the script.
+  for (r in dropped)
+    printf "dropped=%s rows=%d\n", r, dropped[r] > "/dev/stderr"
+
   # A requested mode with no rows is an operator error (a typo, or a mode the
   # corpus has never been harvested for). Say so and fail, rather than printing
   # nothing and exiting 0 -- which reads as "the corpus supports no change".
@@ -225,16 +288,6 @@ END {
       }
     }
   }
-
-  # Rejections are LOUD (spec Decision 12): silent filtering produces a corpus that looks
-  # complete and is not. stderr, so stdout stays byte-identical for a corpus with nothing to
-  # drop -- which is every corpus until the first post-slice-54 harvest lands. Emission order
-  # is awk hash order; these are diagnostics, not a parsed format.
-  #
-  # NOTE: no apostrophes anywhere inside this awk program -- it is single-quoted in the
-  # shell, so one would terminate the quote and break the script.
-  for (r in dropped)
-    printf "dropped=%s rows=%d\n", r, dropped[r] > "/dev/stderr"
 
   for (k in n) {
     cnt = n[k]
