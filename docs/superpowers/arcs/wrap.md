@@ -49,7 +49,9 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    by division — the exact term behind this map's "not literally width-independent"
    correction. Floating-point edges make it a design question for the brainstorm, not a
    drive-by.
-4. `pending` — **← next (lean, topological)** point→(row, cell) wrap-aware composite.
+4. `pending` — **← lean for the next *feature* slice (topological)**; slice 54 took the
+   calibration-chain route instead (user call, 2026-08-23), so this node is selected but not
+   yet consumed. point→(row, cell) wrap-aware composite.
    Criterion 3, and its last enumerated analog. Composes node 3's `visualRowAt` with the
    existing within-line column query the way `pointAt` composes `lineAt` with `columnAt` —
    no new search. Fold-in home for **D-24** (the row-axis dispatch is pinned by nothing —
@@ -57,7 +59,14 @@ brief's «Ограничения» and the initial brief it inherits by referenc
 5. `pending` — `--memory-shape` extension to the wrap path. Criterion 2.
 6. `pending` — Wrap benchmark modes promoted to blocking gates
    (harvest → derive). Criterion 4. Likely splits per mode, as the first
-   arc's gate promotions did.
+   arc's gate promotions did. **Both of its inputs are being repaired ahead of it in
+   slice 54** (D-23: the wrap modes measure one operation per `clock.measure` and print
+   tick-quantised numbers; D-7: the harvester selects rows by run id with no
+   conclusion/event/fork check) — because `harvest → derive` never re-measures and never
+   re-authenticates, so neither defect is repairable *after* this node's first harvest.
+   Still to read when it arrives: D-20/D-21 (the non-gateable modes' `AbsoluteCeiling`
+   class is pinned by nothing, and that inertness ends the moment a wrap mode becomes
+   gateable).
 7. `pending` — Incremental edits under wrap inside frame-hot-path budgets.
    Criterion 5.
 8. `pending` — `fork: which platform host ships first, and how much of the
@@ -341,3 +350,39 @@ once, over a complete wrap query surface, not twice.
   Open for the user rather than decided here: re-affirm or schedule **D-7** and **D-9**
   (both `deferred(user, …)` P2s, origins ≥ 3 completed slices back), and whether **D-23**
   folds into slice 54 or waits for node 6's first task.
+
+- 2026-08-23 — **User chose Option C: Slice 54 = the calibration-chain route**, not the
+  node-4 lean, and in the same call **scheduled D-7** (which had been `deferred(user, …)`
+  since 2026-07-22 and re-affirmed once) rather than deferring it a third time. Scope:
+  **D-23** (P2 — put both wrap benchmark modes on the amortised `operationsPerSample`
+  timing shape the twelve gated modes use) plus **D-7** (P2 — provenance checks in
+  `harvest-gate-corpus.sh`, so a run's `p95_ns=` lines are selected on conclusion/event/fork
+  and not on run id alone). One theme, not two errands: **D-23 makes the measurement real,
+  D-7 makes the harvested evidence authentic**, and both are inputs to node 6 that
+  `harvest → derive` can never repair after the fact — it neither re-measures nor
+  re-authenticates. Pairing them also answers the slice-53 review's own objection to Option C
+  standing alone ("it is a fold-in, not a slice").
+  Argument added at selection time, beyond what the review recorded: node 4 will by symmetry
+  add its own wrap benchmark mode (node 3 added `--wrap-row-query`), so repairing the timing
+  shape **first** means that third mode is born correct instead of becoming a third copy of
+  the defect.
+  Slice 54 advances **no wrap criterion** and consumes **no map node** — the fourth slice of
+  that shape, after the process slice 48, the debt slice 51 and the calibration slice 52 — but
+  like slice 52 it is de-risking work for a *named* criterion: criterion 4 binds future wrap
+  gates to this recipe by reference, and a gate calibrated from clock overhead or from
+  unauthenticated rows is the arc's own "gate that cannot fail" failure mode with a deadline.
+  **Node 4 (point→(row, cell)) remains the lean** for the next feature slice, carrying D-24
+  (and D-25, plausibly D-13) as fold-ins. **D-9** is `deferred(user, 2026-08-23)` — re-affirmed,
+  and now on its second consecutive re-affirmation; the next review should schedule it or state
+  why the `gov_p95` observable is a permanent substitute for a fix.
+  Live re-verification run at selection time (three claims, all held): D-24 is still real
+  (`grep "func logicalLine(containingVisualRow"` → exactly the requirement and the default, no
+  conformer overrides); `pointAt` does compose `lineAt` → `columnAt` feeding the located line
+  index forward (`PointQuery.swift:34-40`), so node 4's composition shape is confirmed; and
+  `visualRowAt` does return both coordinate systems (`WrapPositionQuery.swift:39-45`).
+  One design question surfaced for node 4's brainstorm rather than pre-decided here: `columnAt`
+  requires `columnOffset(inLine:column:0) == 0` (`HorizontalPositionQuery.swift:28`) and clamps
+  to the **logical line's** edges (`columnIndex: 0` / `count - 1`, lines 40/43), while a visual
+  row is a `[startColumn, endColumn)` span with its own left edge — so node 4 must settle x
+  rebasing and whether a clamp lands on the row's edge or the line's. That is what makes node 4
+  more than a mechanical composition.
