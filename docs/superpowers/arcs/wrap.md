@@ -427,3 +427,12 @@ and the arc cannot afford consecutive no-criterion slices.
   the argument rather than re-deferring silently: the `gov_p95=median|max` observable substitutes
   for a stale *list*, not for a *fix*, and a one-line assertion should fold into the next
   calibration-touching slice or be deferred a third time explicitly.
+- 2026-08-23 — **User affirmed the selection: Slice 55 = node 4** (point→(row, cell)
+  wrap-aware composite), not an override. The three options put to the user were the
+  slice-54 review's own: node 4, an infrastructure slice (D-27 + D-29 + possibly D-17),
+  and node 6 (wrap-gate promotion); the user took node 4. Rationale on record: slice 54
+  was the arc's **fifth** slice moving no criterion, node 4 is one slice overdue, and it
+  closes criterion 3's last enumerated analog. **D-27 therefore remains scheduled for
+  slice 56 at the latest**, and **D-17 escalates at slice 55's review** — neither is
+  discharged by this call. Fold-ins to settle at the brainstorm: D-24 (P2), D-29
+  (mandatory), D-25 (P3), D-13 only on merit. Next inner-loop step: brainstorm node 4.
