@@ -99,4 +99,36 @@ final class WrapComputeTests: XCTestCase {
         XCTAssertEqual(rows[0].row.endColumn, 2)   // [0,2) width exactly 20 -- inclusive edge
         XCTAssertEqual(rows[1].row.startColumn, 2)
     }
+
+    // --- slice 55a, guards 3 and 4 (spec Decision 4): a malformed logicalLine override ---
+    // Both cases must STREAM NOTHING -- next() is nil on the first call -- rather than
+    // trap, stream the start line from row 0, or skip to the next line. The range comes
+    // from compute over the plain layout (compute never consults the hook); only the
+    // cursor sees the override.
+
+    // The override answers a line outside 0..<lineCount; on the shipped code
+    // `firstVisualRow(ofLine:)` traps on it. Drill (f2) removes the guard.
+    func testCursorStreamsNothingWhenTheHookAnswersOutOfRange() {
+        let base = layout()
+        let rigged = OverridingLogicalLineLayout(base: base, log: HookLog(), answer: { _ in base.lineCount + 1 })
+        let input = VariableViewportInput(scrollOffsetY: 5, viewportHeight: 5, overscanLinesBefore: 0, overscanLinesAfter: 0)
+        guard case .success(let range) = ViewportVirtualizer.compute(input, layout: base) else { return XCTFail("expected success") }
+        var cursor = ViewportVirtualizer.visualRowGeometry(for: range, layout: rigged)
+        XCTAssertNil(cursor.next(), "an out-of-range startLine must stream nothing, not trap")
+    }
+
+    // The override answers an in-range line whose firstVisualRow exceeds bufferStart, so
+    // rowInStartLine is negative; on the shipped code the walk's `0..<k` range traps
+    // (SIGTRAP). Drill (f1) removes the guard: with the helper total, the case then
+    // streams line 2 FROM ROW 0 -- the plausible wrong answer this assertion catches.
+    func testCursorStreamsNothingWhenTheHookMakesRowInLineNegative() {
+        let base = layout()
+        // bufferStart = 1 (row 1 of line 0); answering 2 gives firstVisualRow(2) = 4 > 1.
+        let rigged = OverridingLogicalLineLayout(base: base, log: HookLog(), answer: { _ in 2 })
+        let input = VariableViewportInput(scrollOffsetY: 5, viewportHeight: 5, overscanLinesBefore: 0, overscanLinesAfter: 0)
+        guard case .success(let range) = ViewportVirtualizer.compute(input, layout: base) else { return XCTFail("expected success") }
+        XCTAssertEqual(range.bufferStart, 1, "fixture: the buffer must start inside a line")
+        var cursor = ViewportVirtualizer.visualRowGeometry(for: range, layout: rigged)
+        XCTAssertNil(cursor.next(), "a negative rowInStartLine must stream nothing, not trap or restart the line")
+    }
 }

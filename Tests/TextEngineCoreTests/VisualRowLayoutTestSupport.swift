@@ -70,3 +70,34 @@ func collectGeometry<L: VisualRowLayoutSource>(_ cursor: DocumentVisualRowCursor
     while let g = c.next() { out.append(g) }
     return out
 }
+
+/// Records every `logicalLine(containingVisualRow:)` call made through an
+/// `OverridingLogicalLineLayout`.
+final class HookLog {
+    var logicalLineCalls: [Int] = []
+}
+
+/// A `TestVisualRowLayout` whose row-axis hook is OVERRIDDEN with a caller-supplied
+/// answer, every call logged. Two uses (slice 55 spec, Decision 4 and D-24): hand a
+/// malformed answer to each consumer of the hook -- the default cannot misbehave, an
+/// override can, so the producer guards are only reachable this way -- and, with the
+/// correct answer, pin that the consumers dispatch through the hook at all. The
+/// prefix sum, row counts and column metrics are `base`'s, untouched: only the hook lies.
+struct OverridingLogicalLineLayout: VisualRowLayoutSource {
+    let base: TestVisualRowLayout
+    let log: HookLog
+    let answer: (Int) -> Int
+
+    var lineCount: Int { base.lineCount }
+    var rowHeight: Double { base.rowHeight }
+    var wrapWidth: Double { base.wrapWidth }
+    func columnCount(inLine line: Int) -> Int { base.columnCount(inLine: line) }
+    func columnOffset(inLine line: Int, column: Int) -> Double { base.columnOffset(inLine: line, column: column) }
+    func canBreak(beforeColumn column: Int, inLine line: Int) -> Bool { base.canBreak(beforeColumn: column, inLine: line) }
+    func visualRowCount(inLine line: Int) -> Int { base.visualRowCount(inLine: line) }
+    func firstVisualRow(ofLine line: Int) -> Int { base.firstVisualRow(ofLine: line) }
+    func logicalLine(containingVisualRow g: Int) -> Int {
+        log.logicalLineCalls.append(g)
+        return answer(g)
+    }
+}
