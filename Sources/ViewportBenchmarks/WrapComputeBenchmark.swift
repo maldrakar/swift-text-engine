@@ -96,6 +96,21 @@ func formatWrapComputeLine(
         + " checksum=\(checksum)"
 }
 
+/// The `--wrap-compute` drain body, one operation: stream the buffer range through
+/// `visualRowGeometry` and fold every row's `endColumn`. A function rather than a
+/// closure so `WrapComputeDrainTests` can drive it through a counting layout and assert
+/// it performs no `compute(_:layout:)` (D-29) -- witnessed by zero
+/// `firstVisualRow(ofLine: lineCount)` probes, which every compute makes and the drain
+/// path structurally never does. The drain ranges are built outside the clock by the
+/// caller (slice 54 spec, Decision 4); computing one in here would make drain_p95_ns
+/// measure compute+drain and gate node 6 on the wrong quantity.
+func drainVisualRows<Layout: VisualRowLayoutSource>(_ range: VirtualRange, layout: Layout) -> Int {
+    var cursor = ViewportVirtualizer.visualRowGeometry(for: range, layout: layout)
+    var sink = 0
+    while let geometry = cursor.next() { sink &+= geometry.row.endColumn }
+    return sink
+}
+
 @available(macOS 13.0, *)
 func runWrapComputeBenchmarks() -> Bool {
     let lineCount = 100_000
@@ -177,11 +192,7 @@ func runWrapComputeBenchmarks() -> Bool {
         let drainMeasured = amortisedSamples(
             iterations: iterations, operationsPerSample: drainOperationsPerSample
         ) { operation in
-            var cursor = ViewportVirtualizer.visualRowGeometry(
-                for: drainRanges[operation % drainRangeCount], layout: layout)
-            var sink = 0
-            while let geometry = cursor.next() { sink &+= geometry.row.endColumn }
-            return sink
+            drainVisualRows(drainRanges[operation % drainRangeCount], layout: layout)
         }
 
         var computeSamples = computeMeasured.samples
