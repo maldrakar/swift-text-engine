@@ -87,9 +87,11 @@ adjustment — Decision 13): `WrapPackingTests`, `WrapValidationTests`, `WrapCom
 
 - `--wrap-compute`, one column per commit on its path — two baselines after commit 0, then after commits
   1, 3, 4, 5. Commits 1, 3, 5: flat on every token within the baseline spread. Commit 4:
-  `compute_*` flat; `reindex_ns` and `drain_*` move per Decision 12's table — by the
-  cells-per-line factor at `inf`, roughly halved at `40`, roughly −11 % at `10`. The
-  `checksum=` token is byte-identical across **all** columns.
+  `compute_*` flat; `reindex_ns` and `drain_*` fall at every width, ordered `inf` < `40` <
+  `10` < 1 — time falls less than Decision 12's scan-iteration factors, because a per-row
+  fixed cost remains once the scan is gone (the plan's smoke test measured drain p95 0.55 /
+  0.80 / 0.92 and reindex 0.45 / 0.68 / 0.93); the record reads the direction and the order,
+  not the iteration factor. The `checksum=` token is byte-identical across **all** columns.
 - `--wrap-row-query`: `checksum=` byte-identical to the pre-branch run.
 - All twelve blocking gates `gate=pass`; every gated checksum byte-identical to the
   pre-branch baseline; `swift test` green with its count; Foundation scan empty;
@@ -787,15 +789,26 @@ never touches the packer and must not move. On the mode's fixture (`cells = 80`,
 
 | Width | Rows/line | Before → after | `reindex_ns` and `drain_*` |
 |---|---|---|---|
-| `inf` | 1 | 80 → 0 (the only row is the last row) | fall by roughly the cells-per-line factor |
-| `40` | 2 | 41 + 40 → 41 + 0, i.e. 81 → 41 | roughly **halve** |
-| `10` | 8 | 7 × 11 + 10 → 7 × 11 + 0, i.e. 87 → 77 | fall by roughly 11 % |
+| `inf` | 1 | 80 → 0 (the only row is the last row) | fall the most — smoke test: reindex 0.45, drain p95 0.55 |
+| `40` | 2 | 41 + 40 → 41 + 0, i.e. 81 → 41 | fall less — 0.68 / 0.80 |
+| `10` | 8 | 7 × 11 + 10 → 7 × 11 + 0, i.e. 87 → 77 | fall least — 0.93 / 0.92 |
+
+**Time falls less than iterations.** The scan costs about 1.5 ns per cell on this fixture,
+and what remains per row does not shrink: `makeInner`'s cursor construction through
+`visualRows`, protocol-witness dispatch on the layout, the layout value's retain/release
+per line, the `VisualRowGeometry` itself. So the ratios are ordered `inf` < `40` < `10` < 1
+but sit nowhere near the iteration factors — the numbers in the table are what the plan's
+smoke test measured (Apple silicon, one run each side, 2026-08-28), with `compute_*` inside
+the noise and all three checksums identical. `reindex_ns` at `inf` carries a second effect
+the record must name: it is the first width the mode runs, so its one-shot construction
+pays the cold caches and the fresh 100 000-entry array's page faults — a pre-existing
+property of the mode, recorded rather than repaired here.
 
 Every direction is a prediction the record confirms (Verification): a flat `width_inf`, a
-`width_40` that does not halve, or a `compute_*` that moves is a finding. "`width_inf`
+`width_40` that falls less than `width_10`, or a `compute_*` that moves is a finding. "`width_inf`
 falls and the rest holds still" is the wrong prediction — it forgets that the last row of a
-wrapped line is the same O(1) case — and a record carrying it beside a halved `width_40`
-column would force a reviewer to file the halving as an instrumentation bug. That is a
+wrapped line is the same O(1) case — and a record carrying it beside a `width_40` column
+that fell by a fifth would force a reviewer to file the fall as an instrumentation bug. That is a
 genuine speed-up of the measured operation, not a weakening of the measurement: at the
 finite widths every line still wraps, the interior rows still scan, and the mode keeps
 measuring the reindex it exists to measure.
@@ -837,8 +850,11 @@ constant, the predicate has drifted.
 and a probe-count pin for the *cost*.** The result is preserved, so no new test asserts a
 result; what covers it is that a *wrong* version reddens what is already there —
 `WrapPackingTests` (`testCharWrapOneCellPerRow`, `testUnbreakableRunOverflowsOneRow`,
-`testPartitionTilesTheLine`), `VisualRowEquivalenceTests` and `WrapComputeEquivalenceTests`
-all exercise lines that must **not** collapse to a single row. Drill (l) shows this bites,
+`testPartitionTilesTheLine`) exercises lines that must **not** collapse to a single row —
+and **only** it does: `VisualRowEquivalenceTests` and `WrapComputeEquivalenceTests` are ∞
+oracles whose every line fits, and on a fitting line the inverted predicate is false at `∞`
+and true at `width == total`, exactly like the real one, so they stay green under (l)
+(observed in the plan's smoke test). Drill (l) shows the packing suite bites,
 and it **inverts** the predicate rather than deleting it: deleting a pure optimization
 changes no result and would redden nothing, which is exactly the shape of a drill that
 proves nothing. The second witness is the `checksum=` token 55a adds to the `wrap_compute`
@@ -1223,8 +1239,13 @@ Contracts; (d1) is observed in both.
 - **(k)** the `>= total` guard — remove it; on Decision 6's fixture 2 the overriding hook
   records a call at `x == lineWidth` and the test reddens, while fixture 1 stays green.
 - **(l)** the packer short-circuit — **invert** its predicate (`total − startOffset >=
-  wrapWidth`); `WrapPackingTests` (the three named cases), `VisualRowEquivalenceTests` and
-  the ∞ oracle redden. Inversion and not deletion, on purpose: deleting a result-preserving
+  wrapWidth`); `WrapPackingTests` (the three named cases) reddens, while
+  `VisualRowEquivalenceTests` and the ∞ oracles stay **green** — at `∞` the inverted
+  predicate is false and the scan runs, at `width == total` both predicates are true, and an
+  equivalence fixture holds only fitting lines, on which the two agree (observed in the
+  plan's smoke test); the oracle is structurally blind to the predicate's shape, which is
+  one more reason drill (m)'s cost pin cannot be replaced by it. Inversion and not
+  deletion, on purpose: deleting a result-preserving
   optimization reddens nothing, so a deletion drill would prove only that the branch is
   optional — the D-25 shape in drill form. Decision 13 adds no drill (a refactor with no new
   standing guarantee has nothing to break); Decision 12 is not in that category, because it
@@ -1804,4 +1825,13 @@ provenance.
     5, after four of the five columns it was to certify; it moves to **commit 0** (printer
     only), and the overriding-hook test conformer moves to commit 1 (the guard tests need
     it), with commit 6 reduced to the dispatch pin and the ordering rule restated as "no
-    test drives an override against an unguarded consumer".
+    test drives an override against an unguarded consumer". **Smoke-tested from the
+    plan** (a throwaway worktree, 2026-08-28): every predicted red reproduces on the
+    shipped code (two trap shapes, two fabricated `.row`s, `WrapPackingCountTests` at
+    7/12/3), the full suite is 425/0 after (408 + 17), the three `wrap_compute` checksums
+    are identical across the short-circuit, and drills (m), D-24 (both sites) and D-29
+    bite. Two corrections from it: drill (l) reddens `WrapPackingTests` only — the ∞
+    oracles cannot see the predicate's shape — and the `--wrap-compute` *time* prediction
+    was over-claimed: scan iterations fall by the table's factors, time by 0.45–0.55 at
+    `inf`, 0.68–0.80 at `40`, about 0.93 at `10`, because a per-row fixed cost remains once
+    the ~1.5 ns/cell scan is gone; Decision 12's table and Contract 55a now say so.
