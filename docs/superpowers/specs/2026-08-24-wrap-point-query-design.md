@@ -302,7 +302,8 @@ deadline as "the slice after 55b". Silence is the one outcome ruled out.
 4. **Honest cost.** The within-line walk inherited from node 2 is stated, tested and
    measured, not hidden behind the logarithmic terms; Decision 12 confines the column scan
    to rows whose remaining suffix does not fit, so a line that fits (`∞` included) and the
-   last row of any line pack in O(1), and at `∞` the query's cost class equals `pointAt`'s.
+   last row of any line pack in O(1) unless it overflows, and at `∞` the query's cost
+   class equals `pointAt`'s.
    Which scenarios pay the walk is printed, not inferred (Benchmark Mode / CI).
 5. **Four ledger items discharged** — D-24, D-29 (the falsifiability audit's mandatory
    option), D-25 and D-18 — counted here because the review's ledger delta counts what the
@@ -1404,7 +1405,8 @@ between two merges is the drift this document exists to prevent:
   "O(cells-in-row) per `next()`" and node 2's says reaching the first buffered row costs
   "the documented O(rowInLine) within-line walk"; both must now say that a row whose
   remaining suffix fits the wrap width is answered in O(1) — so a line that fits packs in
-  O(1) (`∞` included), and the last row of any line does too (Decision 12).
+  O(1) (`∞` included), and the last row of any line does too, unless it overflows
+  (Decision 12).
 - The two shipped doc comments stating the same cost: `DocumentVisualRowCursor.swift:4-5`
   ("Cost: O(rowInStartLine + buffer)") and `VisualRowCursor.swift:51-56` (`greedyEnd`'s
   "O(cells in the row)"), in the Decision 12 commit itself.

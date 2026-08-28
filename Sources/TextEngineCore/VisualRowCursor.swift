@@ -65,8 +65,10 @@ public struct VisualRowCursor<Metrics: WrapMetricsSource> {
     // under the strictly-increasing contract, every legal end before it fits too, so
     // the scan would finish at `columnCount` anyway; the short-circuit returns it with
     // no probe (slice 55 spec, Decision 12). That is every row of a line that fits the
-    // width (∞ included) and the LAST row of every line; only the interior rows of a
-    // wrapped line scan, O(cells in the row). Bit-identical to the scan: both compare
+    // width (∞ included) and the LAST row of every line unless it overflows (no legal
+    // end fits; the scan falls to the forced-overflow fallback); only the interior rows
+    // of a wrapped line, and an overflowing last row, scan, O(cells in the row).
+    // Bit-identical to the scan: both compare
     // in the same `offset − startOffset <= wrapWidth` form and IEEE subtraction of a
     // common operand is monotone; on an interior-GIGO NaN startOffset both fall to
     // `firstLegal`. Pinned by WrapPackingCountTests; the predicate must NOT be narrowed

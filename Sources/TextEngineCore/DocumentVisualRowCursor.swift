@@ -4,7 +4,8 @@
 /// `ViewportVirtualizer.visualRowGeometry(for:layout:)`. Cost: O(rowInStartLine +
 /// buffer) — the O(rowInStartLine) is the accepted within-line walk (node 2's spec
 /// fork): rows 0…rowInStartLine−1 of the start line are packed, each interior row
-/// scanning its cells, while a line's last row is O(1) (node 1's suffix short-circuit).
+/// scanning its cells, while a line's last row is O(1) (node 1's suffix short-circuit)
+/// unless it overflows, in which case it scans like an interior row.
 public struct DocumentVisualRowCursor<Layout: VisualRowLayoutSource> {
     private let layout: Layout
     private let rowHeight: Double
