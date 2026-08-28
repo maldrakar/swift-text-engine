@@ -153,7 +153,12 @@ sequential); random access inside one line is a later, separate provider node.
 `ViewportVirtualizer.visualRowAt(y:layout:)` is the **y→row layer** (node 3): the
 wrap-aware `lineAt` analog over the visual-row axis. It runs `compute(_:layout:)`'s
 layout ladder — the *same* extracted helper, so the two entry points accept and
-reject exactly the same layouts by construction — then delegates the row-axis search
+reject exactly the same layouts **at the ladder** by construction; after it they
+diverge on one class, a malformed `logicalLine(containingVisualRow:)` override (a line
+outside `0..<lineCount`, or an in-range line whose `firstVisualRow` exceeds the row),
+which `compute` never consults and `visualRowAt` rejects with
+`.failure(.invalidVisualRowLayout)` instead of trapping or naming a row that does not
+exist (slice 55a; the default hook cannot produce either) — then delegates the row-axis search
 to `lineAt` over `UniformLineMetrics(totalRows, rowHeight)` and names the located row
 in **both** coordinate systems: `globalRow` (the index space `compute(_:layout:)`
 ranges over) plus `logicalLine`/`rowInLine` (what `VisualRow` and

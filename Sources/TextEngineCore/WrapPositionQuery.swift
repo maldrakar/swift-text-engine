@@ -4,7 +4,12 @@ extension ViewportVirtualizer {
     ///
     /// Stateless, O(1) core memory. Runs `compute(_:layout:)`'s layout ladder (the same
     /// shared helper, so the two entry points accept and reject exactly the same
-    /// layouts), then delegates the row-axis search to `lineAt` over a uniform row axis
+    /// layouts AT THE LADDER; after it they diverge on one class -- a
+    /// `logicalLine(containingVisualRow:)` override answering outside `0..<lineCount`,
+    /// or an in-range line whose `firstVisualRow` exceeds the row -- which `compute`
+    /// never consults and this query rejects with `.invalidVisualRowLayout` rather than
+    /// trapping or naming a row that does not exist; the default hook cannot produce
+    /// either), then delegates the row-axis search to `lineAt` over a uniform row axis
     /// and names the located row in both coordinate systems. Adds no new search: one
     /// row-axis search, one `logicalLine(containingVisualRow:)` search
     /// (provider-overridable, binary-search default), one O(1) `firstVisualRow` probe.
@@ -38,7 +43,24 @@ extension ViewportVirtualizer {
         case .line(let location):
             let globalRow = location.lineIndex
             let logicalLine = layout.logicalLine(containingVisualRow: globalRow)
+            // Guards 1 and 2 (slice 55 spec, Decision 4). The default hook cannot
+            // misbehave (binarySearchLogicalLine returns a line in 0..<lineCount whose
+            // firstVisualRow is <= globalRow); an override can, and this is the only
+            // frame that can catch it -- one frame later the array below has been read.
+            // A line outside the range would trap on the provider's array; an in-range
+            // line whose firstVisualRow exceeds the row names no row at all. Both are
+            // .invalidVisualRowLayout, not a trap and not a fabricated location; node
+            // 4's query inherits this by .failure propagation and re-checks neither.
+            // The upper bound (rowInLine < visualRowCount) is deliberately NOT checked
+            // here: it costs a layout-axis probe, and the within-line walk catches it at
+            // the point of use.
+            if logicalLine < 0 || logicalLine >= layout.lineCount {
+                return .failure(.invalidVisualRowLayout)
+            }
             let rowInLine = globalRow - layout.firstVisualRow(ofLine: logicalLine)
+            if rowInLine < 0 {
+                return .failure(.invalidVisualRowLayout)
+            }
             return .row(VisualRowLocation(
                 globalRow: globalRow,
                 logicalLine: logicalLine,

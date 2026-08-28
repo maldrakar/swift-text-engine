@@ -1,6 +1,9 @@
 /// The layout half of the visual-row validation ladder, shared verbatim by
 /// `compute(_:layout:)` and `visualRowAt(y:layout:)` so their accept/reject sets are
-/// equal by construction rather than by inspection (spec Decision 5).
+/// equal AT THE LADDER by construction rather than by inspection (slice 53 spec,
+/// Decision 5). After the ladder the two diverge on exactly one class -- a malformed
+/// `logicalLine(containingVisualRow:)` override -- which `compute` never consults and
+/// `visualRowAt` rejects (slice 55 spec, Decision 4).
 ///
 /// `lineCount < 0` deliberately does NOT live here: it is the first check in BOTH
 /// callers, and each caller's *next* check differs (`compute` validates its input,
