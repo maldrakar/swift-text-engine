@@ -6,8 +6,9 @@ import TextEngineCore
 /// Result-bearing suites cannot see this: the short-circuit changes no row, so a
 /// version that fires on too few rows -- say only when `start == 0` -- leaves every
 /// packing result, every checksum and every result test green while the cost claim in
-/// AGENTS.md ("the last row of any line packs in O(1)") is false. Only a probe count
-/// can read it. Both cases are RED on the packer as shipped before slice 55a.
+/// AGENTS.md ("the last row of every line [packs in O(1)] unless it overflows") is
+/// false. Only a probe count can read it. Both cases are RED on the packer as shipped
+/// before slice 55a.
 final class WrapPackingCountTests: XCTestCase {
     private final class ProbeCounter {
         var columnCountCalls = 0

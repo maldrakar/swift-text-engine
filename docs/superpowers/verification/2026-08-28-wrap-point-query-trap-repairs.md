@@ -9,21 +9,23 @@ ladder; the cursor stores total* (commit 3), `a2007cc` *feat: the packer short-c
 the remaining suffix fits* (commit 4), `f143e96` *docs: the last-row O(1) claim is qualified
 by overflow*, `c384f7b` *refactor: extract the `--wrap-compute` drain body so its purity is
 testable (D-29)* (commit 5), and `58b78f4` *test: pin that the row-axis hook is dispatched
-(D-24)* (commit 6). The eighth commit, `f143e96`, is a review-driven `docs:` commit that
-exists because the Task 5 review produced a **counter-example** to the "the last row of every
-line packs in O(1)" claim: on a line whose tail is an unbreakable run wider than `wrapWidth`,
-`greedyEnd`'s suffix test `total - startOffset <= wrapWidth` does not fire on the last row
-either, the scan runs and falls to the `firstLegal` forced-overflow fallback, and that last
-row costs O(cells). No code line changed — the claim was narrowed with "unless it overflows"
-at four in-repo sites (`AGENTS.md`'s node 1 and node 2 paragraphs,
-`DocumentVisualRowCursor.swift`'s type doc comment, `VisualRowCursor.swift`'s `greedyEnd`
-comment) and two spec lines (305 and 1407). The piece adds **no new public API**: it adds
-five producer guards so a malformed `logicalLine(containingVisualRow:)` override never traps
-(two in `visualRowAt`, two in `DocumentVisualRowCursor.init`, one in the new shared walk
-helper), two behaviour-preserving extractions shared with node 4's query
-(`advanceVisualRows(_:by:)` and `validateWrapLine`), and the `greedyEnd` suffix short-circuit;
-it discharges **D-24** and **D-29**; and it records **nine** drill reds. The ninth commit on
-the branch is this record and the ledger edits themselves.
+(D-24)* (commit 6). The extra, review-driven `docs:` commit `f143e96` — sixth in the order
+above, and the one commit beyond the seven the plan contracted — exists because the Task 5
+review produced a **counter-example** to the "the last row of every line packs in O(1)"
+claim: on a line whose tail is an unbreakable run wider than `wrapWidth`, `greedyEnd`'s
+suffix test `total - startOffset <= wrapWidth` does not fire on the last row either, the scan
+runs and falls to the `firstLegal` forced-overflow fallback, and that last row costs
+O(cells). No code line changed — the claim was narrowed with "unless it overflows" at four
+in-repo sites (`AGENTS.md`'s node 1 and node 2 paragraphs, `DocumentVisualRowCursor.swift`'s
+type doc comment, `VisualRowCursor.swift`'s `greedyEnd` comment) and four spec lines (305,
+770, 1008–1009 and 1408; the latter two in this slice's final-review follow-up). The piece
+adds **no new public API**: it adds five producer guards so a malformed
+`logicalLine(containingVisualRow:)` override never traps (two in `visualRowAt`, two in
+`DocumentVisualRowCursor.init`, one in the new shared walk helper), two behaviour-preserving
+extractions shared with node 4's query (`advanceVisualRows(_:by:)` and `validateWrapLine`),
+and the `greedyEnd` suffix short-circuit; it discharges **D-24** and **D-29**; and it records
+**nine** drill reds. After these eight come the docs commits: this record with the ledger
+edits, then the hosted-proof commit (`624b4d8`) and the final-review docs follow-up.
 
 ## 1. Acceptance criteria owned by this piece
 
@@ -718,7 +720,9 @@ PR-head tuples recorded above.
 - D-17 escalates at this piece's review; D-27 goes into its Candidate options (spec, Scope).
 - The overriding conformer (`OverridingLogicalLineLayout`) is 55b's second count fixture.
 - The spec's narrative lines 778, 810, 872, 1602 and 1810 still say "last row … O(1)"
-  **without** the overflow qualifier `f143e96` added at the six normative sites (four in-repo
-  sites plus spec lines 305 and 1407). Four of the five sit in the decision log and one in
-  AC17's drill-(m) description; all five are historical prose rather than live claims, and
-  they are deferred to the review rather than rewritten here.
+  **without** the overflow qualifier. `f143e96` added it at six normative sites (four
+  in-repo sites plus spec lines 305 and 1408); this slice's final-review follow-up added it
+  at the two remaining prescriptive spec sites, 770 (Decision 12's cost table) and 1008–1009
+  (55b's Component Design cost model), for eight normative sites qualified in total. Four of
+  the five narrative lines sit in the decision log and one in AC17's drill-(m) description;
+  all five are historical prose rather than live claims, and remain deliberately untouched.

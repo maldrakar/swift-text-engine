@@ -315,7 +315,11 @@ deadline as "the slice after 55b". Silence is the one outcome ruled out.
    inherits trap-freedom by `.failure` propagation. The goal is stated at the width it is
    kept: a provider whose `columnCount(inLine:)` disagrees with its own offset storage still
    traps inside the per-line ladder at `columnOffset(inLine:column: count)`, exactly as it
-   does under `columnAt` — that class stays GIGO and is unchanged.
+   does under `columnAt` — that class stays GIGO and is unchanged. And, by Decision 4, the
+   upper bound `rowInLine < visualRowCount(inLine:)` is not checked here either: a too-low
+   `logicalLine(containingVisualRow:)` answer can still make `visualRowAt` return a `.row`
+   naming a row that does not exist in that line, caught by 55b's within-line walk
+   exhaustion at the point of use, not by `visualRowAt` itself.
 
 **Expected scoreboard outcome:** criterion 3 goes **partial → done**. It enumerates three
 analogs and an equivalence oracle; nodes 2 and 3 shipped two, this slice ships the third
@@ -767,7 +771,7 @@ short-circuit returns. On an interior-GIGO `NaN` `startOffset` both forms fall t
 | Located row | Columns scanned to pack it |
 |---|---|
 | The only row of a line that fits `wrapWidth` (every line at `∞`; unwrapped lines at any width) | **0** — `greedyEnd` returns `columnCount` on the suffix check |
-| The **last** row of any line | **0** — same check; its remaining suffix fits by definition |
+| The **last** row of any line | **0** — same check, unless the last row overflows (no legal end fits and the scan falls to the forced-overflow fallback), in which case it scans like an interior row |
 | An interior row *k* of a wrapped line | O(columns from the line's start to the end of row *k*) — the walk packs rows 0…*k* |
 
 So a line that fits packs in O(1), the query's cost class at `∞` equals `pointAt`'s (where
@@ -1007,7 +1011,7 @@ two sources describe the same document.
 **Cost.** `O(log totalRows)` (row-axis search) + `O(log lineCount)`
 (`logicalLine(containingVisualRow:)`, provider-overridable) + **`O(columns scanned up to the
 end of the located row)`** — the packer walk, zero on a line that fits `wrapWidth` and on any
-line's last row (Decision 12's table) — + `O(log cells-in-line)`
+line's last row unless that row overflows (Decision 12's table) — + `O(log cells-in-line)`
 (`columnIndex(containingOffset:inLine:)`, provider-overridable, on the delegating path only)
 + a constant number of O(1) probes on the column axis: **three** in the shared ladder
 (Decision 13), **two per row the cursor yields** (`columnOffset` at the row's start and end,
