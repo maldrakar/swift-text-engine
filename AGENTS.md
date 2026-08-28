@@ -118,7 +118,12 @@ advance sum. At `wrapWidth ≥ the line's total advance` (∞ included) a line p
 to exactly one row equal to the no-wrap column model (per-line equivalence
 oracle). This is per-logical-line packing only — cross-line aggregation, vertical
 stacking, and wrap-aware `compute` are later nodes. O(1) core memory,
-O(cells-in-row) per `next()`.
+O(cells-in-row) per `next()` — except that a row whose remaining suffix fits `wrapWidth`
+is answered in O(1) with no scan (the packer checks `total − startOffset <= wrapWidth`
+before scanning, from the `total` the per-line ladder validated), so a line that fits
+packs in O(1), `∞` included, and so does the **last** row of every line; only the
+interior rows of a wrapped line scan their cells. Pinned by `WrapPackingCountTests`
+(slice 55a).
 
 The **visual-row layer** (node 2) adds cross-line aggregation: `VisualRowLayoutSource` (refines
 `WrapMetricsSource`) is the visual-row axis, mirroring `LineMetricsSource` —
@@ -148,7 +153,14 @@ every line's total advance) bit-identical to the logical-line `compute` over a
 uniform axis, with the streamed rows one-per-line — the vertical-axis mirror of
 node 1's per-line oracle. Reaching the first buffered row of a multi-row line
 costs the documented O(rowInLine) within-line walk (greedy packing is
-sequential); random access inside one line is a later, separate provider node.
+sequential: rows `0…rowInLine−1` are packed, each interior row scanning its cells,
+while a line's last row is O(1) by node 1's suffix short-circuit); random access
+inside one line is a later, separate provider node. The walk is one shared internal
+helper, `advanceVisualRows(_:by:)`, written so node 4's query reuses it rather than
+copying it. A malformed `logicalLine(containingVisualRow:)` override — a start line
+outside `0..<lineCount`, or an in-range line whose `firstVisualRow` exceeds the buffer
+start — makes the cursor **stream nothing** rather than trap (streaming has no failure
+channel; slice 55a).
 
 `ViewportVirtualizer.visualRowAt(y:layout:)` is the **y→row layer** (node 3): the
 wrap-aware `lineAt` analog over the visual-row axis. It runs `compute(_:layout:)`'s

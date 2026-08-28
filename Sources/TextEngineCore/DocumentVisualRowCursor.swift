@@ -2,7 +2,9 @@
 /// visual order. Reuses node 1's per-line `VisualRowCursor` for packing; holds the
 /// provider, so it is generic and O(1) state. Construct via
 /// `ViewportVirtualizer.visualRowGeometry(for:layout:)`. Cost: O(rowInStartLine +
-/// buffer) — the O(rowInStartLine) is the accepted within-line walk (spec fork).
+/// buffer) — the O(rowInStartLine) is the accepted within-line walk (node 2's spec
+/// fork): rows 0…rowInStartLine−1 of the start line are packed, each interior row
+/// scanning its cells, while a line's last row is O(1) (node 1's suffix short-circuit).
 public struct DocumentVisualRowCursor<Layout: VisualRowLayoutSource> {
     private let layout: Layout
     private let rowHeight: Double

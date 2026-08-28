@@ -59,8 +59,20 @@ public struct VisualRowCursor<Metrics: WrapMetricsSource> {
     // — a row wider than wrapWidth). `columnCount` is always a legal end; interior
     // legal ends are columns `c` with `canBreak(beforeColumn: c)`. Relies on the
     // monotone `columnOffset` precondition: once a legal end overflows, every later
-    // one does too, so the walk stops there. O(cells in the row).
+    // one does too, so the walk stops there.
+    //
+    // Cost: O(1) when the remaining suffix fits -- `columnCount` is a legal end and,
+    // under the strictly-increasing contract, every legal end before it fits too, so
+    // the scan would finish at `columnCount` anyway; the short-circuit returns it with
+    // no probe (slice 55 spec, Decision 12). That is every row of a line that fits the
+    // width (∞ included) and the LAST row of every line; only the interior rows of a
+    // wrapped line scan, O(cells in the row). Bit-identical to the scan: both compare
+    // in the same `offset − startOffset <= wrapWidth` form and IEEE subtraction of a
+    // common operand is monotone; on an interior-GIGO NaN startOffset both fall to
+    // `firstLegal`. Pinned by WrapPackingCountTests; the predicate must NOT be narrowed
+    // to `start == 0` -- that keeps every row identical and loses the last-row case.
     private func greedyEnd(from start: Int, startOffset: Double) -> Int {
+        if total - startOffset <= wrapWidth { return columnCount }
         var lastFitting = -1   // largest legal end seen that fits
         var firstLegal = -1    // smallest legal end > start (overflow fallback)
         var c = start + 1
