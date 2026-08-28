@@ -540,7 +540,171 @@ nothing. The portability evidence is the two hosted jobs in §7.
 
 ### PR-head run
 
-<!-- filled in Step 5 -->
+PR **#132** (`slice-55a-wrap-trap-repairs` -> `main`), workflow run
+**33192269902**, read at **step** level — a green job can hide a dead step.
+
+Three jobs, all `success`:
+
+```
+WASM cross-target compile: success
+Host tests and benchmark gate: success
+iOS cross-target compile: success
+```
+
+Counts over the run log:
+
+```
+run=33192269902
+gate=pass lines: 46 (expect 46)
+gate=fail lines: 0 (expect 0)
+Host tests and benchmark gate	Run host tests	2026-08-28T16:56:43.2477044Z 	 Executed 425 tests, with 0 failures (0 unexpected) in 9.833 (9.833) seconds
+hosted checksum tuples: 46 (expect 46)
+```
+
+The hosted `Executed 425 tests, with 0 failures` matches the local count exactly. All 46
+`gate=pass` lines come from the **Host tests and benchmark gate** job, distributed across
+the twelve gate steps — and no mode's summary is printed by more than one step, so the
+"exactly one CI step may print a given mode's summary lines" rule holds and a future
+harvest of this run cannot double-weight any scenario:
+
+```
+   3 Run synthetic benchmark gate
+   3 Run variable-height benchmark gate
+   3 Run variable-height mutation benchmark gate
+   3 Run structural mutation benchmark gate
+   5 Run bulk structural mutation benchmark gate
+   5 Run line query benchmark gate
+   5 Run line geometry query benchmark gate
+   5 Run column query benchmark gate
+   5 Run column geometry query benchmark gate
+   4 Run point query benchmark gate
+   4 Run point geometry query benchmark gate
+   1 Run realistic provider benchmark gate
+```
+
+Every step of every job concluded `success` (the docs-only detector correctly declined this
+PR: `Complete docs-only PR: skipped` in all three jobs, so all three ran the heavy path):
+
+```
+Host tests and benchmark gate | 4 Detect PR change scope: success
+Host tests and benchmark gate | 5 Complete docs-only PR: skipped
+Host tests and benchmark gate | 6 Show toolchain: success
+Host tests and benchmark gate | 7 Run host tests: success
+Host tests and benchmark gate | 8 Run synthetic benchmark gate: success
+Host tests and benchmark gate | 9 Run variable-height benchmark gate: success
+Host tests and benchmark gate | 10 Run variable-height mutation benchmark gate: success
+Host tests and benchmark gate | 11 Run structural mutation benchmark gate: success
+Host tests and benchmark gate | 12 Run bulk structural mutation benchmark gate: success
+Host tests and benchmark gate | 13 Run line query benchmark gate: success
+Host tests and benchmark gate | 14 Run line geometry query benchmark gate: success
+Host tests and benchmark gate | 15 Run column query benchmark gate: success
+Host tests and benchmark gate | 16 Run column geometry query benchmark gate: success
+Host tests and benchmark gate | 17 Run point query benchmark gate: success
+Host tests and benchmark gate | 18 Run point geometry query benchmark gate: success
+Host tests and benchmark gate | 19 Run realistic provider benchmark gate: success
+Host tests and benchmark gate | 20 Run memory shape diagnostic: success
+Host tests and benchmark gate | 21 Run RSS memory observation diagnostic: success
+iOS cross-target compile | 3 Detect PR change scope: success
+iOS cross-target compile | 4 Complete docs-only PR: skipped
+iOS cross-target compile | 5 Show toolchain: success
+iOS cross-target compile | 6 Compile cross-target packages for iOS: success
+WASM cross-target compile | 4 Detect PR change scope: success
+WASM cross-target compile | 5 Complete docs-only PR: skipped
+WASM cross-target compile | 6 Show toolchain: success
+WASM cross-target compile | 7 Compile cross-target packages for WASM: success
+```
+
+**The WASM job's four `result=pass … blocking=true` lines** (two kinds x two packages), and
+the iOS job's own four (two targets x two packages) — the portability evidence the
+`--self-test` in §6 cannot give:
+
+```
+WASM cross-target compile | mode=cross_target_compile target=wasm          package=core      result=pass reason=none blocking=true
+WASM cross-target compile | mode=cross_target_compile target=wasm_embedded package=core      result=pass reason=none blocking=true
+WASM cross-target compile | mode=cross_target_compile target=wasm          package=providers result=pass reason=none blocking=true
+WASM cross-target compile | mode=cross_target_compile target=wasm_embedded package=providers result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_device    package=core      result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_simulator package=core      result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_device    package=providers result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_simulator package=providers result=pass reason=none blocking=true
+```
+
+### Plan-assertion defect #3 (D-2 class) — the "WASM blocking lines" count is not job-scoped
+
+The plan's check
+`echo "WASM blocking lines: $(grep -c 'result=pass.*blocking=true' <run.log>) (expect 4)"`
+greps the **whole run** log, which carries the iOS job's four blocking lines as well as the
+WASM job's four, so it printed `8` where the plan expected `4`. This is a mislabelled
+counter, not a failure: scoped to the WASM job the count is exactly the four
+`wasm`/`wasm_embedded` x `core`/`providers` lines AGENTS.md specifies, and the four extra
+lines are the iOS job's own blocking compiles, which are equally required. Both sets are
+reproduced verbatim above so the number is read rather than inferred. The scoped commands
+are:
+
+```bash
+awk -F'\t' '$1=="WASM cross-target compile" && /result=pass.*blocking=true/' <run.log> | wc -l   # 4
+awk -F'\t' '$1=="iOS cross-target compile"  && /result=pass.*blocking=true/' <run.log> | wc -l   # 4
+```
+
+### The 46 hosted checksum tuples — 55b's hosted baseline
+
+No recent verification record holds the hosted 46 tuples, so per the plan's fallback they
+are recorded here in full for 55b to diff against. Extracted with the D-18 `grep -v` filter
+(`mode=memory_shape`, `mode=memory_observation` removed — a hosted log carries five and
+three of those respectively, and it is that filter that makes the count 46 and the diff
+meaningful):
+
+```
+bulk_structural_mutation|100k_lines_batch_4096	2285022074625
+bulk_structural_mutation|100k_lines_batch_64	36564666309410
+bulk_structural_mutation|1k_lines_batch_64	82740062444
+bulk_structural_mutation|1m_lines_batch_4096	82203678997143
+bulk_structural_mutation|1m_lines_batch_64	1317343499882000
+column_geometry_query|prefixsum_100k	223985600000
+column_geometry_query|prefixsum_1m	839521520640
+column_geometry_query|uniform_100k	267505512960
+column_geometry_query|uniform_1k	160641440000
+column_geometry_query|uniform_1m	799841600000
+column_query|prefixsum_100k	63985600000
+column_query|prefixsum_1m	639841560320
+column_query|uniform_100k	63985556480
+column_query|uniform_1k	641440000
+column_query|uniform_1m	639841600000
+line_geometry_query|balanced_tree_100k	223985600000
+line_geometry_query|balanced_tree_1m	852321495040
+line_geometry_query|uniform_100k	267505512960
+line_geometry_query|uniform_1k	160641440000
+line_geometry_query|uniform_1m	799841600000
+line_query|balanced_tree_100k	63985600000
+line_query|balanced_tree_1m	639841547520
+line_query|uniform_100k	63985556480
+line_query|uniform_1k	641440000
+line_query|uniform_1m	639841600000
+pipeline|100k_lines_80_visible_overscan_5	570448232307200
+pipeline|1k_lines_20_visible_overscan_0	1319670707200
+pipeline|1m_lines_200_visible_overscan_50	18852477646272000
+point_geometry_query|prefixsum_100k	1712152282485110528
+point_geometry_query|prefixsum_1m	5915921755926273280
+point_geometry_query|uniform_100k	4687694617200924928
+point_geometry_query|uniform_1m	6036755761047907072
+point_query|prefixsum_100k	64166280960
+point_query|prefixsum_1m	640022228480
+point_query|uniform_100k	64166237440
+point_query|uniform_1m	640022280960
+realistic_provider|100k_lines_10mb_text	756321289736960
+structural_mutation|100k_lines_80_visible_overscan_5	89494497658324
+structural_mutation|1k_lines_20_visible_overscan_0	200106952336
+structural_mutation|1m_lines_200_visible_overscan_50	3379593298396981
+variable_height_mutation|100k_lines_80_visible_overscan_5	88324286099072
+variable_height_mutation|1k_lines_20_visible_overscan_0	196866548667
+variable_height_mutation|1m_lines_200_visible_overscan_50	3571078666132451
+variable_height|100k_lines_80_visible_overscan_5	101209179008000
+variable_height|1k_lines_20_visible_overscan_0	231017730560
+variable_height|1m_lines_200_visible_overscan_50	3536425156727040
+```
+
+They are **byte-identical to the 46 local tuples** of §6 (`diff` empty), which is the
+stronger form of the expected result: different hardware changes timings, not checksums.
 
 ### Post-merge push run
 
