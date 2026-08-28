@@ -69,7 +69,8 @@ func formatWrapComputeLine(
     drainOperationsPerSample: Int,
     drainP95Nanoseconds: Int64,
     drainP99Nanoseconds: Int64,
-    reindexNanoseconds: Int64
+    reindexNanoseconds: Int64,
+    checksum: Int
 ) -> String {
     "mode=wrap_compute scenario=width_\(widthLabel) width=\(widthLabel) total_rows=\(totalRows)"
         + " compute_operations_per_sample=\(computeOperationsPerSample)"
@@ -87,6 +88,12 @@ func formatWrapComputeLine(
         // exemption reads as a decision and not an oversight. Do not "consolidate" it.
         + " reindex_operations_per_sample=1"
         + " reindex_ns=\(reindexNanoseconds)"
+        // The result-preservation witness (slice 55 spec, Decision 13): every drained
+        // row's endColumn and every computed range's length, folded, over 100 000 lines
+        // at this width. Deterministic under deterministicScrollOffset, so it must be
+        // byte-identical across every edit on this mode's path while the timings move.
+        // Not a latency key: the harvester still sees no bare p95_ns/p99_ns here.
+        + " checksum=\(checksum)"
 }
 
 @available(macOS 13.0, *)
@@ -182,10 +189,9 @@ func runWrapComputeBenchmarks() -> Bool {
         computeSamples.sort()
         drainSamples.sort()
 
-        // Keeps both measured bodies observably live without adding a token to a line the
-        // harvester must keep ignoring -- the same guard the drain body carried before, now
-        // covering compute as well.
-        if computeMeasured.checksum &+ drainMeasured.checksum == Int.min { print("") }
+        // Both measured bodies stay observably live by being PRINTED (the checksum= token
+        // below), which replaced the former `== Int.min` guard in slice 55a.
+        let checksum = computeMeasured.checksum &+ drainMeasured.checksum
 
         // No Foundation in this target: `String(format:)` is unavailable, so format the
         // (always-integral) finite widths via `Int(_:)` rather than importing Foundation.
@@ -199,7 +205,8 @@ func runWrapComputeBenchmarks() -> Bool {
             drainOperationsPerSample: drainOperationsPerSample,
             drainP95Nanoseconds: percentile(drainSamples, numerator: 95, denominator: 100),
             drainP99Nanoseconds: percentile(drainSamples, numerator: 99, denominator: 100),
-            reindexNanoseconds: nanoseconds(reindexElapsed)))
+            reindexNanoseconds: nanoseconds(reindexElapsed),
+            checksum: checksum))
     }
     return true
 }
