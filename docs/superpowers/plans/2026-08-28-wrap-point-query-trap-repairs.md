@@ -2138,7 +2138,7 @@ After merge, repeat for the post-merge **push** run on `main` (`--branch main`),
 | Expected numbers — `--wrap-compute` two baselines + four columns; `--wrap-row-query` checksum; twelve gates; suite; Foundation; memory-shape | 1 (B1, B2, baselines), 2 (C1), 4 (C3), 5 (C4 + prediction), 6 (C5), 3 + 8 (`--wrap-row-query`), 8 (gates, AC13, memory-shape) |
 | Documentation — node 1, node 2, `visualRowAt` paragraphs; three narrowed sites; two doc comments; D-24, D-29 → discharged | 3 (narrowing + `visualRowAt` behaviour), 5 (cost wording, doc comments), 8 (ledger) |
 | Record + hosted proof, D-17 escalation and D-27 candidate at the review | 8 |
-| AC5 (55a half), AC8, AC9, AC10, AC13, AC14 (nine of nineteen), AC16, AC17, AC18 | see the record's AC table (Task 8 Step 3) |
+| AC5 (55a half), AC8, AC9, AC10, AC13, AC14 (nine of twenty: eighteen lettered drills plus D-24's and D-29's; 55b re-runs (d1) through the composite, so its own count of twelve overlaps this one by that drill), AC16, AC17, AC18 | see the record's AC table (Task 8 Step 3) |
 
 Deliberately **not** in this plan (55b's): the `RiggedVisualRowLayout` comment at `VisualRowLayoutTestSupport.swift:49-53`, the `AGENTS.md` node 4 paragraph and flag lists, D-25, D-18's ledger flip (the `grep -v` filter is already used in Task 8 Step 5 so the hosted count reads 46).
 

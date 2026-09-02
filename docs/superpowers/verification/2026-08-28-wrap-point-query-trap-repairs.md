@@ -498,7 +498,15 @@ absent, `git status --short` was empty, and the file diffed clean against `c384f
 
 ## 6. Gates, checksums, memory shape, Foundation, `--wrap-row-query`
 
-Final full check at HEAD `58b78f4`:
+Final full check at HEAD `58b78f4` — the last commit on this branch that carries shipped
+Swift; every later commit is documentation (the one exception is a comment-only line in
+`WrapPackingCountTests.swift`, `d977248`, which changes no behaviour). Re-run at `d977248`
+during the pre-merge validation pass, the same numbers held: `Executed 425 tests, with 0
+failures`, release build green, Foundation scan empty, 46 `gate=pass` / 0 `gate=fail`, the
+46-tuple checksum diff against the hosted baseline of §7 **empty**, `--wrap-compute`
+`181094400 / 143365120 / 115068800` and all four `--wrap-row-query` checksums unchanged,
+`--memory-shape` five times `invariant=pass`, and drill (m) reproduced with exactly one red
+(`testLastRowOfAWrappedLineAddsNoScan`, `3 != 0`) out of 425.
 
 ```
 suite green
@@ -544,6 +552,23 @@ nothing. The portability evidence is the two hosted jobs in §7.
 
 PR **#132** (`slice-55a-wrap-trap-repairs` -> `main`), workflow run
 **33192269902**, read at **step** level — a green job can hide a dead step.
+
+**Which run covers what.** The branch produced more than one PR-head run, because
+documentation commits landed after the code did, and a record naming only the first would
+send a reader to a run that is no longer the head. The full inventory, every one `success`
+at job level:
+
+| run | head | what it adds |
+|---|---|---|
+| `33192269902` | `be0752d` | **the run read at step level below** — `be0752d` is the last commit carrying shipped Swift, so this run covers 100 % of the slice's code |
+| `33192988425` | `624b4d8` | docs only (this record's hosted-proof section) |
+| `33195156738` | `d977248` | docs, plus one comment-only line in `WrapPackingCountTests.swift` |
+| — | the pre-merge fix commit | its run id and the post-merge `push` run are recorded together in **Post-merge push run** below; a record cannot name the run of the commit that contains it |
+
+The step-level read is done on `33192269902` and not repeated for the docs runs: they
+compile and test the same Swift, and the checksum tuples at the end of this section were
+re-derived locally at `d977248` with an empty diff (§6), which is the property the step
+read exists to establish.
 
 Three jobs, all `success`:
 
@@ -714,11 +739,64 @@ stronger form of the expected result: different hardware changes timings, not ch
 read at step level, its counts appended here, and its 46 checksum tuples diffed against the
 PR-head tuples recorded above.
 
-## 8. Standing notes for 55b and the review
+
+## 8. Pre-merge validation pass (2026-09-02)
+
+The branch was re-validated against this record before merge — every claim above re-run
+rather than re-read (§6 carries the numbers). Five documentation defects were found and
+repaired in the commit that carries this section; none touched shipped behaviour, and the
+46 gated checksums, both wrap modes' checksums and the suite count are unchanged by them:
+
+1. **§7 named one PR-head run while the branch had three.** Repaired by the inventory table
+   in §7 — the step-level read stays on `33192269902` (the run covering every Swift commit)
+   and the two later docs runs are named with what each adds.
+2. **§6 read as though `58b78f4` were the head.** Repaired: it now says which commits come
+   after it and why they change nothing, and carries the `d977248` re-run.
+3. **`AGENTS.md`'s `visualRowAt` paragraph over-read its own guards.** It said the query
+   answers `.failure(.invalidVisualRowLayout)` "instead of trapping or naming a row that
+   does not exist"; the parenthetical scoped that to the two *guarded* answers, but a
+   reader takes the sentence whole — and the **third** malformed answer (a line whose
+   `firstVisualRow` sits *below* the row's own line) still returns a `.row` naming a row
+   that does not exist in that line. Spec Goal 6 states the exemption; `AGENTS.md` now does
+   too. The code comment at `WrapPositionQuery.swift:53-55` already did.
+4. **`AGENTS.md` still claimed `Tests/ViewportBenchmarksTests` holds "five files".** It
+   holds thirteen, and this slice added the thirteenth. The spec assigns this repair to
+   55b's Documentation Updates as pre-existing drift; it is taken **here** instead, because
+   55a is the slice that made the number wronger and 55a's own Documentation Updates
+   preamble is the rule being broken ("a shipped claim that is wrong in the tree between
+   two merges is the drift this document exists to prevent"). Repaired as 55b's bullet
+   prescribes — the head-count is dropped, not corrected, since every slice that adds a
+   test file falsifies it. **55b's Documentation Updates bullet for this item is therefore
+   already discharged**; 55b's record should say so rather than re-doing it.
+5. **The plan's drill arithmetic said "nine of nineteen".** Eighteen lettered drills plus
+   D-24's and D-29's is twenty; 55a's nine and 55b's twelve sum to twenty-one because both
+   run `(d1)`. Corrected in the plan.
+
+Two ledger rows were opened by the same pass, both P3, neither a defect in the shipped
+code: **D-31** — `--wrap-compute`'s local columns cannot resolve an effect below this
+host's own state variance (two measurements of `0235e73` differ by up to 2.84x; a third at
+`d977248` reads `width_inf reindex_ns` 5 927 042 against C5's 11 923 958), which is what
+made §4's `reindex_ns` ordering and `compute_*` flatness read as findings, and which node 6
+must confront before promoting a wrap mode through `harvest -> derive`. **D-32** —
+`advanceVisualRows`' *rule* is pinned but its *call site* is not: reverting
+`DocumentVisualRowCursor.init` to the inline `for _ in 0..<rowInStartLine` loop leaves all
+425 tests green, because with guard 4 live the two forms are behaviourally identical.
+Scheduled to 55b, where a second caller makes the property observable.
+
+## 9. Standing notes for 55b and the review
 
 - 55b compares its `--wrap-compute` run against column **C5**.
 - D-17 escalates at this piece's review; D-27 goes into its Candidate options (spec, Scope).
 - The overriding conformer (`OverridingLogicalLineLayout`) is 55b's second count fixture.
+- **D-32 is scheduled to 55b** and it is not new apparatus: the round-trip test AC8 already
+  requires discharges it, *provided* both sides are driven through `advanceVisualRows`.
+  Say so in 55b's record rather than leaving it implicit (§8).
+- **55b's `AGENTS.md` "five files" bullet is already done** — taken in 55a's pre-merge pass
+  (§8), by dropping the head-count as that bullet prescribes. 55b re-states it as discharged;
+  it does not re-do it.
+- **D-31 is node 6's problem, not 55b's**, but 55b runs `--wrap-compute` once against C5 and
+  calls a movement a finding — read that comparison against D-31's measured 2.84x host
+  spread before filing anything as a regression.
 - The spec's narrative lines 778, 810, 872, 1602 and 1810 still say "last row … O(1)"
   **without** the overflow qualifier. `f143e96` added it at six normative sites (four
   in-repo sites plus spec lines 305 and 1408); this slice's final-review follow-up added it

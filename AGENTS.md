@@ -172,7 +172,12 @@ diverge on one class, a malformed `logicalLine(containingVisualRow:)` override (
 outside `0..<lineCount`, or an in-range line whose `firstVisualRow` exceeds the row),
 which `compute` never consults and `visualRowAt` rejects with
 `.failure(.invalidVisualRowLayout)` instead of trapping or naming a row that does not
-exist (slice 55a; the default hook cannot produce either) — then delegates the row-axis search
+exist (slice 55a; the default hook cannot produce either). The **upper** bound
+`rowInLine < visualRowCount(inLine:)` is deliberately not checked — it costs a
+layout-axis probe — so a third malformed answer, a line whose `firstVisualRow` is
+*below* the row's own line, still yields a `.row` naming a row that does not exist in
+that line; it is caught by the within-line walk at the point of use, not here (spec
+Goal 6). Then it delegates the row-axis search
 to `lineAt` over `UniformLineMetrics(totalRows, rowHeight)` and names the located row
 in **both** coordinate systems: `globalRow` (the index space `compute(_:layout:)`
 ranges over) plus `logicalLine`/`rowInLine` (what `VisualRow` and
@@ -198,8 +203,9 @@ within-row fraction — is a later companion, on the `lineAt`→`lineGeometryAt`
   live here, NOT in the core.
 - `Tests/TextEngineCoreTests` — XCTest only. (`swift test` also prints a
   "0 tests in 0 suites" line for the empty Swift Testing harness — not a failure.)
-- `Tests/ViewportBenchmarksTests` — the benchmark target's first test target,
-  holding five files.
+- `Tests/ViewportBenchmarksTests` — the benchmark target's first test target. It
+  holds the guards below; the head-count is deliberately not stated, because every
+  slice that adds a test file falsifies it.
   `GateLogicTests.swift` unit-tests the gate pass/fail logic itself (band
   boundaries, `budget_exceeded` vs `budget_stale`) against synthetic
   `BenchmarkSummary` values, independent of any hosted timing.
