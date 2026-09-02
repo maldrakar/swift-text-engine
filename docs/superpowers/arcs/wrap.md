@@ -196,6 +196,46 @@ cell), the last analog on criterion 3's list); first genuine fork remains node 8
 slice-53 review and deferred by user call at slice 54's selection, so it is one slice overdue,
 and the arc cannot afford consecutive no-criterion slices.
 
+Map pass 2026-09-03 (Slice 55a review): Slice 55a consumed **no map node**, and unlike the
+process slice 48, the debt slice 51 and the calibration slices 52/54, that was **planned, not
+discovered** — the slice-55 design splits node 4 into `55a` (repairs on shipped node-2/node-3
+code) and `55b` (the query proper), and only 55b marks the node `done`. Node 4 therefore stays
+`pending`; nodes 5-9 and fork V stand unrevised and un-relearned.
+
+What 55a taught, and what the map absorbs: (a) **node 1's packer is cheaper than the map
+assumed** — a row whose remaining suffix fits the width is answered in O(1) with no scan, so a
+line that fits packs in O(1) (∞ included) and so does the **last** row of every line *unless it
+overflows*; only the interior rows of a wrapped line, and an overflowing last row, scan their
+cells. The within-line walk node 2 forked on is correspondingly cheaper but **not** shorter: it
+still packs rows 0…k−1 to reach row k, so Non-Goal 4's random-access provider seam is
+undiminished and, after this slice, is the *only* thing that would change it. (b) **The
+`logicalLine(containingVisualRow:)` hook had two consumers and no range check at either**; both
+now guard, and the two answer a detected lie differently on purpose — `visualRowAt` returns
+`.failure(.invalidVisualRowLayout)`, `DocumentVisualRowCursor` streams nothing, because
+streaming has no failure channel. `compute(_:layout:)` never consults the hook, so node 3's
+"same accept/reject set" claim is now scoped to the **shared ladder** in all three of its
+places. (c) The **upper** bound `rowInLine < visualRowCount(inLine:)` is still unchecked by
+design, so a too-low hook answer still names a row that does not exist in its line — 55b's
+walk exhaustion is what catches it, and that is now stated in `AGENTS.md` as well as the spec.
+
+What it changed for **node 6**, for the fourth consecutive slice: **D-31** records that
+`--wrap-compute`'s *local* columns cannot resolve an effect below this host's own state
+variance — two measurements of the same commit differed by up to **2.84x**, which is why the
+slice's own recorded `reindex_ns` ordering and `compute_*` flatness came out as findings rather
+than confirmations. `harvest -> derive` never re-measures, so node 6 must decide what evidence
+it will accept before its first harvest. **D-33** is sharper still: `--wrap-compute`'s
+`checksum=` — the witness both Decision 12 and Decision 13 rest their result-preservation
+argument on — has no completeness pin and no recorded red, while its two sibling checksums in
+the same test target have both. D-31 and D-33 join D-30, D-28 and D-20/D-21 on node 6's reading
+list, which is now five rows long and should be read as a *precondition set*, not a backlog.
+
+Next step is **topological**: node 4's second half, `55b`. It is not a fork — the split is
+ratified in the slice-55 design and half a split is the one outcome that design rejects. Lean
+and selection: **55b**. What this review does route to the user is orthogonal to the map: three
+open P2s (D-9, D-17, D-27) are at or past the escalation threshold and need a schedule-or-defer
+call, with slice **56** the natural home for the infrastructure slice they add up to. First
+genuine fork remains node 8 (host order) / fork V.
+
 ## Decision log
 
 - 2026-07-20 — User chose the soft-wrap arc over `pointOf(line:column:)`
