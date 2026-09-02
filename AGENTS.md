@@ -118,7 +118,13 @@ advance sum. At `wrapWidth ≥ the line's total advance` (∞ included) a line p
 to exactly one row equal to the no-wrap column model (per-line equivalence
 oracle). This is per-logical-line packing only — cross-line aggregation, vertical
 stacking, and wrap-aware `compute` are later nodes. O(1) core memory,
-O(cells-in-row) per `next()`.
+O(cells-in-row) per `next()` — except that a row whose remaining suffix fits `wrapWidth`
+is answered in O(1) with no scan (the packer checks `total − startOffset <= wrapWidth`
+before scanning, from the `total` the per-line ladder validated), so a line that fits
+packs in O(1), `∞` included, and so does the **last** row of every line unless it
+overflows (no legal end fits, and the scan falls to the forced-overflow fallback);
+only the interior rows of a wrapped line, and an overflowing last row, scan their
+cells. Pinned by `WrapPackingCountTests` (slice 55a).
 
 The **visual-row layer** (node 2) adds cross-line aggregation: `VisualRowLayoutSource` (refines
 `WrapMetricsSource`) is the visual-row axis, mirroring `LineMetricsSource` —
@@ -148,12 +154,30 @@ every line's total advance) bit-identical to the logical-line `compute` over a
 uniform axis, with the streamed rows one-per-line — the vertical-axis mirror of
 node 1's per-line oracle. Reaching the first buffered row of a multi-row line
 costs the documented O(rowInLine) within-line walk (greedy packing is
-sequential); random access inside one line is a later, separate provider node.
+sequential: rows `0…rowInLine−1` are packed, each interior row scanning its cells,
+while a line's last row is O(1) by node 1's suffix short-circuit unless it
+overflows, in which case it scans like an interior row); random access
+inside one line is a later, separate provider node. The walk is one shared internal
+helper, `advanceVisualRows(_:by:)`, written so node 4's query reuses it rather than
+copying it. A malformed `logicalLine(containingVisualRow:)` override — a start line
+outside `0..<lineCount`, or an in-range line whose `firstVisualRow` exceeds the buffer
+start — makes the cursor **stream nothing** rather than trap (streaming has no failure
+channel; slice 55a).
 
 `ViewportVirtualizer.visualRowAt(y:layout:)` is the **y→row layer** (node 3): the
 wrap-aware `lineAt` analog over the visual-row axis. It runs `compute(_:layout:)`'s
 layout ladder — the *same* extracted helper, so the two entry points accept and
-reject exactly the same layouts by construction — then delegates the row-axis search
+reject exactly the same layouts **at the ladder** by construction; after it they
+diverge on one class, a malformed `logicalLine(containingVisualRow:)` override (a line
+outside `0..<lineCount`, or an in-range line whose `firstVisualRow` exceeds the row),
+which `compute` never consults and `visualRowAt` rejects with
+`.failure(.invalidVisualRowLayout)` instead of trapping or naming a row that does not
+exist (slice 55a; the default hook cannot produce either). The **upper** bound
+`rowInLine < visualRowCount(inLine:)` is deliberately not checked — it costs a
+layout-axis probe — so a third malformed answer, a line whose `firstVisualRow` is
+*below* the row's own line, still yields a `.row` naming a row that does not exist in
+that line; it is caught by the within-line walk at the point of use, not here (spec
+Goal 6). Then it delegates the row-axis search
 to `lineAt` over `UniformLineMetrics(totalRows, rowHeight)` and names the located row
 in **both** coordinate systems: `globalRow` (the index space `compute(_:layout:)`
 ranges over) plus `logicalLine`/`rowInLine` (what `VisualRow` and
@@ -179,8 +203,9 @@ within-row fraction — is a later companion, on the `lineAt`→`lineGeometryAt`
   live here, NOT in the core.
 - `Tests/TextEngineCoreTests` — XCTest only. (`swift test` also prints a
   "0 tests in 0 suites" line for the empty Swift Testing harness — not a failure.)
-- `Tests/ViewportBenchmarksTests` — the benchmark target's first test target,
-  holding five files.
+- `Tests/ViewportBenchmarksTests` — the benchmark target's first test target. It
+  holds the guards below; the head-count is deliberately not stated, because every
+  slice that adds a test file falsifies it.
   `GateLogicTests.swift` unit-tests the gate pass/fail logic itself (band
   boundaries, `budget_exceeded` vs `budget_stale`) against synthetic
   `BenchmarkSummary` values, independent of any hosted timing.

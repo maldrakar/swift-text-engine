@@ -2,7 +2,10 @@
 /// visual order. Reuses node 1's per-line `VisualRowCursor` for packing; holds the
 /// provider, so it is generic and O(1) state. Construct via
 /// `ViewportVirtualizer.visualRowGeometry(for:layout:)`. Cost: O(rowInStartLine +
-/// buffer) — the O(rowInStartLine) is the accepted within-line walk (spec fork).
+/// buffer) — the O(rowInStartLine) is the accepted within-line walk (node 2's spec
+/// fork): rows 0…rowInStartLine−1 of the start line are packed, each interior row
+/// scanning its cells, while a line's last row is O(1) (node 1's suffix short-circuit)
+/// unless it overflows, in which case it scans like an interior row.
 public struct DocumentVisualRowCursor<Layout: VisualRowLayoutSource> {
     private let layout: Layout
     private let rowHeight: Double
@@ -25,10 +28,36 @@ public struct DocumentVisualRowCursor<Layout: VisualRowLayoutSource> {
             return
         }
         let startLine = layout.logicalLine(containingVisualRow: range.bufferStart)
+        // Guard 3 (slice 55 spec, Decision 4). The default hook cannot answer outside
+        // 0..<lineCount; an override can, and `firstVisualRow(ofLine:)` below would trap
+        // on it. Streaming has no failure channel, so the cursor takes the terminal state
+        // it already has and streams nothing -- not the line from row 0, not the next
+        // line; both are plausible-looking wrong answers.
+        if startLine < 0 || startLine >= layout.lineCount {
+            self.currentLine = layout.lineCount
+            self.inner = nil
+            self.remaining = 0
+            return
+        }
         let rowInStartLine = range.bufferStart - layout.firstVisualRow(ofLine: startLine)
+        // Guard 4: an in-range line whose firstVisualRow exceeds bufferStart -- the other
+        // way an override can lie -- makes this negative, and the walk would trap on its
+        // range. Same terminal state.
+        if rowInStartLine < 0 {
+            self.currentLine = layout.lineCount
+            self.inner = nil
+            self.remaining = 0
+            return
+        }
         self.currentLine = startLine
         self.inner = Self.makeInner(line: startLine, layout: layout, wrapWidth: wrapWidth)
-        for _ in 0..<rowInStartLine { _ = inner?.next() }   // accepted O(rowInLine) walk
+        // The accepted O(rowInLine) walk, through the helper node 4's query shares. A nil
+        // `inner` (a malformed line, GIGO -- see makeInner) keeps its shipped meaning:
+        // there is nothing to walk.
+        if var cursor = inner {
+            _ = advanceVisualRows(&cursor, by: rowInStartLine)
+            inner = cursor
+        }
     }
 
     private static func makeInner(line: Int, layout: Layout, wrapWidth: Double) -> VisualRowCursor<Layout>? {
@@ -60,6 +89,28 @@ public struct DocumentVisualRowCursor<Layout: VisualRowLayoutSource> {
             inner = Self.makeInner(line: currentLine, layout: layout, wrapWidth: wrapWidth)
         }
     }
+}
+
+/// Advances `cursor` by `k` rows and returns the result of the k-th `next()` call: `nil`
+/// if `k <= 0` (a negative `k` never forms a range) or if any of the `k` calls returned
+/// `nil` -- it stops at that call rather than spinning the rest -- and row `k - 1`
+/// otherwise. NOT the last non-nil row seen along the way: node 4's `visualPointAt`
+/// relies on `nil` meaning "the walk ran out before the row it asked for" (spec
+/// Decision 4).
+///
+/// `inout` on purpose. `VisualRowCursor` is a struct; a by-value helper would advance a
+/// copy and leave the caller's cursor where it was -- a mutation that compiles and passes
+/// a one-row test. Shared by `DocumentVisualRowCursor.init` (k = rowInStartLine, return
+/// discarded) and `visualPointAt` (k = rowInLine + 1, return kept), so the two agree on
+/// "row k of line L" by construction rather than by two tests agreeing.
+func advanceVisualRows<M: WrapMetricsSource>(_ cursor: inout VisualRowCursor<M>, by k: Int) -> VisualRow? {
+    if k <= 0 { return nil }
+    var last: VisualRow? = nil
+    for _ in 0..<k {
+        guard let row = cursor.next() else { return nil }
+        last = row
+    }
+    return last
 }
 
 extension ViewportVirtualizer {

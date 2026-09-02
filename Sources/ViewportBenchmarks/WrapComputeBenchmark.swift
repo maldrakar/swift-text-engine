@@ -69,7 +69,8 @@ func formatWrapComputeLine(
     drainOperationsPerSample: Int,
     drainP95Nanoseconds: Int64,
     drainP99Nanoseconds: Int64,
-    reindexNanoseconds: Int64
+    reindexNanoseconds: Int64,
+    checksum: Int
 ) -> String {
     "mode=wrap_compute scenario=width_\(widthLabel) width=\(widthLabel) total_rows=\(totalRows)"
         + " compute_operations_per_sample=\(computeOperationsPerSample)"
@@ -87,6 +88,27 @@ func formatWrapComputeLine(
         // exemption reads as a decision and not an oversight. Do not "consolidate" it.
         + " reindex_operations_per_sample=1"
         + " reindex_ns=\(reindexNanoseconds)"
+        // The result-preservation witness (slice 55 spec, Decision 13): every drained
+        // row's endColumn and every computed range's length, folded, over 100 000 lines
+        // at this width. Deterministic under deterministicScrollOffset, so it must be
+        // byte-identical across every edit on this mode's path while the timings move.
+        // Not a latency key: the harvester still sees no bare p95_ns/p99_ns here.
+        + " checksum=\(checksum)"
+}
+
+/// The `--wrap-compute` drain body, one operation: stream the buffer range through
+/// `visualRowGeometry` and fold every row's `endColumn`. A function rather than a
+/// closure so `WrapComputeDrainTests` can drive it through a counting layout and assert
+/// it performs no `compute(_:layout:)` (D-29) -- witnessed by zero
+/// `firstVisualRow(ofLine: lineCount)` probes, which every compute makes and the drain
+/// path structurally never does. The drain ranges are built outside the clock by the
+/// caller (slice 54 spec, Decision 4); computing one in here would make drain_p95_ns
+/// measure compute+drain and gate node 6 on the wrong quantity.
+func drainVisualRows<Layout: VisualRowLayoutSource>(_ range: VirtualRange, layout: Layout) -> Int {
+    var cursor = ViewportVirtualizer.visualRowGeometry(for: range, layout: layout)
+    var sink = 0
+    while let geometry = cursor.next() { sink &+= geometry.row.endColumn }
+    return sink
 }
 
 @available(macOS 13.0, *)
@@ -170,11 +192,7 @@ func runWrapComputeBenchmarks() -> Bool {
         let drainMeasured = amortisedSamples(
             iterations: iterations, operationsPerSample: drainOperationsPerSample
         ) { operation in
-            var cursor = ViewportVirtualizer.visualRowGeometry(
-                for: drainRanges[operation % drainRangeCount], layout: layout)
-            var sink = 0
-            while let geometry = cursor.next() { sink &+= geometry.row.endColumn }
-            return sink
+            drainVisualRows(drainRanges[operation % drainRangeCount], layout: layout)
         }
 
         var computeSamples = computeMeasured.samples
@@ -182,10 +200,9 @@ func runWrapComputeBenchmarks() -> Bool {
         computeSamples.sort()
         drainSamples.sort()
 
-        // Keeps both measured bodies observably live without adding a token to a line the
-        // harvester must keep ignoring -- the same guard the drain body carried before, now
-        // covering compute as well.
-        if computeMeasured.checksum &+ drainMeasured.checksum == Int.min { print("") }
+        // Both measured bodies stay observably live by being PRINTED (the checksum= token
+        // below), which replaced the former `== Int.min` guard in slice 55a.
+        let checksum = computeMeasured.checksum &+ drainMeasured.checksum
 
         // No Foundation in this target: `String(format:)` is unavailable, so format the
         // (always-integral) finite widths via `Int(_:)` rather than importing Foundation.
@@ -199,7 +216,8 @@ func runWrapComputeBenchmarks() -> Bool {
             drainOperationsPerSample: drainOperationsPerSample,
             drainP95Nanoseconds: percentile(drainSamples, numerator: 95, denominator: 100),
             drainP99Nanoseconds: percentile(drainSamples, numerator: 99, denominator: 100),
-            reindexNanoseconds: nanoseconds(reindexElapsed)))
+            reindexNanoseconds: nanoseconds(reindexElapsed),
+            checksum: checksum))
     }
     return true
 }

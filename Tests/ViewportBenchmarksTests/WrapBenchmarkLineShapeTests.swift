@@ -51,7 +51,7 @@ final class WrapBenchmarkLineShapeTests: XCTestCase {
             widthLabel: "40", totalRows: 200_000,
             computeOperationsPerSample: 256, computeP95Nanoseconds: 210, computeP99Nanoseconds: 260,
             drainOperationsPerSample: 16, drainP95Nanoseconds: 4_100, drainP99Nanoseconds: 5_200,
-            reindexNanoseconds: 61_000_000)
+            reindexNanoseconds: 61_000_000, checksum: 987_654)
 
         XCTAssertEqual(value("mode", in: line), "wrap_compute")
         // scenario= is what both consumers group on (`mode|scenario`); the line carried only
@@ -69,6 +69,11 @@ final class WrapBenchmarkLineShapeTests: XCTestCase {
         // No gate can be derived from p95 alone: node 6 needs both statistics.
         XCTAssertEqual(value("drain_p99_ns", in: line), "5200")
         XCTAssertEqual(value("reindex_ns", in: line), "61000000")
+        // Slice 55a commit 0: the result-preservation witness for every edit on this
+        // mode's path (spec Decision 13). Folds the compute and drain checksums the
+        // anti-dead-code guard used to hold; must be byte-identical across every column
+        // of the --wrap-compute record.
+        XCTAssertEqual(value("checksum", in: line), "987654")
 
         let keys = tokenKeys(line)
         XCTAssertFalse(keys.contains("p95_ns"), "bare p95_ns would make this line harvestable")
