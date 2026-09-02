@@ -37,7 +37,7 @@ edits, then the hosted-proof commit (`624b4d8`) and the final-review docs follow
 | 10 (D-29) | **Discharged** — `WrapComputeDrainTests` asserts zero `firstVisualRow(ofLine: lineCount)` probes across the drain body with a non-vacuous witness call; a `compute` placed inside the body reddens it | §5 |
 | 13 (Foundation scan, suite, release build, gated checksums) | **Met** — Foundation scan empty, `Executed 425 tests, with 0 failures`, release build green, 46 gated checksums byte-identical to the pre-branch baseline | §6 |
 | 14 (recorded reds: nine in 55a) | **Met** — (d1), (f1), (f2), (f3), (f4), (l), (m), D-24 (two sites), D-29, each with its observed line | §5 |
-| 16 (hosted evidence, both runs) | **PR-head half met** at step level with the run id; the post-merge push half is filled after the user merges | §7 |
+| 16 (hosted evidence, both runs) | **Met, both halves** at step level with run ids — PR-head `33682449259` (final head `21e4d5a`) and post-merge push `33683089074` (`ccbd13e`), three jobs each, 46 `gate=pass` / 0 `gate=fail` each, `Executed 425 tests, with 0 failures` each, and the two runs' 46 checksum tuples byte-identical to each other and to the local set | §7 |
 | 17 (Decision 12, taken) | **Taken** — the short-circuit is `if total - startOffset <= wrapWidth { return columnCount }` in `greedyEnd`, reading `total` from stored state; both O(1) cases pinned red-first by `WrapPackingCountTests`; drill (l)'s inversion reddens `WrapPackingTests`; drill (m)'s narrowing reddens only the last-row pin; `--wrap-compute` recorded on all three widths and all three token families with every deviation recorded as a FINDING | §4, §5 |
 | 18 (Decision 13, taken) | **Taken** — `validateWrapLine` is one internal function, `visualRows` a wrapper with unchanged signature/return type/probe order/failures, `VisualRowCursor` stores `total` through its `internal` init, no public type gains a field; the named suites pass **unedited**; the `wrap_compute` line prints `checksum=`, pinned in `WrapBenchmarkLineShapeTests`; both wrap modes' checksums are byte-identical across the extraction commit and across the Decision 12 commit | §2, §4 |
 
@@ -563,12 +563,13 @@ at job level:
 | `33192269902` | `be0752d` | **the run read at step level below** — `be0752d` is the last commit carrying shipped Swift, so this run covers 100 % of the slice's code |
 | `33192988425` | `624b4d8` | docs only (this record's hosted-proof section) |
 | `33195156738` | `d977248` | docs, plus one comment-only line in `WrapPackingCountTests.swift` |
-| — | the pre-merge fix commit | its run id and the post-merge `push` run are recorded together in **Post-merge push run** below; a record cannot name the run of the commit that contains it |
+| `33682449259` | `21e4d5a` | the pre-merge validation pass (§8) — the branch's **final** PR-head run, read at step level under **The final PR-head run** below; a record cannot name the run of the commit that contains it, so this row was filled by the post-merge proof commit |
 
-The step-level read is done on `33192269902` and not repeated for the docs runs: they
-compile and test the same Swift, and the checksum tuples at the end of this section were
-re-derived locally at `d977248` with an empty diff (§6), which is the property the step
-read exists to establish.
+The step-level read is done on `33192269902` and on the two runs that anchor the proof —
+the final PR-head `33682449259` and the post-merge push `33683089074`, both below. It is
+not repeated for the two intermediate docs runs: they compile and test the same Swift, and
+the checksum tuples at the end of this section were re-derived locally at `d977248` with an
+empty diff (§6), which is the property the step read exists to establish.
 
 Three jobs, all `success`:
 
@@ -735,9 +736,103 @@ stronger form of the expected result: different hardware changes timings, not ch
 
 ### Post-merge push run
 
-**Filled after merge** — the user merges the PR; the post-merge `push` run on `main` is then
-read at step level, its counts appended here, and its 46 checksum tuples diffed against the
-PR-head tuples recorded above.
+PR **#132** merged 2026-09-02 as merge commit **`ccbd13e`**; the post-merge `push` run on
+`main` is **33683089074**, read at **step** level — the Slice 16 lesson: a green job can
+hide a dead step.
+
+This is the run that anchors the proof. The PR-head run proves the *branch* compiled and
+gated; only the push run proves the code **as merged into `main`** does, and the two are
+different trees whenever a merge commit exists — as one does here.
+
+Three jobs, all `success`:
+
+```
+iOS cross-target compile: success
+WASM cross-target compile: success
+Host tests and benchmark gate: success
+```
+
+Counts over the run log:
+
+```
+run=33683089074  head_sha=ccbd13e  event=push  branch=main  conclusion=success
+gate=pass lines: 46 (expect 46)
+gate=fail lines: 0 (expect 0)
+Host tests and benchmark gate	Run host tests	2026-09-02T21:05:59Z 	 Executed 425 tests, with 0 failures (0 unexpected) in 9.178 (9.178) seconds
+push-run checksum tuples: 46 (expect 46)
+```
+
+Every step of the host job concluded `success`; the one non-`success` step in each of the
+three jobs is `Complete docs-only PR: skipped`, which is the detector correctly declining a
+PR that carries Swift — so all three jobs ran the heavy path:
+
+```
+ 1 Set up job: success                     12 Run bulk structural mutation gate: success
+ 2 Initialize containers: success          13 Run line query benchmark gate: success
+ 3 Check out repository: success           14 Run line geometry query gate: success
+ 4 Detect PR change scope: success         15 Run column query benchmark gate: success
+ 5 Complete docs-only PR: skipped          16 Run column geometry query gate: success
+ 6 Show toolchain: success                 17 Run point query benchmark gate: success
+ 7 Run host tests: success                 18 Run point geometry query gate: success
+ 8 Run synthetic benchmark gate: success   19 Run realistic provider gate: success
+ 9 Run variable-height gate: success       20 Run memory shape diagnostic: success
+10 Run variable-height mutation: success   21 Run RSS memory observation: success
+11 Run structural mutation gate: success
+```
+
+**Exactly one step prints each mode's summary** — the `AGENTS.md` rule that keeps a future
+harvest of this run from double-weighting any scenario in `median()`. Read from the raw
+per-step logs, not from the concatenated stream, so the attribution is the runner's own:
+
+```
+   3 8_Run synthetic benchmark gate              5 15_Run column query benchmark gate
+   3 9_Run variable-height benchmark gate        5 16_Run column geometry query benchmark gate
+   3 10_Run variable-height mutation gate        4 17_Run point query benchmark gate
+   3 11_Run structural mutation gate             4 18_Run point geometry query benchmark gate
+   5 12_Run bulk structural mutation gate        1 19_Run realistic provider benchmark gate
+   5 13_Run line query benchmark gate
+   5 14_Run line geometry query benchmark gate
+```
+
+The WASM job's four `result=pass … blocking=true` lines (two kinds x two packages) and the
+iOS job's own four (two targets x two packages) — the portability evidence no `--self-test`
+can give, counted **job-scoped** so the iOS four are not miscounted as the WASM four (the
+plan-assertion defect #3 recorded above):
+
+```
+WASM cross-target compile | mode=cross_target_compile target=wasm          package=core      result=pass reason=none blocking=true
+WASM cross-target compile | mode=cross_target_compile target=wasm_embedded package=core      result=pass reason=none blocking=true
+WASM cross-target compile | mode=cross_target_compile target=wasm          package=providers result=pass reason=none blocking=true
+WASM cross-target compile | mode=cross_target_compile target=wasm_embedded package=providers result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_device    package=core      result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_simulator package=core      result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_device    package=providers result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_simulator package=providers result=pass reason=none blocking=true
+```
+
+### The checksum diff — three trees, one set of 46 tuples
+
+The 46 tuples of the post-merge run were extracted with the same D-18 `grep -v` filter and
+diffed **twice**, both empty:
+
+```
+diff <push-run 33683089074 tuples> <PR-head run 33682449259 tuples>   -> empty
+diff <push-run 33683089074 tuples> <local tuples at d977248>          -> empty
+```
+
+So one set of 46 checksums holds across hosted Linux x86_64 at the merge commit, hosted
+Linux x86_64 at the branch head, and local Apple silicon — which is the property the
+baseline diff exists to establish: different hardware and different trees change timings,
+never results. AC13 and AC16 are both closed on this evidence.
+
+### The final PR-head run
+
+The pre-merge validation pass (§8) added one commit after the runs §7 opened with, so the
+branch's **final** PR-head run is **33682449259** (`21e4d5a`). Read at step level like the
+push run: three jobs `success`, `Complete docs-only PR: skipped` in all three, 46
+`gate=pass` / 0 `gate=fail`, `Executed 425 tests, with 0 failures (0 unexpected) in 6.663`,
+the same one-step-per-mode distribution, the same 4 + 4 blocking compile lines, and 46
+checksum tuples identical to the push run's. This closes the inventory table's last row.
 
 
 ## 8. Pre-merge validation pass (2026-09-02)
