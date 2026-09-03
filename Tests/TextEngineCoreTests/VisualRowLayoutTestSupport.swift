@@ -48,8 +48,12 @@ struct TestVisualRowLayout: VisualRowLayoutSource {
 
 /// Hand-riggable `VisualRowLayoutSource` for validation-ladder tests: aggregates are set
 /// directly (so `firstVisualRow(0)`, `totalRows`, `rowHeight`, `wrapWidth`, `lineCount`
-/// can be made malformed). Column metrics are stubbed — `compute(_:layout:)` never reads
-/// them (only the cursor does, and validation tests build no cursor).
+/// can be made malformed). Column metrics are stubbed as a BLANK LINE (`columnCount == 0`,
+/// `columnOffset == 0`): `compute(_:layout:)` never reads them at all, and `visualRowAt`
+/// does not either. `visualPointAt` is the first query that does — it builds the per-line
+/// cursor — so on a rigged layout it sees one packed `[0, 0)` row per line. That is not a
+/// limitation but the fixture for `WrapPointQueryValidationTests`' walk-exhaustion case: a
+/// prefix sum claiming more rows than the packer produces.
 struct RiggedVisualRowLayout: VisualRowLayoutSource {
     let lineCount: Int
     let rowHeight: Double
@@ -99,5 +103,38 @@ struct OverridingLogicalLineLayout: VisualRowLayoutSource {
     func logicalLine(containingVisualRow g: Int) -> Int {
         log.logicalLineCalls.append(g)
         return answer(g)
+    }
+}
+
+/// Records every `columnIndex(containingOffset:inLine:)` dispatch made through an
+/// `OverridingColumnIndexLayout`.
+final class ColumnHookLog {
+    var offsets: [Double] = []
+    var lines: [Int] = []
+    var callCount: Int { offsets.count }
+}
+
+/// A `TestVisualRowLayout` whose COLUMN-inverse hook is overridden with the correct
+/// answer, every call logged. The mirror of `OverridingLogicalLineLayout` on the other
+/// axis, and needed for the same two reasons (slice 55 spec, Testing Strategy): only an
+/// overriding conformer can count "exactly one `columnIndex` call", and only an
+/// overriding conformer can show ZERO calls on a path that must not dispatch — the
+/// default hook's probes are indistinguishable from the ladder's own.
+struct OverridingColumnIndexLayout: VisualRowLayoutSource {
+    let base: TestVisualRowLayout
+    let log: ColumnHookLog
+
+    var lineCount: Int { base.lineCount }
+    var rowHeight: Double { base.rowHeight }
+    var wrapWidth: Double { base.wrapWidth }
+    func columnCount(inLine line: Int) -> Int { base.columnCount(inLine: line) }
+    func columnOffset(inLine line: Int, column: Int) -> Double { base.columnOffset(inLine: line, column: column) }
+    func canBreak(beforeColumn column: Int, inLine line: Int) -> Bool { base.canBreak(beforeColumn: column, inLine: line) }
+    func visualRowCount(inLine line: Int) -> Int { base.visualRowCount(inLine: line) }
+    func firstVisualRow(ofLine line: Int) -> Int { base.firstVisualRow(ofLine: line) }
+    func columnIndex(containingOffset x: Double, inLine line: Int) -> Int {
+        log.offsets.append(x)
+        log.lines.append(line)
+        return base.columnIndex(containingOffset: x, inLine: line)
     }
 }

@@ -16,6 +16,7 @@ enum BenchmarkMode: CaseIterable {
     case memoryObservation
     case wrapCompute
     case wrapRowQuery
+    case wrapPointQuery
 
     var outputName: String {
         switch self {
@@ -53,6 +54,8 @@ enum BenchmarkMode: CaseIterable {
             return "wrap_compute"
         case .wrapRowQuery:
             return "wrap_row_query"
+        case .wrapPointQuery:
+            return "wrap_point_query"
         }
     }
 
@@ -65,9 +68,9 @@ enum BenchmarkMode: CaseIterable {
     // is now a compile error until it is answered, and `testEveryGateableModeIsRegistered`
     // then fails until its scenarios are registered.
     //
-    // The five false cases have no budgets by nature: --range-only is a component
+    // The six false cases have no budgets by nature: --range-only is a component
     // timing, the two memory modes assert an invariant / observe RSS rather than
-    // measure latency, and the two wrap modes are observational until map node 6
+    // measure latency, and the three wrap modes are observational until map node 6
     // promotes them.
     var isGateable: Bool {
         switch self {
@@ -88,7 +91,8 @@ enum BenchmarkMode: CaseIterable {
              .memoryShape,
              .memoryObservation,
              .wrapCompute,
-             .wrapRowQuery:
+             .wrapRowQuery,
+             .wrapPointQuery:
             return false
         }
     }
@@ -96,10 +100,10 @@ enum BenchmarkMode: CaseIterable {
     // Which absolute product ceiling this mode is held to. Exhaustive, never a
     // deny-list -- the same discipline as isGateable.
     //
-    // The five non-gateable modes (rangeOnly, memoryShape, memoryObservation,
-    // wrapCompute, wrapRowQuery) must classify under a total function but never reach the
-    // gate, so their value is inert. Worth knowing: the class-membership pin filters on
-    // isGateable and therefore does NOT cover them. Their class is a compile-time
+    // The six non-gateable modes (rangeOnly, memoryShape, memoryObservation,
+    // wrapCompute, wrapRowQuery, wrapPointQuery) must classify under a total function but
+    // never reach the gate, so their value is inert. Worth knowing: the class-membership
+    // pin filters on isGateable and therefore does NOT cover them. Their class is a compile-time
     // obligation, not a pinned one -- do not expect a test to catch a wrong choice here.
     var absoluteCeiling: AbsoluteCeiling {
         switch self {
@@ -120,7 +124,8 @@ enum BenchmarkMode: CaseIterable {
              .memoryShape,
              .memoryObservation,
              .wrapCompute,
-             .wrapRowQuery:
+             .wrapRowQuery,
+             .wrapPointQuery:
             return .scrollFrame
         }
     }
@@ -137,7 +142,7 @@ struct BenchmarkOptions {
     let enforceGate: Bool
 
     static let usage = """
-    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--bulk-structural-mutation] [--line-query] [--line-geometry-query] [--column-query] [--column-geometry-query] [--point-query] [--point-geometry-query] [--memory-shape] [--memory-observation] [--wrap-compute] [--wrap-row-query] [--help]
+    Usage: ViewportBenchmarks [--range-only] [--gate] [--realistic-provider] [--variable-height] [--variable-height-mutation] [--structural-mutation] [--bulk-structural-mutation] [--line-query] [--line-geometry-query] [--column-query] [--column-geometry-query] [--point-query] [--point-geometry-query] [--memory-shape] [--memory-observation] [--wrap-compute] [--wrap-row-query] [--wrap-point-query] [--help]
 
     Options:
       --range-only          Run only viewport range recompute benchmark.
@@ -157,6 +162,7 @@ struct BenchmarkOptions {
       --memory-observation  Run host RSS observation diagnostics.
       --wrap-compute        Run the observational wrap-aware compute width-change demonstration (not gateable).
       --wrap-row-query      Run the observational wrap-aware y->row position query benchmark (not gateable).
+      --wrap-point-query    Run the observational wrap-aware (x,y)->(row,cell) point query benchmark (not gateable).
       --help                Print this help.
     """
 
@@ -252,6 +258,11 @@ struct BenchmarkOptions {
                     return .failure("--wrap-row-query cannot be combined with another mode")
                 }
                 mode = .wrapRowQuery
+            case "--wrap-point-query":
+                if mode != .pipeline {
+                    return .failure("--wrap-point-query cannot be combined with another mode")
+                }
+                mode = .wrapPointQuery
             default:
                 return .failure("unknown argument \(argument)")
             }

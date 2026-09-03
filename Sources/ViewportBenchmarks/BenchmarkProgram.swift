@@ -33,6 +33,8 @@ func runBenchmarks(options: BenchmarkOptions) -> Bool {
         return runWrapComputeBenchmarks()
     case .wrapRowQuery:
         return runWrapRowQueryBenchmarks()
+    case .wrapPointQuery:
+        return runWrapPointQueryBenchmarks()
     }
 }
 

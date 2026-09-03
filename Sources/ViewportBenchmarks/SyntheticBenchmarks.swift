@@ -152,6 +152,8 @@ func runScenario(
                 preconditionFailure("wrap compute mode uses runWrapComputeBenchmarks")
             case .wrapRowQuery:
                 preconditionFailure("wrap row query mode uses runWrapRowQueryBenchmarks")
+            case .wrapPointQuery:
+                preconditionFailure("wrap point query mode uses runWrapPointQueryBenchmarks")
             }
 
             checksum &+= operationResult.checksum

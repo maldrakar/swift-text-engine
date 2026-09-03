@@ -119,13 +119,32 @@ final class WrapRowQueryCountTests: XCTestCase {
         XCTAssertLessThanOrEqual(counter.totalCalls, expectedMax)
     }
 
-    func testProbeCountDoesNotGrowLinearlyWithTheDocument() {
+    /// The layout axis's IN-RANGE worst case, held to the tight bound with NO slack
+    /// (D-25, discharged in slice 55b). It used to assert `< lineCount / 10` — 102 against
+    /// a sibling's 14 on the same fixture and the same located branch — so no
+    /// implementation could fail it without the sibling failing first.
+    ///
+    /// The TARGET is what gives it a claim the sibling does not make, and tightening alone
+    /// would not have: over 1 024 lines the default `logicalLine` search costs 10 probes at
+    /// almost every target, so row 700 (the sibling) and row 1 000 (this test's old target)
+    /// both measure `2 + 10 + 1 = 13` — same fixture, same branch, same count, same bound.
+    /// Only rows 1 022 and 1 023 reach the search's 11-probe worst case, so row 1 022
+    /// measures exactly `14 == ceilLog2(lineCount) + 4`: one added probe anywhere reddens
+    /// here and nowhere else on the in-range branch.
+    /// `testClampedQueriesStillSearchTheLayoutAxis` also reaches 14, but through the clamp
+    /// branch, which is a different path.
+    func testTheInRangeWorstCaseTargetHasNoSlackAgainstTheBound() {
         let (layout, counter) = counting()
-        guard case .row = ViewportVirtualizer.visualRowAt(y: 1_000.0 * Self.rowHeight + 3.0, layout: layout) else {
+        guard case .row(let located) = ViewportVirtualizer.visualRowAt(
+            y: 1_022.0 * Self.rowHeight + 3.0, layout: layout
+        ) else {
             return XCTFail("expected .row")
         }
-        // A linear walk over 1024 lines would blow this by two orders of magnitude.
-        XCTAssertLessThan(counter.totalCalls, Self.lineCount / 10)
+        // Fixture guards: the target must be the one the doc comment names, and it must be
+        // IN RANGE — a clamped target would measure the branch the sibling already covers.
+        XCTAssertEqual(located.globalRow, 1_022)
+        XCTAssertEqual(located.clamp, .inRange)
+        XCTAssertLessThanOrEqual(counter.totalCalls, expectedMax)
     }
 
     /// `LineAtQueryCountTests.testClampBranchesDoNotSearch` pins a two-probe CONSTANT for

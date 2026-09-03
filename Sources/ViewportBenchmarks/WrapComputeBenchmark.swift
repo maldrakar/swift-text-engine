@@ -111,6 +111,21 @@ func drainVisualRows<Layout: VisualRowLayoutSource>(_ range: VirtualRange, layou
     return sink
 }
 
+/// The `wrap_compute` line's result-preservation witness, as a pure function so a test can
+/// drive it (D-33). The compute half folds every computed range's length, the drain half
+/// every drained row's `endColumn` — the half that witnesses PACKING, and the half whose
+/// silent removal would leave a stable, plausible, meaningless number.
+///
+/// Both weights are 1, and that is a trade, not an oversight: a weighted fold would also
+/// catch a swap of the two halves, but it would change the printed VALUE and break
+/// byte-comparability with the slice-55a record that Decisions 12 and 13 rest on
+/// (`width_inf` 181094400, `width_40` 143365120, `width_10` 115068800). The siblings'
+/// distinct-multiplier rule exists to stop an INDEX fold from colliding; here the two
+/// operands come from distinct measurements three lines apart.
+func wrapComputeChecksum(compute: Int, drain: Int) -> Int {
+    compute &+ drain
+}
+
 @available(macOS 13.0, *)
 func runWrapComputeBenchmarks() -> Bool {
     let lineCount = 100_000
@@ -202,7 +217,7 @@ func runWrapComputeBenchmarks() -> Bool {
 
         // Both measured bodies stay observably live by being PRINTED (the checksum= token
         // below), which replaced the former `== Int.min` guard in slice 55a.
-        let checksum = computeMeasured.checksum &+ drainMeasured.checksum
+        let checksum = wrapComputeChecksum(compute: computeMeasured.checksum, drain: drainMeasured.checksum)
 
         // No Foundation in this target: `String(format:)` is unavailable, so format the
         // (always-integral) finite widths via `Int(_:)` rather than importing Foundation.

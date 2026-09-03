@@ -192,6 +192,37 @@ uniform axis (equivalence oracle). Geometry — the row's cell span, `y`/`height
 within-row fraction — is a later companion, on the `lineAt`→`lineGeometryAt` pattern.
 `--wrap-row-query` is its observational, **non-gateable** benchmark mode.
 
+`ViewportVirtualizer.visualPointAt(x:y:layout:)` is **node 4**: the wrap-aware `pointAt`
+analog, mapping a point to `(visual row, cell)` over a **single**
+`VisualRowLayoutSource` — the layout refines `WrapMetricsSource`, which refines
+`LineHorizontalMetricsSource`, so one object serves both axes and `pointAt`'s standing
+"the two sources must describe the same document" precondition disappears. It composes
+`visualRowAt` (the whole vertical half, carried **verbatim** into
+`VisualPointLocation.row`, guards included) with one
+`columnIndex(containingOffset:inLine:)` dispatch, and adds **no search**: the shared
+per-line ladder (`validateWrapLine`) and the shared within-line walk
+(`advanceVisualRows`) are the same code `visualRows` and `DocumentVisualRowCursor` run.
+`x` is measured from the located **row**'s left edge and both clamps land on the row's
+edges, while the returned `columnIndex` is an index into the **logical line**, with
+`rowSpan.startColumn` as the bridge; on an **overflow** row an `x` between `wrapWidth`
+and `rowSpan.width` is `.inRange`, because the comparison is against the row's own
+advance sum. A non-finite `x` is a failure, not a clamp, and is checked before any
+horizontal work, so it costs zero column-metric probes; `.empty` still beats it, and it
+beats `.blankLine`. Cost: O(log totalRows) + O(log lineCount) + the inherited
+within-line walk + O(log cells-in-line), with `3 + 2` column-axis probes on a fitting
+line when it clamps and `3 + 2 + 1` plus one hook call when it delegates; O(1) core
+memory. Step 7 rebases `x` by the row's left offset, answers from the ladder's stored
+`total` when the rebased value rounds onto the line's width (the hook's precondition is
+`x < lineWidth` and it does not clamp), and otherwise clamps the hook's answer into the
+row's span — the index only, never the flag. The one failure it adds of its own is a
+layout whose row counts disagree with the packer, so the walk runs out before the row it
+was asked for: `.failure(.invalidVisualRowLayout)`, not a fabricated row. At `wrapWidth =
+∞` (or any width no line exceeds) it is bit-identical to `pointAt` over a uniform
+vertical axis **on the located branch** — the failure orderings diverge by design
+(equivalence oracle). Geometry is a later companion, smaller than the family's precedent
+suggests: its vertical half is arithmetic, so it adds one axis's box and fractions.
+`--wrap-point-query` is its observational, **non-gateable** benchmark mode.
+
 ## Package layout
 
 - `Sources/TextEngineCore` — the library. Pure, headless, Foundation-free.
@@ -287,6 +318,7 @@ swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape inva
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --wrap-compute   # observational wrap compute width-change demo (amortised; not gateable)
 swift run -c release ViewportBenchmarks -- --wrap-row-query   # observational wrap y->row query benchmark (amortised; not gateable)
+swift run -c release ViewportBenchmarks -- --wrap-point-query   # observational wrap (x,y)->(row,cell) query benchmark (amortised; not gateable)
 swift run -c release ViewportBenchmarks -- --help            # all flags
 ./.github/scripts/harvest-gate-corpus.sh --limit 40 --corpus <corpus.tsv>   # hosted CI logs -> NEW corpus rows (append half)
 ./.github/scripts/harvest-gate-corpus.sh --self-test         # harvest selection-logic self-test (no network)
@@ -306,7 +338,7 @@ Benchmark flags: `--range-only`, `--realistic-provider`, `--variable-height`,
 `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
 `--column-query`, `--column-geometry-query`, `--point-query`,
 `--point-geometry-query`, `--memory-shape`,
-`--memory-observation`, `--wrap-compute`, `--wrap-row-query`, `--gate`. Only one mode
+`--memory-observation`, `--wrap-compute`, `--wrap-row-query`, `--wrap-point-query`, `--gate`. Only one mode
 flag at a time. `--gate` is valid with the default pipeline, `--realistic-provider`,
 `--variable-height`, `--variable-height-mutation`, `--structural-mutation`,
 `--bulk-structural-mutation`, `--line-query`, `--line-geometry-query`,
@@ -314,9 +346,9 @@ flag at a time. `--gate` is valid with the default pipeline, `--realistic-provid
 `--point-geometry-query` modes; it is
 **rejected** with
 `--range-only`, `--memory-shape`,
-`--memory-observation`, `--wrap-compute`, `--wrap-row-query`.
+`--memory-observation`, `--wrap-compute`, `--wrap-row-query`, `--wrap-point-query`.
 
-Both wrap modes measure on the same **amortised** shape as the gated modes —
+All three wrap modes measure on the same **amortised** shape as the gated modes —
 `operationsPerSample` operations under one clock read, divided by `amortise`
 (`BenchmarkSupport.swift`) — so their numbers resolve the operation rather than the
 host clock tick. Every measurement prints its own `*_operations_per_sample=` token.
