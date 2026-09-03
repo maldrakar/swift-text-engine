@@ -8,10 +8,16 @@ PR: opened by this record's own commit (Task 11 Step 5) — see the post-merge f
 appended to §7 once the number and hosted proof are known; Step 6/7 (both hosted proofs)
 are explicitly out of this task's scope and land as separate commits.
 
-Seventeen commits (`main..HEAD`) once this record's own fix-wave commit lands. Sixteen are
-listed below by SHA; the seventeenth **is** the fix-wave commit carrying this sentence, so it
-cannot name its own hash — committing it would change it. The count was re-checked after that
-commit landed (`git log main..HEAD --oneline | wc -l` → 17).
+**Twenty commits** (`main..HEAD`) once this record's own validation-round-3 commit lands.
+Nineteen are listed below by SHA; the twentieth **is** the commit carrying this sentence, so
+it cannot name its own hash — committing it would change it.
+
+The count has been rewritten twice, and that is worth naming rather than smoothing over: a
+self-referential count in a record that later grows is a claim that goes stale silently. It
+said "seventeen" through the fix wave, and entries 18 and 19 (the §7 hosted proof, then a
+pre-merge validation pass) each falsified it. The stable formulation is the one above —
+"nineteen by SHA plus this one" — and the arithmetic `19 + 1 = 20` is re-checkable against
+`git log main..HEAD --oneline | wc -l` by anyone reading after the merge.
 
 1. `38028db` docs: record the slice-55b selection and the three routed P2 calls
 2. `7852e92` docs: slice 55b implementation plan (node 4, visualPointAt)
@@ -29,19 +35,22 @@ commit landed (`git log main..HEAD --oneline | wc -l` → 17).
 14. `aa10b76` docs: node 4 in AGENTS.md; discharge D-18, D-25 and D-33; amend the spec
 15. `e563794` docs: retract the spec's ~10^9/appear-to-hang claim (fix round 1)
 16. `6913fe7` docs: slice 55b plan and verification record
-17. *(this commit)* the post-review fix wave — six findings, two new recorded reds (§9 item 7)
+17. `334a94f` fix: drill the two undrilled guards; correct the record (fix round 2) — the post-review fix wave, six findings, two new recorded reds (§9 item 7)
+18. `9dddc10` docs: fill in §7 hosted proof (Task 11 Step 6, PR-head run)
+19. `20a8351` test: remove the slack from two node-4 pins (validation round 3) (§9 item 8)
+20. *(this commit)* the validation-round-3 record update — drills (r) and (s), §9 items 8 and 9
 
 ## 1. Acceptance criteria owned by this piece
 
 | AC | Disposition | Evidence |
 |---|---|---|
 | 1 (`visualPointAt` exists, `row` pinned verbatim to `visualRowAt`) | **Met** — `Sources/TextEngineCore/WrapPointQuery.swift`; `testRowIsCarriedVerbatimFromVisualRowAt` sweeps `y` across both clamp edges; drill (g) reddens it | §2, §3 |
-| 2 (`x` row-relative, clamps land on the row's edges, overflow-row mid-range stays `.inRange`) | **Met** — steps 5–6 of the ladder; `testXBetweenWrapWidthAndRowWidthOnAnOverflowRowStaysInRange` (Task 1) | §2 |
+| 2 (`x` row-relative, clamps land on the row's edges, overflow-row mid-range stays `.inRange`) | **Met** — steps 5–6 of the ladder; `testXBetweenWrapWidthAndRowWidthOnAnOverflowRowStaysInRange` (Task 1), whose overflow run was widened from one cell to four in validation round 3 so the returned INDEX is pinned and not just the flag; drill (s) | §2, §3, §9 |
 | 3 (index line-absolute, always inside `[startColumn, endColumn)`, swept property) | **Met** — `testTheIndexIsAlwaysInsideItsRowSpan` / `...OnTheFPFixture`; drills (e) and (k) each reddens the fixture they gate | §2, §3 |
 | 4 (infinite-width oracle on the located branch, narrow-width control non-vacuous) | **Met** — `WrapPointQueryEquivalenceTests`; the narrow-width control was independently confirmed non-vacuous (Task 6, a genuine `rowSpan` shape mismatch); drill (a) reddens the oracle | §2, §3 |
-| 5, 55b half (validation ladder rung for rung, `±∞` named separately, both precedence pairs, three malformed-provider cases) | **Met** — `WrapPointQueryValidationTests`, 16 cases; drills (d1)/(d2)/(d3) each trap when their guard is removed | §2, §3 |
+| 5, 55b half (validation ladder rung for rung, `±∞` named separately, both precedence pairs, three malformed-provider cases) | **Met** — `WrapPointQueryValidationTests`, **17** cases (16 at Task 4, plus the fix wave's `testANonFiniteInteriorColumnOffsetFails`); drills (d1)/(d2)/(d3) each trap when their guard is removed | §2, §3 |
 | 6 (Decision 6 discharged on both fixtures) | **Met** — fixture 1 (the FP clamp, `.inRange` intact) and fixture 2 (the `>= total` guard, zero hook calls) both in `WrapPointQueryTests`; drills (e)/(k) are the asymmetric pair | §2, §3 |
-| 7 (probe-count table) | **Met** — `WrapPointQueryCountTests`, 8 cases: `<= ceilLog2(lineCount) + 4` with no `totalRows` term, zero column-metric calls off the located path, exact `3 + 2` / `3 + 2 + 1` counts, the `rowInLine` growth lower bound; drills (h)/(i) reddens the placement and the bound respectively | §2, §3 |
+| 7 (probe-count table) | **Met** — `WrapPointQueryCountTests`, 8 cases: `<= ceilLog2(lineCount) + 4` with no `totalRows` term, zero column-metric calls off the located path, exact `3 + 2` / `3 + 2 + 1` counts, the `rowInLine` growth lower bound; drills (h)/(i) redden the placement and the bound respectively. The layout-axis pin was **retargeted from row 700 to row 1 022 in validation round 3** — at 700 it measured 13 against a bound of 14 and could not fail on the +1 it exists to catch; drill (r) | §2, §3, §9 |
 | 8, round-trip half (streamed row equals queried row on both line kinds) | **Met** — `WrapPointQueryRoundTripTests.testEveryStreamedRowIsFoundByItsOwnPoint`, fixture guard corrected to `fitting = 3, wrapped = 2` (§8) | §2, §8 |
 | 9, 55b half (D-24: dispatch proven for `visualPointAt`, with a recorded red) | **Deviation — discharged by assertion, not by drill.** `WrapPointQueryCountTests`' fixture 2 asserts `logicalLineDispatches == 1` on both the clamped and the delegating path, but Contract 55b's drill list carries no dispatch-bypass drill and D-24's ledger row is already `discharged(slice 55a)` on 55a's own red. See §9 | §9 |
 | 11 (D-25 discharged) | **Met** — retargeted (not merely tightened) to row 1 022, `testTheInRangeWorstCaseTargetHasNoSlackAgainstTheBound`, `totalCalls` read back as 14 with zero slack. See §9 for why a tightened-in-place bound would not have discharged it | §2, §9 |
@@ -54,8 +63,8 @@ commit landed (`git log main..HEAD --oneline | wc -l` → 17).
 
 ## 2. Test files added this piece
 
-- `Tests/TextEngineCoreTests/WrapPointQueryTests.swift` — the seven-step ladder, the verbatim-row pin, the swept span property, Decision 6's two fixtures (Tasks 1–3).
-- `Tests/TextEngineCoreTests/WrapPointQueryValidationTests.swift` — the full validation ladder, 16 cases (Task 4).
+- `Tests/TextEngineCoreTests/WrapPointQueryTests.swift` — the seven-step ladder, the verbatim-row pin, the swept span property, Decision 6's two fixtures (Tasks 1–3); 13 cases, the overflow fixture widened in validation round 3.
+- `Tests/TextEngineCoreTests/WrapPointQueryValidationTests.swift` — the full validation ladder, **17** cases (16 at Task 4; the fix wave added `testANonFiniteInteriorColumnOffsetFails`).
 - `Tests/TextEngineCoreTests/WrapPointQueryCountTests.swift` — the probe-count table, 8 cases (Task 5).
 - `Tests/TextEngineCoreTests/WrapRowQueryCountTests.swift` — modified: D-25's retarget (Task 5).
 - `Tests/TextEngineCoreTests/WrapPointQueryEquivalenceTests.swift` — the infinite-width oracle (Task 6).
@@ -73,7 +82,7 @@ Source files added/modified: `Sources/TextEngineCore/ViewportTypes.swift` (`Visu
 `Sources/ViewportBenchmarks/WrapPointQueryBenchmark.swift` (new),
 `Sources/ViewportBenchmarks/WrapComputeBenchmark.swift` (`wrapComputeChecksum` extraction).
 
-## 3. The fourteen drills, plus one bonus and two fix-wave additions
+## 3. The fourteen drills, plus one bonus, two fix-wave additions and two from validation round 3
 
 Every named guarantee's recorded red, with the exact observed failure line(s) and, for the
 asymmetric ones, both halves.
@@ -281,6 +290,66 @@ asserts its own reachability (three packed rows, row 1 starting at the poisoned 
 `+∞`) and carries a finite-row control. Reverted; re-run
 `Executed 480 tests, with 0 failures (0 unexpected)`.
 
+**Two validation-round-3 additions, (r) and (s).** A pre-merge validation pass found two
+more pins of the same class the fix wave had just closed twice — a decision that is right and
+a fixture that cannot fail on it (§9 item 8). Both are drilled below, both are **asymmetric**,
+and the asymmetry is the evidence: each drill reddens the strengthened pin and leaves the pin
+*as it was shipped at Task 11* green. The letters continue past (q); nothing is renumbered.
+Unlike the fix wave, these two drills ran against a **clean tree** — the strengthening was
+committed first (`20a8351`) — so `git checkout --` is the restore mechanism and `git status
+--short | wc -l` reads `0` after each revert, which is what the record cites instead of the
+fix wave's md5 discipline.
+
+**(r) — validation-round-3 addition. One gratuitous layout-axis probe added to
+`visualPointAt` (`_ = layout.visualRowCount(inLine: line)` after step 3's line binding).**
+This is the exact regression the pin exists to catch: node 4's claim is that it adds **no**
+layout-axis probe over node 3.
+
+```
+Tests/TextEngineCoreTests/WrapPointQueryCountTests.swift:157: error: -[TextEngineCoreTests.WrapPointQueryCountTests testLayoutAxisStaysLogarithmicInLineCount] : XCTAssertLessThanOrEqual failed: ("15") is greater than ("14")
+	 Executed 8 tests, with 2 failures (0 unexpected)
+```
+Two failures: the retargeted in-range pin **and** `testClampedQueriesDoNotWidenTheLayoutBound`.
+Then the second half — the same probe, with the test's target moved back to row 700 as it was
+shipped:
+
+```
+Tests/TextEngineCoreTests/WrapPointQueryCountTests.swift:168: error: -[TextEngineCoreTests.WrapPointQueryCountTests testClampedQueriesDoNotWidenTheLayoutBound] : XCTAssertLessThanOrEqual failed: ("15") is greater than ("14") - y=16385.0
+	 Executed 8 tests, with 1 failure (0 unexpected)
+```
+**One** failure, and not the in-range pin: at row 700 the count is 13, so 13 + 1 = 14 still
+satisfies the bound. Measured directly through a throwaway counting conformer: row 700 → 13,
+row 1 000 → 13, row 1 022 → 14, row 1 023 → 14, and `visualRowAt` alone measures the same 13
+and 14 at 700 and 1 022 — which is *why* row 1 022 is the target and why the sibling
+`WrapRowQueryCountTests` was retargeted there by this same slice for D-25. The clamped pin
+does catch the regression, but on the clamp branch, which the D-25 discharge itself calls "a
+different path"; after (r) the in-range branch carries its own teeth. Reverted; `dirty=0`.
+
+**(s) — validation-round-3 addition. Step 7's hook dispatch dropped: the delegating branch
+made unconditional on the guard's answer (`if rebased >= total` → `if true`, so
+`raw = rowSpan.endColumn - 1` always).**
+
+```
+Tests/TextEngineCoreTests/WrapPointQueryTests.swift:94: error: -[TextEngineCoreTests.WrapPointQueryTests testXBetweenWrapWidthAndRowWidthOnAnOverflowRowStaysInRange] : XCTAssertEqual failed: ("cell(...columnIndex: 3...)") is not equal to ("cell(...columnIndex: 2...)")
+```
+And the second half — the **same** mutation against the overflow fixture as shipped at Task 11
+(line 2 = `advances [30.0, 10.0]`, break before 1, located row `[0, 1)`) with its own original
+expectations:
+
+```
+Test Case '-[TextEngineCoreTests.WrapPointQueryTests testXBetweenWrapWidthAndRowWidthOnAnOverflowRowStaysInRange]' passed (0.001 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected)
+```
+**Green.** With a one-cell row, `rowSpan.startColumn`, `rowSpan.endColumn - 1` and the hook's
+own answer are all index 0, so no assertion in the index can separate the branches — the test
+pinned `.inRange` (which *is* AC2's claim) and nothing else. This is drill (p)'s lesson on a
+second fixture, found by looking for it rather than by another review. The widened fixture
+keeps the row geometry identical (two rows, widths 40 and 10, `firstVisualRow` and `totalRows`
+unchanged) and only splits the overflow run into four cells, so the band `(20, 40)` spans two
+whole cells and `x = 25` lands on cell 2 — neither end of the span. It asserts its own
+three-cell minimum and that the expected index differs from both ends, so the gap cannot
+silently reopen. Reverted; `dirty=0`, full suite `Executed 480 tests, with 0 failures`.
+
 ## 4. Suite, release build, Foundation scan
 
 ```
@@ -313,6 +382,10 @@ benchmarks_import_foundation=none
 added) + 2 (Task 6) + 1 (Task 7) + 11 (Task 8) + 1 (Task 8 fix round, the golden pin) + 2
 (Task 9) + 0 (Task 10, docs-only) = 479. Matches the per-task reports' running counts
 exactly.
+
+**Validation round 3 moves the count not at all: still 480.** It adds no test case — it
+retargets one and widens one fixture — so `Executed 480 tests, with 0 failures (0 unexpected)`
+both before and after, re-run on the clean tree after each of drills (r) and (s).
 
 **After the post-review fix wave the count is 480.** The wave adds exactly one test —
 `WrapPointQueryValidationTests.testANonFiniteInteriorColumnOffsetFails` (Finding 2, drill
@@ -515,13 +588,26 @@ self_test=pass
 ### PR-head run (Task 11 Step 6)
 
 PR **#135** (`slice-55b-wrap-point-query` -> `main`), workflow run **33772207907**, head
-**`334a94f`** — the current HEAD, i.e. the **post-fix-wave** head, not the earlier one. Read
-at **step** level, not job conclusion: this repo's standing lesson is that a green job can
-hide a dead `continue-on-error` step (Slice 16).
+**`334a94f`** — the **post-fix-wave** head. Read at **step** level, not job conclusion: this
+repo's standing lesson is that a green job can hide a dead `continue-on-error` step (Slice 16).
 
-**Which run covers what.** An earlier run, **33758940527**, was green on the pre-fix-wave
-head `6913fe7`; it is superseded by this run, which covers the fix wave (`334a94f`, six
-findings, two new recorded reds per §9 item 7) as well as everything the earlier run covered.
+**Which run covers what, and why this section names three.** A hosted-proof section committed
+to its own branch moves the head it is proving, so "the current HEAD" is a claim this record
+cannot keep — it was written here once and was false two commits later. What is durable is
+the per-head table:
+
+| head | what it added | run | verdict |
+|---|---|---|---|
+| `6913fe7` | the record's first draft | 33758940527 | success (superseded) |
+| `334a94f` | the fix wave (six findings, drills (p)/(q)) | **33772207907** | success — read at step level below |
+| `9dddc10` | §7 itself, i.e. this section's first fill-in | 33775496545 | success — 3 jobs, 46 `gate=pass`, 0 `gate=fail`, 480/0, 8 `blocking=true`, `docs_only_pr=false` |
+| validation round 3 (`20a8351` + this commit) | drills (r)/(s), §9 items 8–9 | recorded in the merge note below | — |
+
+Every row after `334a94f` is docs plus test-only strengthening: no `Sources/` change reaches
+the engine after the fix wave (validation round 3 touches two test files and this record), so
+the gated-checksum and portability evidence read below at `334a94f` is not re-derived per
+head — but each head does carry its own full green run, because the required contexts are
+per-commit and the ruleset is strict.
 
 Three jobs, all `success`:
 
@@ -809,6 +895,50 @@ text calls the shared helper), which is a different, un-taken decision.
    met as shipped at Task 11 — and what is true after, with the one deliberate exception
    above. The governing rule this discharges: *a guarantee whose drill is missing is an
    unfinished acceptance criterion, not a review finding.*
+
+8. **Validation round 3 — the fix wave's class, found twice more by a pass that went looking
+   for it.** A pre-merge validation pass against the spec re-ran the fix wave's own question —
+   *can this pin fail on the defect it names?* — over every pin node 4 adds, and found two that
+   could not. Both are fixed in `20a8351`, both drilled ((r) and (s), §3), and the
+   generalisation is now three instances deep, so it is stated rather than left to the next
+   reviewer to rediscover: **a pin's target and its fixture are part of the claim.** A bound is
+   only as strong as the input that approaches it, and an assertion in an index is only as
+   strong as the fixture's ability to make the right answer differ from the plausible wrong
+   ones.
+
+   - **Item 1 — the layout-axis bound had one probe of slack at its target.**
+     `testLayoutAxisStaysLogarithmicInLineCount` queried row 700 of 1 024, where the count is
+     13 against the bound of 14, so the claim it pins — node 4 adds **no** layout-axis probe —
+     could regress by exactly one without it reddening. This is D-25's own shape: the ledger
+     row says the sibling "asserts `< lineCount / 10` while its sibling asserts `<= 14` on the
+     same fixture", and this slice *retargeted that sibling to row 1 022 for precisely this
+     reason* while leaving node 4's new pin at a slack target. Retargeted to row 1 022 with the
+     same two fixture guards (the located `globalRow`, and `.inRange` so it stays on the branch
+     the clamped sibling does not cover). Drill (r) shows the asymmetry: with a gratuitous
+     probe added, the retargeted pin fails and the row-700 form does not.
+   - **Item 2 — the overflow-row fixture could not separate the answers.** The located row held
+     one cell, where `startColumn`, `endColumn - 1` and the hook's answer are the same index.
+     Widened to a four-cell unbreakable run at identical row geometry. Drill (s) shows the same
+     asymmetry. This is drill (p) on a second fixture — the record already carried the lesson,
+     and the lesson did not carry itself to the neighbouring test.
+
+   Neither item is an engine defect: `visualPointAt`'s behaviour is unchanged by round 3, no
+   `Sources/` file is touched, the test count stays 480, and no gated output moves.
+
+9. **AC12's "every returned field" is implemented as "every non-duplicated field".** AC12 asks
+   for "a checksum folding every returned field including `rowSpan.width`";
+   `wrapPointQueryChecksum` folds eight fields and deliberately omits two —
+   `rowSpan.logicalLine` and `rowSpan.rowInLine`, which duplicate `row.logicalLine` /
+   `row.rowInLine` (both folded) and agree with them by construction, since one cursor walk
+   produces both. The reasoning is in the function's own doc comment and the duplication is
+   pinned in the core suite by `testRowSpanAndRowAgreeOnTheirDuplicatedFields`, so nothing is
+   uncovered — but the narrowing is a departure from the criterion's literal wording and
+   belongs here rather than only in a source comment. **Folding them was considered and
+   rejected on the same ground as Decision 15's weights**: it would move the printed
+   `checksum=` values, and §6's byte-identity comparison against Task 8's recorded run is
+   evidence this record leans on. If a later slice ever re-baselines this mode's checksums
+   (node 6's gate promotion is the natural moment, since it re-prints the line anyway), fold
+   the two then and delete this item.
 
 Two decisions recorded elsewhere and cross-referenced here for completeness: **Decision 15
 and AC19** (the D-33 fold-in, `wrapComputeChecksum`/`drainVisualRows` completeness pins,
