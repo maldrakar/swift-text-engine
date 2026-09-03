@@ -476,3 +476,17 @@ genuine fork remains node 8 (host order) / fork V.
   slice 56 at the latest**, and **D-17 escalates at slice 55's review** — neither is
   discharged by this call. Fold-ins to settle at the brainstorm: D-24 (P2), D-29
   (mandatory), D-25 (P3), D-13 only on merit. Next inner-loop step: brainstorm node 4.
+- 2026-09-03 — **User took Option C at the slice-55a selection: Slice 55b = node 4 proper
+  (`visualPointAt`), with D-33 folded in.** The three options on the table were the
+  slice-55a review's own: A (55b alone), B (the infrastructure slice now), C (55b + D-33,
+  the review's lean). Rationale on record: the split is ratified, the next step is
+  topological, and folding D-33 into 55b costs one test file while closing the
+  falsifiability audit's only gap on the surface 55b already touches.
+  The review's other two routed calls were answered in the same pass:
+  **D-9 is `scheduled(slice-56)` — a fix, not a permanent-observable close.** After two
+  consecutive `deferred(user)` re-affirmations the user declined a third and declined the
+  close: `gov_p95=median|max` stays a re-derivable observable, but the thin p95 axis gets a
+  real repair in slice 56.
+  **Slice 56 is confirmed as the infrastructure slice: D-27 + D-34 + D-17 + D-9.** Four P2s,
+  all now `scheduled(slice-56)` in the ledger rather than open-and-aging. It consumes no map
+  node; nodes 5-9 and fork V are untouched by this call.
