@@ -99,4 +99,85 @@ final class WrapPointQueryTests: XCTestCase {
         XCTAssertEqual(bottomInterior.row.clamp, .clampedToBottom)
         XCTAssertEqual(bottomInterior.column, .cell(ColumnLocation(columnIndex: 1, clamp: .inRange)))
     }
+
+    /// Every row boundary, every row interior and BOTH clamp edges.
+    private func ySweep() -> [Double] {
+        var ys: [Double] = [-100.0, -0.001]
+        for row in 0..<6 {
+            let top = Double(row) * Self.rowHeight
+            ys.append(top)                              // exact boundary
+            ys.append(top + Self.rowHeight / 2.0)       // interior
+            ys.append(top + Self.rowHeight - 0.001)     // just below the next boundary
+        }
+        ys.append(60.0)                                 // clamped to the bottom
+        ys.append(1_000.0)
+        return ys
+    }
+
+    /// Decision 3's central promise: `row` is `visualRowAt`'s answer, carried verbatim.
+    ///
+    /// Nothing else in this slice notices a re-derivation — the oracle compares against
+    /// `pointAt`, the round-trip against the cursor, the count tests count probes; all
+    /// three stay green if the vertical half is rebuilt inside the query. The CLAMP EDGES
+    /// are what give this teeth: a fabricated location would most plausibly get the index
+    /// right and the flag wrong.
+    func testRowIsCarriedVerbatimFromVisualRowAt() {
+        let layout = Self.layout()
+        var sawTop = false
+        var sawBottom = false
+        for y in ySweep() {
+            guard case .row(let expected) = ViewportVirtualizer.visualRowAt(y: y, layout: layout) else {
+                XCTFail("fixture: visualRowAt must locate a row at y=\(y)"); continue
+            }
+            guard case .point(let point) = ViewportVirtualizer.visualPointAt(x: 5.0, y: y, layout: layout) else {
+                XCTFail("expected .point at y=\(y)"); continue
+            }
+            XCTAssertEqual(point.row, expected, "y=\(y)")
+            if expected.clamp == .clampedToTop { sawTop = true }
+            if expected.clamp == .clampedToBottom { sawBottom = true }
+        }
+        XCTAssertTrue(sawTop && sawBottom, "the sweep must reach both clamp edges, or the pin has no teeth")
+    }
+
+    /// The duplicated fields agree. Named for what this actually catches: with the walk
+    /// called at `k = rowInLine + 1`, the last row it consumes carries that `rowInLine` BY
+    /// CONSTRUCTION, so the assertion can only fire on a wrong `k` — a plausible edit, and
+    /// worth a test, but not evidence that two independently derived numbers agree.
+    func testRowSpanAndRowAgreeOnTheirDuplicatedFields() {
+        let layout = Self.layout()
+        for y in ySweep() {
+            guard case .point(let point) = ViewportVirtualizer.visualPointAt(x: 5.0, y: y, layout: layout) else {
+                XCTFail("expected .point at y=\(y)"); continue
+            }
+            XCTAssertEqual(point.rowSpan.logicalLine, point.row.logicalLine, "y=\(y)")
+            XCTAssertEqual(point.rowSpan.rowInLine, point.row.rowInLine, "y=\(y)")
+        }
+    }
+
+    /// Decision 2's swept property, and the only test that reads Decision 6's clamp.
+    /// Shared so Task 3 can drive it over the FP fixture where the clamp actually fires.
+    func assertIndexInsideItsRowSpan<Layout: VisualRowLayoutSource>(
+        layout: Layout, xs: [Double], ys: [Double],
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        for y in ys {
+            for x in xs {
+                guard case .point(let point) = ViewportVirtualizer.visualPointAt(x: x, y: y, layout: layout) else {
+                    XCTFail("expected .point at (x: \(x), y: \(y))", file: file, line: line); continue
+                }
+                guard case .cell(let cell) = point.column else { continue }  // blank rows have no cell
+                XCTAssertGreaterThanOrEqual(cell.columnIndex, point.rowSpan.startColumn,
+                                            "(x: \(x), y: \(y)) left the span", file: file, line: line)
+                XCTAssertLessThan(cell.columnIndex, point.rowSpan.endColumn,
+                                  "(x: \(x), y: \(y)) left the span", file: file, line: line)
+            }
+        }
+    }
+
+    func testTheIndexIsAlwaysInsideItsRowSpan() {
+        assertIndexInsideItsRowSpan(
+            layout: Self.layout(),
+            xs: [-100.0, -0.001, 0.0, 0.001, 4.999, 5.0, 9.999, 10.0, 19.999, 20.0, 25.0, 30.0, 1_000.0],
+            ys: ySweep())
+    }
 }
