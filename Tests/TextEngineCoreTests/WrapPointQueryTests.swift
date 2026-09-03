@@ -180,4 +180,78 @@ final class WrapPointQueryTests: XCTestCase {
             xs: [-100.0, -0.001, 0.0, 0.001, 4.999, 5.0, 9.999, 10.0, 19.999, 20.0, 25.0, 30.0, 1_000.0],
             ys: ySweep())
     }
+
+    // ---- Decision 6: Double arithmetic at magnitudes near 2^53 ----
+    //
+    // `rowSpan.width` is itself the rounded difference `columnOffset(end) - rowLeft`, so
+    // an `x` STRICTLY below that difference can rebase to a value that rounds up to
+    // `columnOffset(end)` or beyond. ulp is 2 at 1e16: every offset below is exactly
+    // representable and strictly increasing, so these are legal inputs, and
+    // `1e16 + 3.9` rounds to exactly `1e16 + 4`.
+
+    /// Fixture 1 — the rounding lands INSIDE the line, so the hook answers with a cell
+    /// belonging to the NEXT row and only the clamp confines it.
+    ///
+    ///   advances [1e16, 4, 4] -> offsets [0, 1e16, 1e16+4, 1e16+8], breaks before 1 and 2
+    ///   wrapWidth 4:  row 0 = [0,1) (overflow), row 1 = [1,2) rowLeft 1e16 width 4,
+    ///                 row 2 = [2,3)
+    private static func fpClampLayout() -> TestVisualRowLayout {
+        TestVisualRowLayout(
+            lines: [(advances: [1e16, 4.0, 4.0], breaks: [1, 2])],
+            rowHeight: rowHeight, wrapWidth: 4.0)
+    }
+
+    /// Fixture 2 — drop the third advance and the rounding lands on the LINE's width, so
+    /// Decision 14's `>= total` guard answers and the hook is never called (calling it
+    /// would violate its `x < lineWidth` precondition).
+    ///
+    ///   advances [1e16, 4] -> offsets [0, 1e16, 1e16+4], break before 1
+    ///   wrapWidth 4:  row 0 = [0,1) (overflow), row 1 = [1,2) rowLeft 1e16 width 4
+    private static func fpGuardLayout() -> TestVisualRowLayout {
+        TestVisualRowLayout(
+            lines: [(advances: [1e16, 4.0], breaks: [1])],
+            rowHeight: rowHeight, wrapWidth: 4.0)
+    }
+
+    func testFixtureOneRoundsPastTheRowAndTheClampConfinesTheIndex() {
+        let layout = Self.fpClampLayout()
+
+        // The fixture must actually be the FP case, or this test proves nothing.
+        XCTAssertEqual(layout.firstVisualRow(ofLine: 1), 3, "fixture: three rows")
+        XCTAssertEqual(1e16 + 3.9, 1e16 + 4.0, "fixture: 3.9 must round up at this magnitude")
+        XCTAssertEqual(layout.columnIndex(containingOffset: 1e16 + 3.9, inLine: 0), 2,
+                       "the UNCLAMPED hook answers cell 2 -- outside row 1's [1, 2) span")
+
+        // y = 15 -> global row 1 (rowHeight 10). x = 3.9 < rowSpan.width == 4.
+        guard case .point(let point) = ViewportVirtualizer.visualPointAt(x: 3.9, y: 15.0, layout: layout) else {
+            return XCTFail("expected .point")
+        }
+        XCTAssertEqual(point.rowSpan, VisualRow(logicalLine: 0, rowInLine: 1, startColumn: 1, endColumn: 2, width: 4.0))
+        // The clamp moves the INDEX and not the FLAG: x was inside [0, width), so a
+        // right-edge report would be a different wrong answer.
+        XCTAssertEqual(point.column, .cell(ColumnLocation(columnIndex: 1, clamp: .inRange)))
+    }
+
+    func testFixtureTwoAnswersFromTheTotalGuardWithoutCallingTheHook() {
+        let log = ColumnHookLog()
+        let layout = OverridingColumnIndexLayout(base: Self.fpGuardLayout(), log: log)
+
+        XCTAssertEqual(layout.firstVisualRow(ofLine: 1), 2, "fixture: two rows")
+
+        guard case .point(let point) = ViewportVirtualizer.visualPointAt(x: 3.9, y: 15.0, layout: layout) else {
+            return XCTFail("expected .point")
+        }
+        XCTAssertEqual(point.rowSpan, VisualRow(logicalLine: 0, rowInLine: 1, startColumn: 1, endColumn: 2, width: 4.0))
+        XCTAssertEqual(point.column, .cell(ColumnLocation(columnIndex: 1, clamp: .inRange)))
+        XCTAssertEqual(log.callCount, 0,
+                       "rebased == total: the guard must answer, and the hook must not be called at x == lineWidth")
+    }
+
+    /// The swept property over the FP fixture — this is where drill (e) reddens it.
+    func testTheIndexIsAlwaysInsideItsRowSpanOnTheFPFixture() {
+        assertIndexInsideItsRowSpan(
+            layout: Self.fpClampLayout(),
+            xs: [-1.0, 0.0, 1e15, 3.9, 3.999, 4.0, 5.0],
+            ys: [-1.0, 5.0, 15.0, 25.0, 100.0])
+    }
 }
