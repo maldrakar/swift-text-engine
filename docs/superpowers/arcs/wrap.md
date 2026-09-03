@@ -12,7 +12,7 @@ brief's «Ограничения» and the initial brief it inherits by referenc
 |---|---|---|---|
 | 1 | Layout-width change (device rotation, browser resize) does not recompute the document: frame cost stays viewport-bounded, in the spirit of the existing O(log N) + O(buffer) | partial | Core half retired (Slice 50): per-frame `compute(_:layout:)` is O(log totalRows) and never re-walks the document on a width change — width baked into the provider; only its O(N) reindex (a setup cost) is linear. [PR #117](https://github.com/maldrakar/swift-text-engine/pull/117) (`fdc66d2`), post-merge run `30169643578`, `--wrap-compute` numbers. `done` needs the estimated/async veneer (fork V) — the *exact* reindex is Ω(N) |
 | 2 | Core memory not linear in document size with wrap on; wrap data lives behind the provider abstraction; `--memory-shape` extended to the wrap path | open | — |
-| 3 | Wrap-aware equivalents of existing queries (compute over visual rows, y→row, point→(row, cell)); no-wrap path preserved; wrap at infinite width equals no-wrap (equivalence oracle) | partial | Per-line (Slice 49, [PR #114](https://github.com/maldrakar/swift-text-engine/pull/114) `8e91f52`, `VisualRowEquivalenceTests`) **and whole-document** (Slice 50, [PR #117](https://github.com/maldrakar/swift-text-engine/pull/117) `fdc66d2`, `WrapComputeEquivalenceTests`) equivalence proven (wrap at ∞ = no-wrap, bit-identical over irregular inputs); the **compute** query analog shipped; no-wrap path untouched. The **y→row** analog shipped (Slice 53, [PR #126](https://github.com/maldrakar/swift-text-engine/pull/126) `c2e6b37`, `WrapRowQueryEquivalenceTests` — `visualRowAt` at ∞, and at any width no line exceeds, is bit-identical to `lineAt` over a uniform axis; post-merge run `32595528239`). Remaining: the **point→(row, cell)** analog (node 4), the last item on this criterion's own list |
+| 3 | Wrap-aware equivalents of existing queries (compute over visual rows, y→row, point→(row, cell)); no-wrap path preserved; wrap at infinite width equals no-wrap (equivalence oracle) | **done** | All three enumerated analogs shipped with their oracles: **compute over visual rows** (Slice 50, [PR #117](https://github.com/maldrakar/swift-text-engine/pull/117) `fdc66d2`, `WrapComputeEquivalenceTests`), **y→row** (Slice 53, [PR #126](https://github.com/maldrakar/swift-text-engine/pull/126) `c2e6b37`, `WrapRowQueryEquivalenceTests`), **point→(row, cell)** (Slice 55b, [PR #135](https://github.com/maldrakar/swift-text-engine/pull/135) `7390107`, `WrapPointQueryEquivalenceTests`; post-merge run `33791182282`), on top of the per-line oracle of Slice 49 ([PR #114](https://github.com/maldrakar/swift-text-engine/pull/114) `8e91f52`). The no-wrap path is untouched — 46 gated checksums byte-identical across the whole of slices 55a/55b. **Scope of what the oracles prove, stated because the brief's wording is unqualified:** bit-identity holds **on the located branch**. The wrap and no-wrap ladders validate different things in different orders, so their *failure* orderings diverge by design (slice-55 spec, Decision 5); each oracle is scoped to the located branch deliberately and carries a narrow-width control proving it is not vacuous. Geometry-bearing companions are not on this criterion's list (slice-55 spec, Non-Goal 1) |
 | 4 | 100k+ lines / >10 MB scroll with wrap on holds p95/p99 budgets and the absolute 60 FPS ceiling; new wrap modes become blocking CI gates via the existing harvest → derive recipe | open | — |
 | 5 | Incremental edits with wrap on (in-line edit, structural insert/delete) stay within frame-hot-path budgets | open | — |
 | 6 | Thin verification hosts: iOS feeding CoreText-measured advances, browser feeding canvas `measureText` over the WASM build; both observably smooth-scroll a large wrapped document | open | — |
@@ -49,16 +49,22 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    by division — the exact term behind this map's "not literally width-independent"
    correction. Floating-point edges make it a design question for the brainstorm, not a
    drive-by.
-4. `pending` — **← SELECTED by the slice-54 review (topological)**; deferred once already
-   (slice 54 took the calibration-chain route by user call, 2026-08-23), so this node is one
-   slice overdue. point→(row, cell) wrap-aware composite.
-   Criterion 3, and its last enumerated analog. Composes node 3's `visualRowAt` with the
-   existing within-line column query the way `pointAt` composes `lineAt` with `columnAt` —
-   no new search. Fold-in home for **D-24** (the row-axis dispatch is pinned by nothing —
-   drill C leaves 397/0 green while bypassing it), **D-29** (MANDATORY under the skill's
-   falsifiability rule — the only slice-54 guarantee with no recorded red; a counting
-   layout wrapper asserts the `--wrap-compute` drain body invokes `compute` zero times)
-   and **D-25**; plausibly **D-13**.
+4. `done` (Slices 55a + 55b) — point→(row, cell) wrap-aware composite, `visualPointAt`.
+   **Closed criterion 3.** Consumed by two slices, and that was *planned*: the slice-55 design
+   splits the node into 55a (every edit to shipped node-2/node-3 code — the two extractions, the
+   packer short-circuit, five producer guards) and 55b (the query proper, which therefore touches
+   no shipped measured path — a checkable claim, and it held: `--wrap-compute` and
+   `--wrap-row-query` checksums byte-identical across twenty commits). Shipped as specified: no
+   new search, the vertical half carried verbatim from `visualRowAt`, `x` row-relative with the
+   index line-absolute, one source for both axes (which *removes* `pointAt`'s standing
+   two-sources precondition). Fold-ins landed: **D-24, D-29** (55a), **D-25, D-18, D-32, D-33**
+   (55b). D-13 was not folded in — this node adds no fourth copy of the binary-search body, so it
+   still rides on merit.
+   What it taught, beyond 55a's packer correction: the **within-line walk is now the query
+   surface's only non-logarithmic term**, it is measured rather than inferred
+   (`long_line_deep_row`, 400 rows deep, ~20-30x its logarithmic siblings locally), and after
+   Decision 12 only the *interior* rows of genuinely wrapped lines can drive it — which sharpens
+   rather than shrinks the case for fork R below.
 5. `pending` — `--memory-shape` extension to the wrap path. Criterion 2.
 6. `pending` — Wrap benchmark modes promoted to blocking gates
    (harvest → derive). Criterion 4. Likely splits per mode, as the first
@@ -76,6 +82,27 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    gate work (node 6) must land before hosts` — iOS thin host (CoreText
    advances). Criterion 6.
 9. `pending` — Browser/WASM thin host (canvas `measureText`). Criterion 6.
+R. `pending` — **fork (a provider capability, not a criterion node): within-line random
+   access** — a provider-native seam answering "row *k* of line *L*" without packing rows
+   0…*k−1*. **A restoration, not a new node:** node 2's spec assigned it to node 7 ("…plus the
+   within-line random-access provider work this node deferred",
+   `2026-07-24-wrap-viewport-compute-design.md:715-719`) and the map entry dropped the clause;
+   slice 55b leans on it as the *only* admissible answer to a walk-cost breach, so it is back on
+   the map by name rather than living in one spec's prose.
+   It arrives as a protocol requirement **with a default implementation**, so it is
+   source-compatible for every conformer and costs nothing in API terms to defer. Decision 12
+   neither pre-empts nor shrinks it: the short-circuit decides *"does the remaining suffix fit"*
+   in O(1) from a value in hand; the seam decides *"where does row k start"*, which no O(1)
+   predicate can.
+   **Numeric trigger** (the point of putting it here — "if node 6's absolute ceiling is
+   breached" fires only *after* a gate is red): fire when `--wrap-point-query`'s
+   `long_line_deep_row` **p99 reaches 25 % of `GateLimits.frameNanoseconds / 10`** (the
+   `.scrollFrame` class this mode is classified into) on **hosted Linux**, the calibration
+   authority. At merge the scenario measured p99 ≈ 7.4 µs locally, and hosted runs 2-3x slower,
+   so the trigger sits roughly 20-25x above the shipped number and fires with room, not at the
+   edge. Secondary trigger, independent of the number: any product requirement for logical lines
+   materially longer than the scenario's 2 000 cells re-opens it, because the term is linear in
+   the cells before the located row and the scenario is the *only* place it is measured.
 V. `pending` — **fork (not yet a numbered node): the estimated/async width-change
    veneer** over the exact index space that closes criterion 1 from `partial` to
    `done`. Required because a *full* width change is Ω(N) (every multi-row line's
@@ -235,6 +262,44 @@ and selection: **55b**. What this review does route to the user is orthogonal to
 open P2s (D-9, D-17, D-27) are at or past the escalation threshold and need a schedule-or-defer
 call, with slice **56** the natural home for the infrastructure slice they add up to. First
 genuine fork remains node 8 (host order) / fork V.
+
+Map pass 2026-09-03 (Slice 55b review): node 4 is **`done`**, and with it **criterion 3**.
+Unlike the process slice 48, the debt slice 51 and the calibration slices 52/54, the two-slice
+shape here was *planned* — 55a consumed no node by design and 55b marks it done — so it is not
+another instance of "the arc spent a slice without a criterion". Nodes 5-9 and fork V stand
+unrevised: nothing 55b taught touches ownership of row data, the width-change event, memory
+shape, gate promotion, incremental edits or the hosts.
+
+Three things this pass owes, named by the slice-55 design rather than discovered here, all now
+done: (a) the node is marked consumed-by-two-slices with the split's rationale, above; (b) the
+**within-line random-access seam is back on the map as fork R** with a *numeric* trigger — node
+2's spec had assigned it to node 7 and the map entry dropped the clause, so slice 55b was
+leaning on a remedy nobody had scheduled (the D-27 failure shape, named before it happened);
+(c) **criterion 3's evidence cell states the oracles' scoping** — bit-identity on the *located*
+branch, failure orderings divergent by design — because the brief's wording is unqualified and
+the previous cell read "bit-identical" with no caveat. Flipping the criterion to `done` is
+right; the evidence says what was proven, not more.
+
+Two notes deposited for the **geometry companion** of node 4, so a later node inherits them
+instead of re-deciding (slice-55 spec, Decision 9): it is *smaller* than the family's precedent
+suggests — its vertical half is arithmetic (`y = globalRow * rowHeight`, `height = rowHeight`,
+both available to the caller with no probe), so it adds one axis's box and two fractions — and
+its coordinate frame is already settled by Decision 1: `x` goes in row-relative, so the cell's
+box must come back row-relative, bridged by `rowLeft`, which `VisualPointLocation` does not
+return and the companion either re-probes (one O(1) call) or builds a row-relative box from.
+
+What it changed for **node 6**: nothing new, and that is worth stating after four consecutive
+slices that did. Node 6's reading list stands at five rows (D-20/D-21, D-28, D-30, D-31) plus
+the four P2s scheduled into slice 56; `--wrap-point-query` is born on the repaired amortised
+shape (D-23) and prints prefixed latency keys, so it emits no corpus row until node 6
+deliberately un-prefixes them — the mode is harvest-inert by construction, not by omission.
+
+Next step is **topological**, and the immediate slot is already assigned: the user selected
+slice **56 = the infrastructure slice** (D-27 + D-34 + D-17 + D-9) on 2026-09-03 at 55b's own
+selection, and this review confirms it and folds in D-35/D-37. **Node 5** (`--memory-shape`
+over the wrap path, criterion 2 — the only wrap criterion with no evidence at all) is the next
+*feature* node and should not wait past slice 57. First genuine fork remains node 8 (host
+order) / fork V, now joined by fork R.
 
 ## Decision log
 
@@ -476,6 +541,13 @@ genuine fork remains node 8 (host order) / fork V.
   slice 56 at the latest**, and **D-17 escalates at slice 55's review** — neither is
   discharged by this call. Fold-ins to settle at the brainstorm: D-24 (P2), D-29
   (mandatory), D-25 (P3), D-13 only on merit. Next inner-loop step: brainstorm node 4.
+- 2026-09-03 — **Slice 55b merged; node 4 and criterion 3 close.** PR
+  [#135](https://github.com/maldrakar/swift-text-engine/pull/135) (`7390107`) + post-merge proof
+  [#136](https://github.com/maldrakar/swift-text-engine/pull/136) (`f9ffe58`). The review
+  confirms the already-selected slice 56 (infrastructure) rather than routing a fork, adds
+  **fork R** (within-line random access, restored from node 2's spec with a numeric trigger),
+  and records **D-35** — the Contract's drill list is a closed set while AC14 says "every
+  standing guarantee", which cost four late-caught escapes in one slice.
 - 2026-09-03 — **User took Option C at the slice-55a selection: Slice 55b = node 4 proper
   (`visualPointAt`), with D-33 folded in.** The three options on the table were the
   slice-55a review's own: A (55b alone), B (the infrastructure slice now), C (55b + D-33,
