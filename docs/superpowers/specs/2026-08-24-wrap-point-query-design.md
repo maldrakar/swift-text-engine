@@ -1369,8 +1369,9 @@ should not have to open this file to know what it measured.
 **The mode gets its own layout type, so the long line is not fighting an O(N × cells)
 setup.** `BenchmarkWrapLayout.init` deliberately re-packs *every* line to measure the real
 O(N) reindex; `--wrap-row-query` reuses it, and at `100_000 × 20` the setup is invisible,
-but a `long_line_deep_row` built that way would spend ~10⁹ packing steps before the first
-measurement, appear to hang, and the nearest remedy to hand is a shorter line — which
+but a `long_line_deep_row` built that way would pay O(`lineCount` × `cells`) to re-pack
+every line before the first measurement, where the new type pays only O(`lineCount` +
+`cells`) — and the nearest remedy to hand for the former is a shorter line, which
 silently deletes the term the scenario exists to expose. A *query* mode measures no reindex
 and has no use for that property, and every line in these fixtures is identical by
 construction, so `WrapPointQueryLayout` packs **one** line and fills the prefix sum by
@@ -1873,3 +1874,20 @@ provenance.
     **AC19** add the D-33 fold-in the slice-55a review made mandatory and the user
     scheduled into 55b; the 55b plan is written against this amendment. Nothing else in the
     body changed.
+13. **2026-09-03, twelfth pass** (amendment, not a review pass; retraction, no new
+    decision). Component Design's "the mode gets its own layout type" paragraph claimed a
+    `long_line_deep_row` built on `BenchmarkWrapLayout` "would spend ~10⁹ packing steps
+    before the first measurement, appear to hang" — false by roughly three orders of
+    magnitude. `greedyEnd` (`VisualRowCursor.swift:76-93`) `break`s at the first legal end
+    that overflows the width, so each row's scan is bounded by its own cells, the scans
+    partition the line, and a line packs in O(cells); re-packing every line is therefore
+    O(`lineCount` × `cells`), not exponential-feeling nonsense. The source comment carried
+    the identical sentence and was corrected in commit `de10e37`, on the same tree, before
+    this pass — this amendment brings the spec into agreement with code it already
+    contradicted. The false sentence is replaced with cost classes only (O(`lineCount` ×
+    `cells`) re-packing every line versus O(`lineCount` + `cells`) for the new type),
+    never a step count or a timing — the standing rule that a comment quoting a measured
+    value rots is exactly how this sentence went stale. The paragraph's real argument is
+    unchanged: `BenchmarkWrapLayout.init` must stay untouched because it *is*
+    `--wrap-compute`'s measured reindex, a query mode has no use for that property, and
+    `WrapPointQueryLayout` packs one line and fills the prefix sum by multiplication.
