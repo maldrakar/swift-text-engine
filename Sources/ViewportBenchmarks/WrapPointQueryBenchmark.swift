@@ -75,19 +75,28 @@ private struct SingleLinePointWrap: WrapMetricsSource {
     func canBreak(beforeColumn column: Int, inLine line: Int) -> Bool { column > 0 && column < cells }
 }
 
-/// This mode's own layout, so the long line is not fighting an O(N x cells) setup.
+/// This mode's own layout: an O(lineCount + cells) construction, where re-packing every
+/// line would be O(lineCount x cells).
 ///
-/// `BenchmarkWrapLayout.init` deliberately re-packs EVERY line -- its init IS
-/// `--wrap-compute`'s measured reindex -- and at `long_line_deep_row`'s 1 000 x 2 000
-/// cells a layout built that way would spend ~10^9 packing steps before the first
-/// measurement, appear to hang, and the nearest remedy to hand is a shorter line, which
-/// silently deletes the term the scenario exists to expose. A QUERY mode measures no
-/// reindex and has no use for that property, and every line in these fixtures is
-/// identical by construction, so this packs ONE line and fills the prefix sum by
-/// multiplication: O(lineCount + cells). `BenchmarkWrapLayout` is NOT touched, and the
-/// two constructions' agreement is asserted on a small shape in
-/// `WrapBenchmarkLineShapeTests` -- the shortcut is valid because of the FIXTURE, not the
-/// type.
+/// `BenchmarkWrapLayout` is NOT touched, and not merely by preference: its init
+/// deliberately re-packs EVERY line, because that init IS `--wrap-compute`'s measured
+/// reindex. Editing it would move another mode's measured quantity. A QUERY mode measures
+/// no reindex and has no use for that property.
+///
+/// What this uses instead: every line in these fixtures is identical by construction, so
+/// it packs ONE line and fills the prefix sum by multiplication -- O(lineCount + cells)
+/// against the re-packing form's O(lineCount x cells). Asymptotically better, and that is
+/// the whole claim: no timing is quoted here, because a comment naming a measured number
+/// is falsified by the next machine that runs it.
+///
+/// Packing one line is O(cells), NOT O(cells x rows): `greedyEnd` breaks at the FIRST
+/// legal end that overflows the width, so each row's scan is bounded by its own cells and
+/// the scans partition the line. So the re-packing form is merely more expensive here, not
+/// pathological -- an earlier draft of this comment claimed otherwise.
+///
+/// The shortcut is valid because of the FIXTURE, not the type, so the two constructions'
+/// agreement is asserted element for element on a small shape in
+/// `WrapBenchmarkLineShapeTests`.
 struct WrapPointQueryLayout: VisualRowLayoutSource {
     let lineCount: Int
     let rowHeight: Double
@@ -137,8 +146,11 @@ private func wrapPointHorizontalClampCode(_ clamp: ColumnLocation.Clamp) -> Int 
     }
 }
 
-/// Folds EVERY returned field under distinct multipliers -- both indices of the row, both
-/// ends of the span, the span's width, the cell, and BOTH clamp flags. Folding one index
+/// Folds every NON-DUPLICATED returned field under distinct multipliers -- both indices of
+/// the row, both ends of the span, the span's width, the cell, and BOTH clamp flags.
+/// `rowSpan.logicalLine` and `rowSpan.rowInLine` are the two deliberate omissions: they
+/// duplicate `row.logicalLine` / `row.rowInLine`, which ARE folded, and agree with them by
+/// construction, because both come from the same cursor walk. Folding one index
 /// would let a release build delete the rest and still print a plausible number;
 /// `PointGeometryChecksumTests` exists because exactly that reversion once passed
 /// silently. `width` is a Double, folded through its bit pattern with

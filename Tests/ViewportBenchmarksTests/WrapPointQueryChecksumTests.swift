@@ -59,4 +59,20 @@ final class WrapPointQueryChecksumTests: XCTestCase {
                      column: .cell(ColumnLocation(columnIndex: 0, clamp: .inRange))))
         XCTAssertNotEqual(blank, cellZero)
     }
+
+    /// The inequality above holds for two independent reasons -- the sentinel, and the
+    /// clamp code starting at 1 -- so it survives DELETING the sentinel: every `.cell`
+    /// contributes at least its clamp code's 32_452_843, which `.blankLine`'s 104_729
+    /// never equals. This golden value pins the sentinel arithmetically instead, on the
+    /// shape `WrapRowQueryChecksumTests.testKnownValue` uses.
+    func testBlankLineGoldenValuePinsTheSentinel() {
+        // 5*1 (globalRow) + 3*31 (logicalLine) + 2*131 (rowInLine)
+        //   + 1*1_009 (vertical clamp .inRange) + 0*3_571 (startColumn) + 0*7_919 (endColumn)
+        //   + Int(0.0.bitPattern)*17 (width) + 104_729 (the .blankLine sentinel)
+        // = 5 + 93 + 262 + 1_009 + 0 + 0 + 0 + 104_729 = 106_098
+        XCTAssertEqual(
+            wrapPointQueryChecksum(
+                location(startColumn: 0, endColumn: 0, width: 0.0, column: .blankLine)),
+            106_098)
+    }
 }
