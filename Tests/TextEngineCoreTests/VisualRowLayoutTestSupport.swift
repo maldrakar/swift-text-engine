@@ -48,8 +48,12 @@ struct TestVisualRowLayout: VisualRowLayoutSource {
 
 /// Hand-riggable `VisualRowLayoutSource` for validation-ladder tests: aggregates are set
 /// directly (so `firstVisualRow(0)`, `totalRows`, `rowHeight`, `wrapWidth`, `lineCount`
-/// can be made malformed). Column metrics are stubbed — `compute(_:layout:)` never reads
-/// them (only the cursor does, and validation tests build no cursor).
+/// can be made malformed). Column metrics are stubbed as a BLANK LINE (`columnCount == 0`,
+/// `columnOffset == 0`): `compute(_:layout:)` never reads them at all, and `visualRowAt`
+/// does not either. `visualPointAt` is the first query that does — it builds the per-line
+/// cursor — so on a rigged layout it sees one packed `[0, 0)` row per line. That is not a
+/// limitation but the fixture for `WrapPointQueryValidationTests`' walk-exhaustion case: a
+/// prefix sum claiming more rows than the packer produces.
 struct RiggedVisualRowLayout: VisualRowLayoutSource {
     let lineCount: Int
     let rowHeight: Double

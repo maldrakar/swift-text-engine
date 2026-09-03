@@ -1000,6 +1000,28 @@ total` guard instead of a carried flag, on an overriding-hook conformer that rec
 calls; drill (k) targets that guard; no ledger row is appended for a `columnAt`-tail
 extraction, because nothing here needs it.
 
+### Decision 15 — D-33's completeness pin rides in 55b, with the fold's weights unchanged
+
+**User call** (2026-09-03, at the slice-55b selection). The slice-55a review's
+falsifiability audit found `--wrap-compute`'s `checksum=` to be the only guarantee in that
+piece with no recorded red — and it is the witness Decisions 12 and 13 rest their
+result-preservation argument on. The pin lands here, in the slice that already adds two
+benchmark-target test files.
+
+Two halves, because the hole has two shapes: the printed value must read **both**
+measurements (the fold is extracted into a pure `wrapComputeChecksum(compute:drain:)` so a
+test can drive it), and the drain half must fold **every** row's `endColumn` rather than
+the first (`drainVisualRows` driven over two layouts differing in exactly one row's
+`endColumn`, as the ledger row prescribes).
+
+**The weights stay 1 and 1.** A weighted fold would additionally catch a swap of the two
+halves, at the cost of changing the printed value — and the Verification section requires
+55b's `--wrap-compute` run to be byte-comparable against **55a's final column**, which is
+the evidence the two decisions rest on. The siblings' distinct-multiplier rule exists to
+stop an *index* fold from colliding; here the two operands come from distinct measurements
+three lines apart, and the swap is not a live defect. Recorded so a later reader does not
+"repair" the weights and silently break the comparison.
+
 ## Component Design
 
 The signature is in Contract 55b. One source for both axes: `VisualRowLayoutSource` refines
@@ -1624,6 +1646,12 @@ slice with its acceptance deferred.
     counts are restated at `3 + 3` clamped and `3 + 3 + 1` delegating, and the record says
     whether Decision 12 was kept on those terms; dropping Decision 13 while leaving Decision
     12's `total` unsourced is not admissible.
+19. **D-33 discharged** (Decision 15): `wrapComputeChecksum(compute:drain:)` is a pure
+    function pinned to read both operands, `drainVisualRows` is pinned to fold every row's
+    `endColumn` over two layouts differing in exactly one of them, both with recorded reds
+    ((n) and (o)) — and each red leaves the sibling guard green (the line-shape pin for
+    (n), D-29's own test for (o)), which is what shows neither existing pin covered it. The
+    printed `checksum=` value is byte-identical to 55a's final column.
 
 ## Risks And Gaps
 
@@ -1841,3 +1869,7 @@ provenance.
     was over-claimed: scan iterations fall by the table's factors, time by 0.45–0.55 at
     `inf`, 0.68–0.80 at `40`, about 0.93 at `10`, because a per-row fixed cost remains once
     the ~1.5 ns/cell scan is gone; Decision 12's table and Contract 55a now say so.
+12. **2026-09-03, eleventh pass** (amendment, not a review pass). **Decision 15** and
+    **AC19** add the D-33 fold-in the slice-55a review made mandatory and the user
+    scheduled into 55b; the 55b plan is written against this amendment. Nothing else in the
+    body changed.
