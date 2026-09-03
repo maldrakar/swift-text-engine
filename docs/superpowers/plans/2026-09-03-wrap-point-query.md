@@ -23,7 +23,7 @@ Every task's requirements implicitly include these.
 - **`--wrap-point-query` is observational**: `isGateable == false`, `--gate` rejected, latency tokens stay prefixed (`query_p95_ns=`), not wired into `.github/workflows/swift-ci.yml`, no budget, no corpus row. `absoluteCeiling` is `.scrollFrame` (spec Benchmark Mode / CI — a decision, not a default).
 - **`BenchmarkWrapLayout` is not touched.** Its `init` *is* `--wrap-compute`'s measured reindex. The new mode gets its own `WrapPointQueryLayout` with an O(`lineCount` + `cells`) construction.
 - **TDD.** Failing test first, minimal implementation, green, commit. Where a pin's red requires breaking shipped code, that is a **drill**: apply the edit, observe the red, record the exact failure line, revert with `git checkout --`, re-run green. A drill is never committed.
-- **Fourteen recorded reds** (spec drills (a), (b), (c), (d1), (d2), (d3), (e), (g), (h), (i), (j), (k) — twelve — plus (n) and (o) for D-33). A guarantee whose drill is missing is an unfinished acceptance criterion (AC14).
+- **Fourteen recorded reds** (spec drills (a), (b), (c), (d1), (d2), (d3), (e), (g), (h), (i), (j), (k) — twelve — plus (n) and (o) for D-33). A guarantee whose drill is missing is an unfinished acceptance criterion (AC14). Task 7 Step 3's **D-32 probe is not one of them** and is not counted as one: its expected outcome is *green*, and that green is the evidence for a bounded claim rather than a broken guarantee. Do not renumber it into the drill list.
 - **Conventional commits**: `feat:`, `test:`, `refactor:`, `docs:`. One logical step per commit. Every commit message ends with:
   ```
   Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
@@ -79,7 +79,7 @@ Every task's requirements implicitly include these.
 | `WrapBenchmarkLineShapeTests.swift` | +3 cases: no bare `p95_ns=`/`p99_ns=` key and the `fast_path=` value the parameters imply; the scenario table's floors; `WrapPointQueryLayout` and `BenchmarkWrapLayout` agree element for element on `firstVisualRow`. |
 | `WrapComputeChecksumTests.swift` | **new** (D-33) — both halves of the `wrap_compute` fold move the value, and `drainVisualRows` folds **every** row's `endColumn`, not the first. |
 
-**Docs**: `AGENTS.md` (node 4 paragraph, commands, both flag lists, "both wrap modes" → three, the `Tests/ViewportBenchmarksTests` inventory head-count), `docs/superpowers/debt-ledger.md` (D-18, D-25, D-33 → `discharged`), the spec's Revision History + Decision 15 + AC19 (the D-33 fold-in), `docs/superpowers/verification/2026-09-03-wrap-point-query.md` (new).
+**Docs**: `AGENTS.md` (node 4 paragraph, commands, both flag lists, "both wrap modes" → three, the `Tests/ViewportBenchmarksTests` inventory head-count), `docs/superpowers/debt-ledger.md` (D-18, D-25, **D-32**, D-33 → `discharged`), the spec's Revision History + Decision 15 + AC19 (the D-33 fold-in), `docs/superpowers/verification/2026-09-03-wrap-point-query.md` (new).
 
 **Untouched on purpose**: `BenchmarkWrapLayout`, every gated benchmark file, `BenchmarkModels.swift`, `.github/workflows/swift-ci.yml`, the corpus, every budget, `docs/superpowers/arcs/wrap.md`'s map (node 4 is marked `done` at the post-slice review, not here — spec Documentation Updates).
 
@@ -611,7 +611,7 @@ Spec Decision 6 (both fixtures, checked by hand there and observed here), Decisi
 - Modify: `Tests/TextEngineCoreTests/WrapPointQueryTests.swift`
 
 **Interfaces:**
-- Produces: `ColumnHookLog` (records every `columnIndex(containingOffset:inLine:)` dispatch) and `OverridingColumnIndexLayout` (a `TestVisualRowLayout` whose column-inverse hook is overridden with the CORRECT answer and every call logged) — Task 5's count fixture 2 uses both.
+- Produces: `ColumnHookLog` (records every `columnIndex(containingOffset:inLine:)` dispatch) and `OverridingColumnIndexLayout` (a `TestVisualRowLayout` whose column-inverse hook is overridden with the CORRECT answer and every call logged). **Used by this task alone.** Task 5's fixture 2 needs a conformer that counts BOTH axes' metric probes *and* overrides BOTH inverse hooks, which this type does not do, so it declares its own `CountingOverridingLayout` around its `ProbeCounter` rather than composing two loggers. The two are kept apart on purpose: this one exists to assert **zero** hook calls, which needs no counter around the metrics at all.
 
 - [ ] **Step 1: Add the overriding-column-hook conformer**
 
@@ -798,7 +798,7 @@ and the hook is never called at x == lineWidth (drill (k)). Neither subsumes
 the other, and each drill leaves the other fixture green.
 
 Adds OverridingColumnIndexLayout, the column-axis mirror of
-OverridingLogicalLineLayout, which Task 5's dispatch counts also need.
+OverridingLogicalLineLayout, for the zero-call assertion fixture 2 needs.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_017mqDLc9fAUHbw7Bkw6uv2f
@@ -1365,7 +1365,12 @@ final class WrapPointQueryCountTests: XCTestCase {
 
         let near = 2
         let far = 10
-        XCTAssertLessThan(far, 19, "neither sample may be the line's last row")
+        // Derived from the fixture, never a literal: written as `XCTAssertLessThan(far, 19)`
+        // this compared two constants and could not fail, so a fixture reshaped to ten rows
+        // would leave `far` ON the last row with the guard still green -- D-25's own shape,
+        // in the task that discharges D-25.
+        XCTAssertLessThan(far, base.visualRowCount(inLine: 0) - 1,
+                          "neither sample may be the line's last row")
         // Rows are [5j, 5j+5): endColumn(10) − endColumn(2) = 55 − 15 = 40 cells the walk
         // must scan between the two samples.
         let mustScan = 55 - 15
@@ -1435,7 +1440,11 @@ Expected: `testColumnCostGrowsWithTheRowInLine` is **RED** — the observed diff
 
 - [ ] **Step 5: D-25 — tighten the redundant bound**
 
-`WrapRowQueryCountTests.testProbeCountDoesNotGrowLinearlyWithTheDocument` asserts `totalCalls < lineCount / 10` (102) while its sibling asserts `<= ceilLog2(lineCount) + 4` (14) on the same fixture and the same located branch. The two probe different `y`, so they are not formally nested, but no independent failure mode is on record. Keep the second target — search depth genuinely varies by target, and the sibling's own comment records 13 at one target and 14 at another — and hold it to the **tight** bound.
+`WrapRowQueryCountTests.testProbeCountDoesNotGrowLinearlyWithTheDocument` asserts `totalCalls < lineCount / 10` (102) while its sibling asserts `<= ceilLog2(lineCount) + 4` (14) on the same fixture and the same located branch. The two probe different `y`, so they are not formally nested, but no independent failure mode is on record.
+
+**Retargeting is what discharges it, not tightening alone.** Over 1 024 lines the default `logicalLine` binary search costs **10** probes at almost every target: row 700 (the sibling's) and row 1 000 (this test's target today) both land on `2 + 10 + 1 = 13`, one probe under the bound. Holding row 1 000 to `<= 14` would therefore leave the test claiming nothing its sibling does not — same fixture, same branch, same count, same bound — which is D-25's own defect restated more precisely, and exactly the "tightening" the row warns against. Only rows **1 022 and 1 023** drive that search to its 11-probe worst case. So the target moves to row **1 022**, where the count is exactly `14` and the bound carries **zero** slack: a claim the sibling (one probe of slack) cannot make, reached on the **in-range** branch, and therefore distinct from `testClampedQueriesStillSearchTheLayoutAxis`, which reaches 14 only through the clamp branch.
+
+The probe counts above are arithmetic over `binarySearchLogicalLine`, not a measurement to take on faith — Step 6 reads the observed number back.
 
 Replace, in `Tests/TextEngineCoreTests/WrapRowQueryCountTests.swift`:
 
@@ -1453,18 +1462,31 @@ Replace, in `Tests/TextEngineCoreTests/WrapRowQueryCountTests.swift`:
 With:
 
 ```swift
-    /// A SECOND search target, held to the same TIGHT bound (D-25, discharged in slice
-    /// 55b). It used to assert `< lineCount / 10` — 102 against a sibling's 14 on the same
-    /// fixture and the same located branch — so no implementation could fail it without
-    /// the sibling failing first; the review recorded it as redundant rather than
-    /// un-failable. What it can now claim that its sibling cannot: binary-search depth
-    /// varies by target (the sibling measures 13 at row 700, this one row 1000), so a
-    /// regression that only lengthens the search for adversarial targets is visible here.
-    func testASecondSearchTargetHoldsTheSameTightBound() {
+    /// The layout axis's IN-RANGE worst case, held to the tight bound with NO slack
+    /// (D-25, discharged in slice 55b). It used to assert `< lineCount / 10` — 102 against
+    /// a sibling's 14 on the same fixture and the same located branch — so no
+    /// implementation could fail it without the sibling failing first.
+    ///
+    /// The TARGET is what gives it a claim the sibling does not make, and tightening alone
+    /// would not have: over 1 024 lines the default `logicalLine` search costs 10 probes at
+    /// almost every target, so row 700 (the sibling) and row 1 000 (this test's old target)
+    /// both measure `2 + 10 + 1 = 13` — same fixture, same branch, same count, same bound.
+    /// Only rows 1 022 and 1 023 reach the search's 11-probe worst case, so row 1 022
+    /// measures exactly `14 == ceilLog2(lineCount) + 4`: one added probe anywhere reddens
+    /// here and nowhere else on the in-range branch.
+    /// `testClampedQueriesStillSearchTheLayoutAxis` also reaches 14, but through the clamp
+    /// branch, which is a different path.
+    func testTheInRangeWorstCaseTargetHasNoSlackAgainstTheBound() {
         let (layout, counter) = counting()
-        guard case .row = ViewportVirtualizer.visualRowAt(y: 1_000.0 * Self.rowHeight + 3.0, layout: layout) else {
+        guard case .row(let located) = ViewportVirtualizer.visualRowAt(
+            y: 1_022.0 * Self.rowHeight + 3.0, layout: layout
+        ) else {
             return XCTFail("expected .row")
         }
+        // Fixture guards: the target must be the one the doc comment names, and it must be
+        // IN RANGE — a clamped target would measure the branch the sibling already covers.
+        XCTAssertEqual(located.globalRow, 1_022)
+        XCTAssertEqual(located.clamp, .inRange)
         XCTAssertLessThanOrEqual(counter.totalCalls, expectedMax)
     }
 ```
@@ -1477,7 +1499,27 @@ swift test --filter WrapRowQueryCountTests 2>&1 | tail -6
 swift test 2>&1 | tail -5
 ```
 
-Expected: both green. If the tightened D-25 assertion fails, record the observed count — a target needing more than `ceilLog2(lineCount) + 4` probes is a finding about the search, not a reason to restore the loose bound.
+Expected: both green. **Read the observed `totalCalls` at row 1 022 back and record it** — the retarget's whole point is that it equals `expectedMax` exactly. A number *below* 14 means the target is not the worst case the doc comment claims, and the target must be re-derived rather than the claim left standing; a number *above* it is a finding about the search, not a reason to restore the loose bound.
+
+The bound's arithmetic, so the number is read rather than assumed:
+
+```bash
+cd /Users/aabanschikov/swift-text-engine
+python3 -c "
+def probes(target, n):
+    low, high, c = 0, n - 1, 0
+    while low <= high:
+        mid = low + (high - low) // 2
+        c += 1
+        if mid <= target: low = mid + 1
+        else: high = mid - 1
+    return c
+for t in (700, 1000, 1022, 1023):
+    print('target=%d search_probes=%d total=%d' % (t, probes(t, 1024), 2 + probes(t, 1024) + 1))
+"
+```
+
+Expected: `total=13` at 700 and 1000, `total=14` at 1022 and 1023. Paste it into the verification record beside the suite's green — it is what makes "zero slack" a read number rather than an assertion about an assertion.
 
 - [ ] **Step 7: Commit**
 
@@ -1668,7 +1710,9 @@ MSG
 
 ## Task 7: Round-trip agreement with the streaming path
 
-Spec Testing Strategy (`WrapPointQueryRoundTripTests`), AC8's second half. The query and `DocumentVisualRowCursor` now answer the *same* question through the *same* helper; this is what notices if a later edit unshares them.
+Spec Testing Strategy (`WrapPointQueryRoundTripTests`), AC8's second half, and **D-32**. The query and `DocumentVisualRowCursor` now answer the *same* question through the *same* helper; this is what notices if a later edit unshares them.
+
+**D-32 is `scheduled(slice-55b)` and is discharged here** (ledger; slice-55a record §9: "the round-trip test AC8 already requires discharges it, *provided* both sides are driven through `advanceVisualRows`. Say so in 55b's record rather than leaving it implicit"). It is a *documentary* discharge with a probe attached, and Step 3 is written so the probe's outcome is recorded whichever way it falls — including the way the ledger row itself predicts, which is green. Do not let it become the fifth instance of the class it names.
 
 **Files:**
 - Create: `Tests/TextEngineCoreTests/WrapPointQueryRoundTripTests.swift`
@@ -1754,9 +1798,49 @@ swift test --filter WrapPointQueryRoundTripTests 2>&1 | tail -6
 swift test 2>&1 | tail -5
 ```
 
-Expected: both green. The round trip has no drill of its own — Decision 4's shared helper makes the two sides agree structurally, and the helper's own rule is pinned by `VisualRowWalkHelperTests` (55a) with drill (f3) on record.
+Expected: both green. The round trip has no **drill** of its own — Decision 4's shared helper makes the two sides agree structurally, and the helper's own rule is pinned by `VisualRowWalkHelperTests` (55a) with drill (f3) on record. What it has instead is Step 3's probe, whose expected outcome is green and whose green is the evidence.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: The D-32 probe — two call sites, one helper, and what that does *not* buy**
+
+D-32 says the shared walk is "pinned by its rule, not by its call site": `VisualRowWalkHelperTests` pins `advanceVisualRows`' own five-case rule, but nothing reddens if `DocumentVisualRowCursor.init` is reverted to the inline `for _ in 0..<rowInStartLine { _ = inner?.next() }` it replaced. 55b is the first tree where a **second** call site exists, so this is where the claim is either enforced or honestly bounded.
+
+First the structural half — both sides go through the helper:
+
+```bash
+cd /Users/aabanschikov/swift-text-engine
+grep -rn 'advanceVisualRows(&' Sources/TextEngineCore
+SITES="$(grep -rn 'advanceVisualRows(&' Sources/TextEngineCore | wc -l | tr -d ' ')"
+if [ "$SITES" -eq 2 ]; then echo "d32_call_sites=2 (DocumentVisualRowCursor.init + visualPointAt)"; else echo "d32_call_sites=$SITES -- expected 2, read the two files"; fi
+```
+
+Expected: two hits — `DocumentVisualRowCursor.swift` and `WrapPointQuery.swift`. The check is on the COUNT, never on `grep`'s exit status (D-2: `grep` exits 1 on no match, which is the very failure this is looking for).
+
+Then the probe. Revert the cursor's call to the inline form and run the round trip:
+
+```bash
+cd /Users/aabanschikov/swift-text-engine
+python3 - <<'PROBE'
+p = 'Sources/TextEngineCore/DocumentVisualRowCursor.swift'
+s = open(p).read()
+old = ('        if var cursor = inner {\n'
+       '            _ = advanceVisualRows(&cursor, by: rowInStartLine)\n'
+       '            inner = cursor\n'
+       '        }')
+new = '        for _ in 0..<rowInStartLine { _ = inner?.next() }   // D-32 PROBE'
+assert old in s
+open(p, 'w').write(s.replace(old, new))
+PROBE
+swift test --filter WrapPointQueryRoundTripTests 2>&1 | tail -6
+swift test 2>&1 | tail -4
+git checkout -- Sources/TextEngineCore/DocumentVisualRowCursor.swift
+swift test --filter WrapPointQueryRoundTripTests 2>&1 | tail -4
+```
+
+**Expected: GREEN, and the green is the finding.** (Pre-observed while this plan was being validated, on the pre-Task-1 tree where only one call site exists: the patch applies cleanly and `swift test` reports `Executed 425 tests, with 0 failures`. The second call site does not change that — the probe only reverts the cursor.) With guard 4 live (`rowInStartLine < 0` cannot reach the loop) the inline form is behaviourally identical, so neither the round trip nor the 425-test suite moves — which is exactly what the ledger row predicts, and the reason it says "no cheap repair exists". Record the observed output verbatim. If it *reddens*, that is the stronger and more interesting result: record which assertion fired and say so, because the row's own prediction would then be wrong.
+
+Either way, this is the sentence 55b's record owes D-32, and Task 10 flips its status on the strength of it: the by-construction property is now **observable** — two callers, one helper, one round trip holding their answers equal on a fixture carrying both of `greedyEnd`'s branches — but it is **not enforced by a red**, because the two forms are behaviourally indistinguishable while the producer guards hold. Enforcement would need a call-site pin rather than a behavioural test, and that is a fresh decision, not this slice's.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 cd /Users/aabanschikov/swift-text-engine
@@ -1770,6 +1854,12 @@ the width and lines that exceed it -- with a guard asserting both are present.
 
 Pins agreement between the query and the cursor, which share advanceVisualRows;
 it is what notices an edit that unshares them.
+
+D-32: with visualPointAt the helper has a second call site, so the property is
+observable rather than unreachable. The probe records what it does NOT buy --
+reverting the cursor to its inline walk stays green, because guard 4 makes the
+two forms behaviourally identical -- so the discharge claims observability, not
+enforcement.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_017mqDLc9fAUHbw7Bkw6uv2f
@@ -1875,8 +1965,11 @@ Four exhaustive switches and two usage strings. Apply each edit by matching text
              .wrapPointQuery:
             return false
 ```
-   and update that arm's comment: "the two wrap modes are observational until map node 6 promotes them" becomes "the **three** wrap modes are observational until map node 6 promotes them".
-4. In `absoluteCeiling`, extend the `.scrollFrame` arm the same way (`.wrapRowQuery,` → `.wrapRowQuery,\n             .wrapPointQuery,`) and update its comment's "five non-gateable modes" to "six".
+   and update **both** counts in that arm's comment, not just the wrap one: "The **five**
+   false cases have no budgets by nature" becomes "The **six** false cases…", and "the two
+   wrap modes are observational until map node 6 promotes them" becomes "the **three** wrap
+   modes are observational until map node 6 promotes them".
+4. In `absoluteCeiling`, extend the `.scrollFrame` arm the same way (`.wrapRowQuery,` → `.wrapRowQuery,\n             .wrapPointQuery,`) and update its comment **and the list inside it**: "The five non-gateable modes (rangeOnly, memoryShape, memoryObservation, wrapCompute, wrapRowQuery)" becomes "The six non-gateable modes (rangeOnly, memoryShape, memoryObservation, wrapCompute, wrapRowQuery, wrapPointQuery)". A count updated without its list is the drift this slice is repairing elsewhere.
 5. In `usage`, add `[--wrap-point-query]` to the `Usage:` line after `[--wrap-row-query]`, and add the option line after the `--wrap-row-query` one:
 ```
       --wrap-point-query    Run the observational wrap-aware (x,y)->(row,cell) point query benchmark (not gateable).
@@ -2254,7 +2347,12 @@ final class WrapPointQueryChecksumTests: XCTestCase {
 
 - [ ] **Step 7: Add the three line-shape cases**
 
-Append inside `final class WrapBenchmarkLineShapeTests` in `Tests/ViewportBenchmarksTests/WrapBenchmarkLineShapeTests.swift`:
+First correct the file's own header comment, which now describes one mode too few: in
+`Tests/ViewportBenchmarksTests/WrapBenchmarkLineShapeTests.swift`, "Both wrap modes' printed
+lines, pinned through their pure formatters." becomes "All three wrap modes' printed lines,
+pinned through their pure formatters."
+
+Then append inside `final class WrapBenchmarkLineShapeTests`:
 
 ```swift
     func testWrapPointQueryLineCarriesItsTokensAndNoBareLatencyKeys() {
@@ -2399,7 +2497,7 @@ git checkout -- Sources/ViewportBenchmarks/WrapPointQueryBenchmark.swift
 swift test 2>&1 | tail -5
 ```
 
-Expected: **RED** — `testWrapPointQueryScenarioParametersAreAtTheirFloors` fails on both the cells floor and `rowInLine == rowsPerLine - 1` (the halved line packs 200 rows, so `399` no longer names its last row). Record both. Then the whole suite green after the revert.
+Expected: **RED** — `testWrapPointQueryScenarioParametersAreAtTheirFloors` fails on **three** assertions, not two: the cells floor (`1_000 >= 2_000`), the derived rows floor (the halved line packs 200 rows, so `200 >= 400` fails), and `rowInLine == rowsPerLine - 1` (`399 != 199`). The `fast_path` loop stays green — `1_000 * 8 <= 40` is still false — which is worth recording too: the parameter pin catches the shortening, the derived-value pin does not. Record all of them from the observed output rather than from this list. Then the whole suite green after the revert.
 
 - [ ] **Step 12: Commit**
 
@@ -2670,7 +2768,7 @@ Spec Documentation Updates (the 55b list), AC11, AC15. `docs/superpowers/arcs/wr
 **Files:**
 - Modify: `AGENTS.md`
 - Modify: `Tests/TextEngineCoreTests/VisualRowLayoutTestSupport.swift` (the `RiggedVisualRowLayout` comment)
-- Modify: `docs/superpowers/debt-ledger.md` (D-18, D-25, D-33 → `discharged`)
+- Modify: `docs/superpowers/debt-ledger.md` (D-18, D-25, **D-32**, D-33 → `discharged`)
 - Modify: `docs/superpowers/specs/2026-08-24-wrap-point-query-design.md` (Decision 15, AC19, Revision History)
 
 - [ ] **Step 1: `AGENTS.md` — the node 4 paragraph**
@@ -2799,10 +2897,12 @@ three lines apart, and the swap is not a live defect. Recorded so a later reader
     printed `checksum=` value is byte-identical to 55a's final column.
 ```
 
-3. Append to Revision History:
+3. Append to Revision History. The list already runs 1–11 (entry 1 is the ratification,
+   entries 2–11 are passes one through ten), so this is entry **12** and the **eleventh
+   pass** — the two numbers differ on purpose and both are stated:
 
 ```markdown
-11. **2026-09-03, eleventh pass** (amendment, not a review pass). **Decision 15** and
+12. **2026-09-03, eleventh pass** (amendment, not a review pass). **Decision 15** and
     **AC19** add the D-33 fold-in the slice-55a review made mandatory and the user
     scheduled into 55b; the 55b plan is written against this amendment. Nothing else in the
     body changed.
@@ -2815,21 +2915,41 @@ In `docs/superpowers/debt-ledger.md`, replace the status cell (the last column) 
 - **D-18** — `open` becomes:
   `discharged([slice 55b](plans/2026-09-03-wrap-point-query.md)): the AC13 checksum-extraction step is written with the `grep -v -e 'mode=memory_shape' -e 'mode=memory_observation'` filter, so the hosted count reads 46 and not 54, and the plan contains no `${PIPESTATUS[0]}` (D-17)`
 - **D-25** — `open` becomes:
-  `discharged([slice 55b](plans/2026-09-03-wrap-point-query.md)): TIGHTENED, not removed. `testProbeCountDoesNotGrowLinearlyWithTheDocument` becomes `testASecondSearchTargetHoldsTheSameTightBound` — the same second target, now held to `<= ceilLog2(lineCount) + 4` instead of `< lineCount / 10`. Reasoning recorded in the test: binary-search depth varies by target (13 probes at row 700, up to 14 at row 1000), so a regression that lengthens the search only for adversarial targets is visible there and nowhere else, which is a claim its sibling does not make`
+  `discharged([slice 55b](plans/2026-09-03-wrap-point-query.md)): TIGHTENED and RETARGETED, not removed. `testProbeCountDoesNotGrowLinearlyWithTheDocument` becomes `testTheInRangeWorstCaseTargetHasNoSlackAgainstTheBound`, held to `<= ceilLog2(lineCount) + 4` instead of `< lineCount / 10`. Tightening alone would NOT have discharged it: over 1 024 lines the default `logicalLine` search costs 10 probes at almost every target, so row 700 (the sibling) and row 1 000 (the old target) both measure 13 — same fixture, same branch, same count, same bound, which is this row's own defect restated. Only rows 1 022 and 1 023 reach the 11-probe worst case, so the target moves to row 1 022, where the count is exactly 14 and the bound carries zero slack. That is the claim the sibling (one probe of slack) does not make, and it is reached on the IN-RANGE branch, unlike `testClampedQueriesStillSearchTheLayoutAxis`'s own 14`
+- **D-32** — `scheduled(slice-55b)` becomes:
+  `discharged([slice 55b](plans/2026-09-03-wrap-point-query.md)): no new apparatus, as this row prescribes. `visualPointAt` is the SECOND call site of `advanceVisualRows(_:by:)`, and `WrapPointQueryRoundTripTests` drives both sides through it — the query on one, `DocumentVisualRowCursor.init` (through `visualRowGeometry`) on the other — over a fixture carrying both of `greedyEnd`'s branches, so "row k of line L" agrees by construction rather than by two tests agreeing. The discharge claims OBSERVABILITY, not enforcement, and the record carries its evidence (Task 7 Step 3): reverting the cursor to its inline walk leaves the round trip and all 425 tests green, because guard 4 makes the two forms behaviourally identical — exactly as this row predicted. Enforcement would need a call-site pin rather than a behavioural test, which is a fresh decision and not this slice's`
 - **D-33** — the `scheduled(slice-55b)` text becomes:
   `discharged([slice 55b](plans/2026-09-03-wrap-point-query.md), spec Decision 15): `WrapComputeChecksumTests` pins both halves — the fold reads both operands (drill (n): returning the compute half alone reddens it while the line-shape pin stays green) and `drainVisualRows` folds every row's `endColumn` (drill (o): folding only the first row reddens it while D-29's own test stays green). The fold's weights stay 1 and 1 on purpose, so the printed value remains byte-comparable with 55a's final column; a weighted fold would buy swap-detection and cost that comparison`
 
 - [ ] **Step 7: Verify the ledger's own conventions still hold**
 
+**`$(NF-1)`, not `$NF`** (D-2). Every ledger row ends with a trailing `|`, so splitting on
+`|` makes the LAST field the empty string after it — `awk '{print $NF}'` prints a blank line
+per row, the `grep -v` keeps all 34 blanks, `$( )` strips them to nothing, and `[ -z ]` is
+true no matter what any status cell says. Verified against a row carrying
+`totally-bogus-status`: the `$NF` form printed `ledger_status=ok`, the `$(NF-1)` form
+printed `ledger_status=BAD`. The status column is the second-to-last field.
+
 ```bash
 cd /Users/aabanschikov/swift-text-engine
-BADSTATUS="$(grep -E '^\| D-' docs/superpowers/debt-ledger.md | awk -F'|' '{print $NF}' | grep -vE 'open|scheduled\(slice-[0-9]+[ab]?\)|discharged\(|deferred\(user, [0-9-]+\)|accepted-risk' || true)"
+BADSTATUS="$(grep -E '^\| D-' docs/superpowers/debt-ledger.md | awk -F'|' '{print $(NF-1)}' | grep -vE 'open|scheduled\(slice-[0-9]+[ab]?\)|discharged\(|deferred\(user, [0-9-]+\)|accepted-risk' || true)"
 if [ -z "$BADSTATUS" ]; then echo "ledger_status=ok"; else echo "ledger_status=BAD"; echo "$BADSTATUS"; fi
 ROWS="$(grep -cE '^\| D-' docs/superpowers/debt-ledger.md)"
 echo "ledger_rows=$ROWS (expect 34)"
 ```
 
 Expected: `ledger_status=ok`, `ledger_rows=34` (this slice opens no new row; if the implementation turns one up, add it and say so here).
+
+Before trusting the `ok`, **prove the check can fail** — the whole reason it was rewritten:
+
+```bash
+cd /Users/aabanschikov/swift-text-engine
+printf '| D-99 | born | P2 | statement | totally-bogus-status |\n' > /tmp/slice55b-ledgercheck.md
+PROOF="$(grep -E '^\| D-' /tmp/slice55b-ledgercheck.md | awk -F'|' '{print $(NF-1)}' | grep -vE 'open|scheduled\(slice-[0-9]+[ab]?\)|discharged\(|deferred\(user, [0-9-]+\)|accepted-risk' || true)"
+if [ -n "$PROOF" ]; then echo "ledger_check_can_fail=yes"; else echo "ledger_check_can_fail=NO -- the check is inert, stop"; fi
+```
+
+Expected: `ledger_check_can_fail=yes`. Record both outputs.
 
 - [ ] **Step 8: Run everything and commit**
 
@@ -2941,13 +3061,16 @@ The `cross-target-compile.sh --self-test` is **shell logic only** — it compile
 Create `docs/superpowers/verification/2026-09-03-wrap-point-query.md` with these sections, each filled from the scratch file named beside it — evidence pasted, not summarized:
 
 1. **Header** — branch, PR, spec, plan, commits in order with their one-line subjects.
-2. **Acceptance-criteria table** — one row per AC this piece owns (1, 2, 3, 4, 5's 55b half, 6, 7, 8's round-trip half, 11, 12, 13, 14, 15, 16, 19), each with its disposition and the section that proves it.
+2. **Acceptance-criteria table** — one row per AC this piece owns (1, 2, 3, 4, 5's 55b half, 6, 7, 8's round-trip half, **9's 55b half**, 11, 12, 13, 14, 15, 16, 19), each with its disposition and the section that proves it. AC9 is listed rather than omitted precisely because its disposition is a deviation (§9), and an AC left off the table reads as an oversight.
 3. **The fourteen drills** — one row each: (a), (b), (c), (d1), (d2), (d3), (e), (g), (h), (i), (j), (k), (n), (o) — with the exact observed failure line, and for the four that are asymmetric ((d1)/(d2) trapping without a query edit, (e)/(k) leaving each other's fixture green, (h) leaving the ±∞ result tests green, (i)'s observed difference against its bound, (n)/(o) leaving their sibling guards green) **both** halves recorded. A drill without its observed red is an unfinished acceptance criterion, not a review finding.
 4. **Suite, release build, Foundation scan** — `/tmp/slice55b/suite.txt`, `/tmp/slice55b/release-build.txt`, the scan's `foundation_scan=empty`.
 5. **The twelve gates** — `/tmp/slice55b/gates.txt` (the 46 summary lines), the `gate_pass`/`gate_fail` counts, and the checksum diff with its `checksum_diff=empty`.
 6. **The three wrap modes and `--memory-shape`** — `/tmp/slice55b/wrap-row-query.txt` with the four-checksum comparison against 55a, `/tmp/slice55b/wrap-point-query.txt` in full (six scenarios), Task 9's `--wrap-compute` output with its three-checksum comparison, `/tmp/slice55b/memory-shape.txt`.
 7. **Hosted proof** — Step 6 below, both runs, at step level.
-8. **Deviations from the spec, with reasons** — the raised scenario floors (Task 8), Decision 15 and AC19 (the D-33 amendment, Task 10), and anything the implementation turned up. A deviation recorded here is a decision; one that is not is drift.
+8. **D-32, stated rather than implied** — Task 7 Step 3's two outputs: the two call sites of `advanceVisualRows`, and the probe reverting the cursor to its inline walk with the suite's response. The sentence the discharge rests on belongs here in full: the shared-helper property is observable (two callers, one helper, one round trip holding them equal) and **not** enforced by a red, with the reason.
+9. **Deviations from the spec, with reasons** — the raised scenario floors (Task 8), the D-25 **retarget** (row 1 022, not 1 000: tightening alone left the test measuring the sibling's own 13, so the discharge needed a different target — Task 5), Decision 15 and AC19 (the D-33 amendment, Task 10), **AC9's 55b half** (below), and anything the implementation turned up. A deviation recorded here is a decision; one that is not is drift.
+
+   **AC9 explicitly.** The criterion reads "an overriding conformer proves the row-axis hook is dispatched, for `visualRowAt` (55a) and `visualPointAt` (55b), **with a recorded red when the dispatch is bypassed**". This slice covers the dispatch — `WrapPointQueryCountTests`' fixture 2 asserts `logicalLineDispatches == 1` on both the clamped and the delegating path, which is AC7's requirement as well — but records **no red** for it, because Contract 55b's drill list (the authoritative distribution) is the twelve named there and carries no dispatch-bypass drill, and D-24's ledger row is already `discharged(slice 55a)` on 55a's own red. So AC9's 55b half is discharged **by assertion, not by drill**, and that is the deviation. The alternative — a `visualPointAt` case in `VisualRowDispatchTests` plus a fifteenth red — was not taken because it adds a guarantee the spec did not scope; if the review disagrees, that is the cheap repair, and it is one test plus one drill.
 
 - [ ] **Step 5: Commit the record and open the PR**
 
@@ -2999,7 +3122,11 @@ gh run view "$RUN" -R maldrakar/swift-text-engine --log > /tmp/slice55b/hosted-p
 echo "gate=pass lines: $(grep -c 'gate=pass' /tmp/slice55b/hosted-prhead.log) (expect 46)"
 echo "gate=fail lines: $(grep -c 'gate=fail' /tmp/slice55b/hosted-prhead.log) (expect 0)"
 rg -n "Executed [0-9]+ tests" /tmp/slice55b/hosted-prhead.log | tail -1
-echo "blocking compile lines: $(grep -c 'result=pass.*blocking=true' /tmp/slice55b/hosted-prhead.log) (expect 8: 4 WASM + 4 iOS)"
+# Job-scoped, per 55a's plan-assertion defect #3: a whole-log grep here prints 8 and reads
+# as a mislabelled "WASM" counter. The two jobs are counted separately so each number is
+# the one AGENTS.md specifies.
+echo "WASM blocking lines: $(awk -F'\t' '$1=="WASM cross-target compile" && /result=pass.*blocking=true/' /tmp/slice55b/hosted-prhead.log | wc -l | tr -d ' ') (expect 4)"
+echo "iOS blocking lines:  $(awk -F'\t' '$1=="iOS cross-target compile" && /result=pass.*blocking=true/' /tmp/slice55b/hosted-prhead.log | wc -l | tr -d ' ') (expect 4)"
 grep -v -e 'mode=memory_shape' -e 'mode=memory_observation' /tmp/slice55b/hosted-prhead.log \
   | sed -nE 's/.*mode=([a-z_]+).*scenario=([^ ]+).*checksum=([0-9-]+).*/\1|\2\t\3/p' | sort -u > /tmp/slice55b/checksums-hosted.tsv
 echo "hosted checksum tuples: $(wc -l < /tmp/slice55b/checksums-hosted.tsv | tr -d ' ') (expect 46)"
@@ -3045,16 +3172,19 @@ Repeat Step 6 with `--branch main`, append to §7, and open the docs-only follow
 | `WrapPointQueryRoundTripTests` | 7 |
 | `WrapPointQueryChecksumTests`, `WrapPointQueryOptionsTests`, three `WrapBenchmarkLineShapeTests` cases | 8 |
 | `--wrap-point-query`: mode, `isGateable`, `absoluteCeiling`, parsing, `--help`, the layout, the scenario table, the checksum, the tokens | 8 |
-| D-25 | 5 |
+| D-25 | 5 (retargeted to row 1 022, not merely tightened) |
 | D-18 | 11 Step 2 (the `grep -v` filter), 10 (the ledger) |
+| D-32 | 7 Step 3 (the probe), 10 (the ledger), 11 Step 4 §8 (the record) |
 | D-33 | 9, 10 |
 | Documentation — `AGENTS.md`, the `RiggedVisualRowLayout` comment, the ledger, the arc (review, not here) | 10, 11 |
 | Verification record + hosted proof, both runs | 11 |
 | Twelve drills (a)–(k) + (n), (o) | 6 (a), 8 (b, c, j), 4 (d1, d2, d3), 3 (e, k), 2 (g), 5 (h, i), 9 (n, o) |
 
-**Deliberately not in this plan** (55a's, already merged): the five guards, `advanceVisualRows`, `validateWrapLine`, the `greedyEnd` short-circuit, `WrapPackingCountTests`, `VisualRowDispatchTests`, `WrapComputeDrainTests`, drills (d1)'s producer half, (f1)–(f4), (l), (m). This plan **consumes** them and re-observes (d1) through the composite. **Deliberately deferred**: the geometry companion (Decision 9), D-13 (Decision 11), node 6's gate promotion, and the map pass itself.
+**Deliberately not in this plan** (55a's, already merged): the five guards, `advanceVisualRows`, `validateWrapLine`, the `greedyEnd` short-circuit, `WrapPackingCountTests`, `VisualRowDispatchTests`, `WrapComputeDrainTests`, drills (d1)'s producer half, (f1)–(f4), (l), (m). This plan **consumes** them and re-observes (d1) through the composite. **Deliberately deferred**: the geometry companion (Decision 9), D-13 (Decision 11), node 6's gate promotion, the map pass itself, AC9's 55b **red** (discharged by assertion instead — Task 11 Step 4 §9 records why), and *enforcement* of D-32's shared-helper property, which a behavioural test structurally cannot buy (Task 7 Step 3).
 
-**2. Placeholder scan.** No "TBD"/"TODO"/"similar to Task N". Every code step carries its code; every assertion carries its expected output and, where the command's exit status is insensitive to the invariant, an `if`/`else` printing both branches. No `${PIPESTATUS[0]}` (D-17). No step asserts this plan's own HEAD commit. Every command block assigns the variables it reads (`FOUNDATION`, `BENCH_FOUNDATION`, `HEADCOUNT`, `BADSTATUS`, `ROWS`, `PASS`, `FAIL`, `DIFF`, `HOSTED_DIFF`, `CHECKSUMS`, `EXPECTED`, `RUN`), and no block reads a variable another block set. The twelve gate invocations are written out rather than looped over a flags variable, because zsh does not word-split an unquoted parameter and the loop would run the default pipeline twelve times while printing `gate=pass` convincingly.
+**2. Placeholder scan.** No "TBD"/"TODO"/"similar to Task N". Every code step carries its code; every assertion carries its expected output and, where the command's exit status is insensitive to the invariant, an `if`/`else` printing both branches. No `${PIPESTATUS[0]}` (D-17). No step asserts this plan's own HEAD commit. Every command block assigns the variables it reads (`FOUNDATION`, `BENCH_FOUNDATION`, `HEADCOUNT`, `BADSTATUS`, `PROOF`, `SITES`, `ROWS`, `PASS`, `FAIL`, `DIFF`, `HOSTED_DIFF`, `CHECKSUMS`, `EXPECTED`, `RUN`), and no block reads a variable another block set.
+
+**Two assertion sites were repaired after this section was first written, and the repairs are recorded rather than folded in silently — a self-review that only ever reports "clean" is the shape D-2 exists to catch.** (i) Task 10 Step 7's ledger-convention check read `awk -F'|' '{print $NF}'`; because every ledger row ends with a trailing `|`, that field is the empty string on every row, so the `grep -v` kept 34 blanks, `$( )` stripped them to nothing, and `[ -z ]` was true whatever the status column said. It is now `$(NF-1)`, and the step carries a positive control that feeds it a `totally-bogus-status` row and asserts the check *does* fire. (ii) Task 5's `XCTAssertLessThan(far, 19, …)` compared two literals and could not fail; it now reads `base.visualRowCount(inLine: 0) - 1`. Both are the class AGENTS.md's rule 2 names — a check whose exit semantics are insensitive to the invariant it claims to guard. The twelve gate invocations are written out rather than looped over a flags variable, because zsh does not word-split an unquoted parameter and the loop would run the default pipeline twelve times while printing `gate=pass` convincingly.
 
 **3. Type consistency.** `VisualPointLocation(row:rowSpan:column:)` is used with that argument order and those labels in Tasks 1, 2, 3, 4, 6, 7 and 8. `VisualRowLocation(globalRow:logicalLine:rowInLine:clamp:)`, `VisualRow(logicalLine:rowInLine:startColumn:endColumn:width:)`, `ColumnLocation(columnIndex:clamp:)` and `ColumnResolution.cell`/`.blankLine` match the shipped declarations in `ViewportTypes.swift`. `validateWrapLine` returns `WrapLineMetrics.valid(count:total:)`; `VisualRowCursor.init(line:columnCount:total:wrapWidth:metrics:)` and `advanceVisualRows(_:by:)` match `VisualRowCursor.swift` and `DocumentVisualRowCursor.swift`. `formatWrapPointQueryLine` is called with the same eleven labels in Task 8's benchmark and in its line-shape test. `wrapComputeChecksum(compute:drain:)` is used with those labels in Task 9's benchmark and test.
 
