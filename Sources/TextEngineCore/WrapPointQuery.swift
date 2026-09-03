@@ -115,6 +115,12 @@ extension ViewportVirtualizer {
         // NEXT row. Clamp the index into the row's span -- and only the index: `x` was
         // inside [0, rowSpan.width), so the flag stays .inRange. Flipping it would report
         // a right-edge hit for a point in the row's interior.
+        //
+        // Only the UPPER half fires under a conforming provider, and that asymmetry is
+        // deliberate: `x >= 0` here, so `rebased >= rowLeft == columnOffset(startColumn)`
+        // and a monotone `columnIndex` hook cannot answer below `startColumn`. The `max`
+        // is defensive symmetry against a provider that violates that contract; it is
+        // kept, and has no recorded red, because no conforming fixture can reach it.
         let index = min(max(raw, rowSpan.startColumn), rowSpan.endColumn - 1)
         return .point(VisualPointLocation(
             row: row, rowSpan: rowSpan,

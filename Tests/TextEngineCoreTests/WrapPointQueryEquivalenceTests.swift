@@ -40,7 +40,11 @@ final class WrapPointQueryEquivalenceTests: XCTestCase {
         return ys
     }
 
-    /// Exact cell boundaries, interiors, and both clamps for every line in the fixture.
+    /// Interiors and both clamps for every line in the fixture, and exact cell boundaries
+    /// for lines 0 and 1 (offsets `[0, 7, 10, 21]` and `[0, 5]`, all present below). Lines
+    /// 2 and 4 are covered at their interiors and at some of their boundaries only —
+    /// `6.0` (line 2) and `9.0` (line 4) are not in the sweep. Line 3 is blank and has no
+    /// cell boundary to hit.
     private static let xs: [Double] = [-100.0, -0.001, 0.0, 0.001, 1.0, 2.0, 4.0, 5.0,
                                        6.999, 7.0, 8.0, 10.0, 20.0, 21.0, 1_000.0]
 

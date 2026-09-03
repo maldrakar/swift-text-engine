@@ -8,7 +8,10 @@ PR: opened by this record's own commit (Task 11 Step 5) — see the post-merge f
 appended to §7 once the number and hosted proof are known; Step 6/7 (both hosted proofs)
 are explicitly out of this task's scope and land as separate commits.
 
-Fifteen commits, in order (`main..HEAD`):
+Seventeen commits (`main..HEAD`) once this record's own fix-wave commit lands. Sixteen are
+listed below by SHA; the seventeenth **is** the fix-wave commit carrying this sentence, so it
+cannot name its own hash — committing it would change it. The count was re-checked after that
+commit landed (`git log main..HEAD --oneline | wc -l` → 17).
 
 1. `38028db` docs: record the slice-55b selection and the three routed P2 calls
 2. `7852e92` docs: slice 55b implementation plan (node 4, visualPointAt)
@@ -25,6 +28,8 @@ Fifteen commits, in order (`main..HEAD`):
 13. `eb04ba4` test: pin the wrap-compute checksum's completeness (D-33)
 14. `aa10b76` docs: node 4 in AGENTS.md; discharge D-18, D-25 and D-33; amend the spec
 15. `e563794` docs: retract the spec's ~10^9/appear-to-hang claim (fix round 1)
+16. `6913fe7` docs: slice 55b plan and verification record
+17. *(this commit)* the post-review fix wave — six findings, two new recorded reds (§9 item 7)
 
 ## 1. Acceptance criteria owned by this piece
 
@@ -41,8 +46,8 @@ Fifteen commits, in order (`main..HEAD`):
 | 9, 55b half (D-24: dispatch proven for `visualPointAt`, with a recorded red) | **Deviation — discharged by assertion, not by drill.** `WrapPointQueryCountTests`' fixture 2 asserts `logicalLineDispatches == 1` on both the clamped and the delegating path, but Contract 55b's drill list carries no dispatch-bypass drill and D-24's ledger row is already `discharged(slice 55a)` on 55a's own red. See §9 | §9 |
 | 11 (D-25 discharged) | **Met** — retargeted (not merely tightened) to row 1 022, `testTheInRangeWorstCaseTargetHasNoSlackAgainstTheBound`, `totalCalls` read back as 14 with zero slack. See §9 for why a tightened-in-place bound would not have discharged it | §2, §9 |
 | 12 (`--wrap-point-query`: six scenarios, tokens, checksum, floors, `--gate`/second-flag rejected, two test files) | **Met, with a recorded floor deviation** — six scenario lines, `fast_path=` printed, `row_in_line=` only on `long_line_deep_row`, prefixed `query_p95_ns=`/`query_p99_ns=`, checksum folding every non-duplicated field; `WrapPointQueryOptionsTests` + `WrapPointQueryChecksumTests` + 3 `WrapBenchmarkLineShapeTests` cases; drills (b)/(c)/(j). Floors raised to `cells >= 2_000` / `rowsPerLine >= 400` (§9) | §6, §9 |
-| 13 (Foundation scan empty, suite green, release build clean, gated checksums byte-identical) | **Met** — `foundation_scan=empty`, `Executed 479 tests, with 0 failures`, `Build complete!`, 46/46 checksum tuples, `checksum_diff=empty` | §4, §5 |
-| 14 (every standing guarantee carries a recorded red) | **Met** — fourteen drills, §3, plus the bonus fifteenth (§3 note) | §3 |
+| 13 (Foundation scan empty, suite green, release build clean, gated checksums byte-identical) | **Met** — `foundation_scan=empty`; `Executed 479 tests, with 0 failures` at Task 11 and `Executed 480 tests, with 0 failures` after the fix wave; `Build complete!`, 46/46 checksum tuples, `checksum_diff=empty` (the wave changes no gated output — its only `Sources/` edit is a doc comment) | §4, §5 |
+| 14 (every standing guarantee carries a recorded red) | **NOT met as shipped at Task 11; met after the post-review fix wave.** Fourteen drills plus the bonus fifteenth were recorded — but the final whole-branch review found **two shipped guards that survived deletion with the whole suite green**: Decision 14's `>= total` *answer* (the fixture's located row held one cell, where the right answer and a plausible wrong one are the same index) and step 7's `!rebased.isFinite` guard (no test at all). Both now carry a recorded red — drills **(p)** and **(q)**. One guarantee remains **deliberately** without one: Decision 6's lower clamp half, unreachable by any conforming provider (§9 item 7). This row is not rewritten into having always been met | §3, §9 |
 | 15 (D-18 discharged unconditionally) | **Met** — the checksum-extraction step (§5) uses the `grep -v -e 'mode=memory_shape' -e 'mode=memory_observation'` filter; no `${PIPESTATUS[0]}` anywhere in this record's commands | §5 |
 | 16 (hosted evidence, both runs, step level) | **Pending — out of this task's scope.** Step 6 (PR-head) and Step 7 (post-merge) are performed by the controller after this record's commit and PR are created; §7 is a placeholder | §7 |
 | 19 (D-33 discharged, Decision 15) | **Met** — `wrapComputeChecksum(compute:drain:)` extracted as a pure function pinned to read both operands (drill (n)); `drainVisualRows` pinned to fold every row's `endColumn` (drill (o)); printed `checksum=` byte-identical to 55a's final column on all three widths | §6, §8 |
@@ -68,7 +73,7 @@ Source files added/modified: `Sources/TextEngineCore/ViewportTypes.swift` (`Visu
 `Sources/ViewportBenchmarks/WrapPointQueryBenchmark.swift` (new),
 `Sources/ViewportBenchmarks/WrapComputeBenchmark.swift` (`wrapComputeChecksum` extraction).
 
-## 3. The fourteen drills, plus one bonus
+## 3. The fourteen drills, plus one bonus and two fix-wave additions
 
 Every named guarantee's recorded red, with the exact observed failure line(s) and, for the
 asymmetric ones, both halves.
@@ -226,6 +231,56 @@ caught a defect the golden pin now can. This is an extra beyond the fourteen enu
 drills, added because Task 8's fix round found the golden pin itself needed proving it could
 fail; the fourteen are not renumbered.
 
+**Two fix-wave additions, (p) and (q) — also not a renumbering.** The final whole-branch
+review found two shipped guards with no recorded red (§9 item 7). Both are drilled below.
+The fourteen enumerated drills and the bonus fifteenth above are untouched; these are
+*additions*, and the letters continue past (o) rather than filling the (l)/(m) gap.
+
+**Revert discipline, stated because it is the defect a drill exists to catch.** Both drills
+mutate `Sources/TextEngineCore/WrapPointQuery.swift` while the working tree carried
+*uncommitted* fixes to three test files and the plan. `git checkout --` was therefore
+deliberately **not** used. The file was copied to a scratch path before the first mutation
+and restored from that copy after each one; every restore was verified byte-identical by
+`diff -q` **and** by md5 (`f8371ad972755d0758b3406ade2f057a` before and after both drills),
+and the restored guard line was re-grepped, before the suite was re-run green.
+
+**(p) — fix-wave addition. Decision 14's `>= total` ANSWER,
+`Sources/TextEngineCore/WrapPointQuery.swift` `raw = rowSpan.endColumn - 1` →
+`raw = rowSpan.startColumn`.**
+
+```
+/Users/aabanschikov/swift-text-engine/Tests/TextEngineCoreTests/WrapPointQueryTests.swift:259: error: -[TextEngineCoreTests.WrapPointQueryTests testFixtureTwoAnswersFromTheTotalGuardWithoutCallingTheHook] : XCTAssertEqual failed: ("cell(TextEngineCore.ColumnLocation(columnIndex: 1, clamp: TextEngineCore.ColumnLocation.Clamp.inRange))") is not equal to ("cell(TextEngineCore.ColumnLocation(columnIndex: 2, clamp: TextEngineCore.ColumnLocation.Clamp.inRange))")
+```
+`Executed 480 tests, with 1 failure (0 unexpected)`. **The same mutation left the whole suite
+GREEN under the fixture as shipped at Task 11.** That fixture's advances were `[1e16, 4.0]`,
+so its located row was `[1, 2)` — ONE cell, where `rowSpan.endColumn - 1` and
+`rowSpan.startColumn` denote the *same* index. The fixture therefore pinned only that the
+guard *fires*, never what it *answers*. The fix widens it to `[1e16, 2.0, 2.0]` with a break
+before column 1 only (column 2 is deliberately not a break opportunity, so the packer cannot
+split the tail back into two rows), making the located row `[1, 3)` and the expected answer
+`columnIndex: 2` where `startColumn` would answer 1. The widened test now asserts its own
+two-cell minimum, so the gap cannot silently reopen. Reverted; re-run
+`Executed 480 tests, with 0 failures (0 unexpected)`.
+
+**(q) — fix-wave addition. Step 7's non-finite rebase guard,
+`if !rebased.isFinite { return .failure(.nonFiniteValue) }`, deleted.**
+
+```
+/Users/aabanschikov/swift-text-engine/Tests/TextEngineCoreTests/WrapPointQueryValidationTests.swift:89: error: -[TextEngineCoreTests.WrapPointQueryValidationTests testANonFiniteInteriorColumnOffsetFails] : XCTAssertEqual failed: ("point(TextEngineCore.VisualPointLocation(row: TextEngineCore.VisualRowLocation(globalRow: 1, logicalLine: 0, rowInLine: 1, clamp: TextEngineCore.LineLocation.Clamp.inRange), rowSpan: TextEngineCore.VisualRow(logicalLine: 0, rowInLine: 1, startColumn: 1, endColumn: 2, width: inf), column: TextEngineCore.ColumnResolution.cell(TextEngineCore.ColumnLocation(columnIndex: 1, clamp: TextEngineCore.ColumnLocation.Clamp.inRange))))") is not equal to ("failure(TextEngineCore.ViewportValidationError.nonFiniteValue)")
+```
+`Executed 480 tests, with 1 failure (0 unexpected)`. **Before the fix wave this guard had no
+test at all** — deleting it was entirely silent. The failure text states the defect exactly:
+without the guard the query fabricates `.cell(columnIndex: 1, .inRange)` for a coordinate that
+has no cell, where Decision 5 promises `.failure(.nonFiniteValue)`. The new conformer
+`PoisonedInteriorOffsetLayout` reaches step 7 by poisoning an **interior** `columnOffset` with
+`-∞` — the per-line ladder validates `columnOffset(0) == 0` and `columnOffset(count)` only and
+trusts everything between, so an interior offset is the only route to the guard. The sign is
+forced, not chosen: at `+∞` the located row's width is `columnOffset(end) - rowLeft = -∞`, so
+step 6's `x >= rowSpan.width` clamps right *before* step 7 and the guard is bypassed. The test
+asserts its own reachability (three packed rows, row 1 starting at the poisoned column, width
+`+∞`) and carries a finite-row control. Reverted; re-run
+`Executed 480 tests, with 0 failures (0 unexpected)`.
+
 ## 4. Suite, release build, Foundation scan
 
 ```
@@ -258,6 +313,22 @@ benchmarks_import_foundation=none
 added) + 2 (Task 6) + 1 (Task 7) + 11 (Task 8) + 1 (Task 8 fix round, the golden pin) + 2
 (Task 9) + 0 (Task 10, docs-only) = 479. Matches the per-task reports' running counts
 exactly.
+
+**After the post-review fix wave the count is 480.** The wave adds exactly one test —
+`WrapPointQueryValidationTests.testANonFiniteInteriorColumnOffsetFails` (Finding 2, drill
+(q)). Finding 1 *widened an existing fixture* rather than adding a case, so it moves no
+count. 479 + 1 = 480. Observed on the reverted tree at the end of the wave:
+
+```
+$ swift test 2>&1 | grep -E "(error:|Executed 480 tests)" | tail -5
+	 Executed 480 tests, with 0 failures (0 unexpected) in 5.962 (5.990) seconds
+	 Executed 480 tests, with 0 failures (0 unexpected) in 5.962 (5.991) seconds
+```
+
+(`grep` is on the right of the pipe here only to *display* the result; the pass/fail claim
+rests on the `0 failures` count in the line itself, not on the pipeline's exit status, which
+is `grep`'s and would be 0 either way. `${PIPESTATUS[0]}` is deliberately not used anywhere
+in this record — see AC15.)
 
 ## 5. The twelve gates and the checksum baseline diff
 
@@ -559,6 +630,56 @@ text calls the shared helper), which is a different, un-taken decision.
      hand-computed from the fixture's advances rather than algebraically derived from the
      test's own `near`/`far` variables — correct today, but a latent transcription risk if
      the fixture ever changes without the literal being re-derived by hand again.
+
+7. **A post-review fix wave, landed after this record was first written.** The final
+   whole-branch review returned six findings; all six are fixed on this branch before merge,
+   in one commit (entry 17 of the commit list above). **`visualPointAt`'s behaviour is
+   unchanged by the wave** — findings 1 and 2 were *test* gaps, not engine defects, and the
+   only edit under `Sources/` is a doc comment (finding 3). That is why §5's 46 gated
+   checksum tuples and the `checksum_diff=empty` result are untouched by it — **re-verified,
+   not asserted**: the twelve gated invocations of §5 were re-run at the end of the wave, all
+   twelve exited 0, all 46 summary lines read `gate=pass`, and the 46
+   `(mode, provider, scenario, checksum)` tuples compare byte-identical to the block in §5.
+
+   - **Finding 1 — a fixture that could not separate the right answer from a wrong one.**
+     Decision 14's `>= total` branch answers `rowSpan.endColumn - 1`. Fixture 2's located row
+     (advances `[1e16, 4.0]`, row `[1, 2)`) held exactly **one** cell, where that expression
+     and `rowSpan.startColumn` denote the same index — so mutating the branch to the wrong
+     one left the entire suite green. The fixture pinned that the guard *fires*, not what it
+     *answers*. Widened to `[1e16, 2.0, 2.0]` (row `[1, 3)`, two cells, column 2 not a break
+     opportunity) and drilled: **(p)**. Generalised lesson, already in the ledger's idiom: a
+     pin is only as strong as the fixture's ability to *separate* the answers, and where two
+     quantities coincide no assertion in them can tell the branches apart.
+   - **Finding 2 — a shipped guard with no test.** Step 7's `!rebased.isFinite` check had no
+     coverage at all; deleting it was silent. New conformer `PoisonedInteriorOffsetLayout`
+     plus `testANonFiniteInteriorColumnOffsetFails`, drilled: **(q)**.
+   - **Finding 3 — Decision 6's lower clamp half is deliberately left without a red.** The
+     clamp is `min(max(raw, rowSpan.startColumn), rowSpan.endColumn - 1)`, and only the
+     **upper** half can fire under a conforming provider: control reaches it only with
+     `x >= 0`, so `rebased >= rowLeft == columnOffset(startColumn)`, and a monotone
+     `columnIndex` hook cannot answer below `startColumn`. The `max` is defensive symmetry
+     against a provider that violates that contract. **No conforming fixture can reach it**,
+     so it carries no recorded red, and the asymmetry is now recorded in the source comment
+     rather than papered over with a deliberately non-conforming fixture built only to make a
+     drill redden — which would pin the mock, not the guarantee. This is the single standing
+     exception to AC14 after the wave, and it is named as such in the §1 table.
+   - **Findings 4 and 5 — documentation corrections.** The plan
+     (`docs/superpowers/plans/2026-09-03-wrap-point-query.md`) restated the retracted
+     "~10⁹ packing steps"/"appear to hang" claim (item 3 above) at **two** sites — the doc
+     comment it prescribes, and the Task 8 commit-message body it prescribes. Both are
+     rewritten to cost classes, each carrying a bracketed editorial retraction note so the
+     change reads as a correction rather than as history quietly rewritten.
+     `WrapPointQueryEquivalenceTests`' "exact cell boundaries for every line" comment was
+     corrected in the same wave.
+   - **Finding 6 — this record.** The commit count (was "Fifteen", the branch carried 16
+     before the wave's own commit and 17 after), the test count (was 479, now 480), the two
+     new recorded reds, the honest AC14 disposition, and this entry.
+
+   **AC14 is not silently rewritten.** Its §1 row states what was true before the wave — two
+   shipped guards survived deletion with the whole suite green, so the criterion was **not**
+   met as shipped at Task 11 — and what is true after, with the one deliberate exception
+   above. The governing rule this discharges: *a guarantee whose drill is missing is an
+   unfinished acceptance criterion, not a review finding.*
 
 Two decisions recorded elsewhere and cross-referenced here for completeness: **Decision 15
 and AC19** (the D-33 fold-in, `wrapComputeChecksum`/`drainVisualRows` completeness pins,

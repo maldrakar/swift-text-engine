@@ -201,15 +201,22 @@ final class WrapPointQueryTests: XCTestCase {
             rowHeight: rowHeight, wrapWidth: 4.0)
     }
 
-    /// Fixture 2 — drop the third advance and the rounding lands on the LINE's width, so
-    /// Decision 14's `>= total` guard answers and the hook is never called (calling it
-    /// would violate its `x < lineWidth` precondition).
+    /// Fixture 2 — split the tail into two cells and the rounding lands on the LINE's
+    /// width, so Decision 14's `>= total` guard answers and the hook is never called
+    /// (calling it would violate its `x < lineWidth` precondition).
     ///
-    ///   advances [1e16, 4] -> offsets [0, 1e16, 1e16+4], break before 1
-    ///   wrapWidth 4:  row 0 = [0,1) (overflow), row 1 = [1,2) rowLeft 1e16 width 4
+    /// The located row must hold at least TWO cells. With a one-cell row the guard's
+    /// answer (`endColumn - 1`) and a wrong one (`startColumn`) are the SAME index, so the
+    /// fixture would pin only that the guard fires and not what it answers — a mutation to
+    /// `raw = rowSpan.startColumn` survived the earlier single-cell fixture with the whole
+    /// suite green. Column 2 is deliberately NOT a break opportunity, so the packer cannot
+    /// split the tail back into two rows.
+    ///
+    ///   advances [1e16, 2, 2] -> offsets [0, 1e16, 1e16+2, 1e16+4], break before 1 only
+    ///   wrapWidth 4:  row 0 = [0,1) (overflow), row 1 = [1,3) rowLeft 1e16 width 4
     private static func fpGuardLayout() -> TestVisualRowLayout {
         TestVisualRowLayout(
-            lines: [(advances: [1e16, 4.0], breaks: [1])],
+            lines: [(advances: [1e16, 2.0, 2.0], breaks: [1])],
             rowHeight: rowHeight, wrapWidth: 4.0)
     }
 
@@ -237,12 +244,19 @@ final class WrapPointQueryTests: XCTestCase {
         let layout = OverridingColumnIndexLayout(base: Self.fpGuardLayout(), log: log)
 
         XCTAssertEqual(layout.firstVisualRow(ofLine: 1), 2, "fixture: two rows")
+        XCTAssertEqual(1e16 + 3.9, 1e16 + 4.0, "fixture: 3.9 must round up at this magnitude")
 
         guard case .point(let point) = ViewportVirtualizer.visualPointAt(x: 3.9, y: 15.0, layout: layout) else {
             return XCTFail("expected .point")
         }
-        XCTAssertEqual(point.rowSpan, VisualRow(logicalLine: 0, rowInLine: 1, startColumn: 1, endColumn: 2, width: 4.0))
-        XCTAssertEqual(point.column, .cell(ColumnLocation(columnIndex: 1, clamp: .inRange)))
+        XCTAssertEqual(point.rowSpan, VisualRow(logicalLine: 0, rowInLine: 1, startColumn: 1, endColumn: 3, width: 4.0))
+        // The fixture must SEPARATE the guard's answer from the plausible wrong one, or it
+        // pins only that the guard fires. Two cells is the minimum that does.
+        XCTAssertGreaterThanOrEqual(point.rowSpan.endColumn - point.rowSpan.startColumn, 2,
+                                    "fixture: the guard's row must hold at least two cells")
+        // x = 3.9 is inside the row's SECOND cell (row-relative [2, 4)): `endColumn - 1`
+        // answers 2, and `raw = rowSpan.startColumn` would answer 1.
+        XCTAssertEqual(point.column, .cell(ColumnLocation(columnIndex: 2, clamp: .inRange)))
         XCTAssertEqual(log.callCount, 0,
                        "rebased == total: the guard must answer, and the hook must not be called at x == lineWidth")
     }

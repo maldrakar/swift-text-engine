@@ -44,6 +44,59 @@ final class WrapPointQueryValidationTests: XCTestCase {
         func firstVisualRow(ofLine line: Int) -> Int { base.firstVisualRow(ofLine: line) }
     }
 
+    /// A layout whose `columnOffset` is non-finite at an INTERIOR column — the class the
+    /// per-line ladder deliberately does not re-validate. `validateWrapLine` checks
+    /// `columnOffset(0) == 0` and that `columnOffset(count)` is finite and positive, and
+    /// trusts everything between, so this is the only way to reach step 7's
+    /// `!rebased.isFinite` guard.
+    ///
+    /// `-∞` and not `+∞`, and the choice is forced: at `+∞` the located row's width is
+    /// `columnOffset(end) - rowLeft = -∞`, so step 6's `x >= rowSpan.width` is true and the
+    /// query clamps right before it ever reaches step 7 — the guard would be bypassed. At
+    /// `-∞` the width is `+∞`, both clamps fall through, and `rebased = -∞ + x` reaches it.
+    ///
+    ///   offsets [0, -∞, 20, 30], breaks before 1 and 2, wrapWidth 10
+    ///   packs to [0,1) (width -∞), [1,2) (width +∞), [2,3) (width 10) — three rows, so the
+    ///   aggregates below agree with the packer under the POISONED metrics, not the honest
+    ///   ones (a disagreement would fail the walk instead, proving nothing about step 7).
+    private struct PoisonedInteriorOffsetLayout: VisualRowLayoutSource {
+        static let offsets: [Double] = [0.0, -.infinity, 20.0, 30.0]
+        let lineCount = 1
+        let rowHeight = 10.0
+        let wrapWidth = 10.0
+        func columnCount(inLine line: Int) -> Int { Self.offsets.count - 1 }
+        func columnOffset(inLine line: Int, column: Int) -> Double { Self.offsets[column] }
+        func canBreak(beforeColumn column: Int, inLine line: Int) -> Bool { column == 1 || column == 2 }
+        func visualRowCount(inLine line: Int) -> Int { 3 }
+        func firstVisualRow(ofLine line: Int) -> Int { line == 0 ? 0 : 3 }
+    }
+
+    /// Step 7's `!rebased.isFinite` guard. Without it the query answers
+    /// `.cell(startColumn, .inRange)` — a fabricated cell for a coordinate that has none —
+    /// where Decision 5 promises `.failure(.nonFiniteValue)`.
+    func testANonFiniteInteriorColumnOffsetFails() {
+        let layout = PoisonedInteriorOffsetLayout()
+
+        // The fixture must actually reach step 7, or this test proves nothing: three packed
+        // rows (so the walk succeeds), and a located row whose left edge is the poisoned
+        // column and whose width is +∞ (so neither clamp fires).
+        let rows = collectRows(ViewportVirtualizer.visualRows(inLine: 0, wrapWidth: 10.0, metrics: layout))
+        XCTAssertEqual(rows.count, 3, "fixture: the poisoned metrics must still pack three rows")
+        XCTAssertEqual(rows[1].startColumn, 1, "fixture: row 1 must START at the poisoned column")
+        XCTAssertEqual(rows[1].width, .infinity, "fixture: the width must be +∞, or step 6 clamps first")
+
+        // y = 15 -> global row 1; x = 5 is finite, non-negative and below +∞.
+        XCTAssertEqual(ViewportVirtualizer.visualPointAt(x: 5.0, y: 15.0, layout: layout),
+                       .failure(.nonFiniteValue))
+
+        // Control: the SAME query one row later, where the offsets are finite, locates a
+        // cell — so the failure above is the poisoned offset and not the fixture.
+        guard case .point(let point) = ViewportVirtualizer.visualPointAt(x: 5.0, y: 25.0, layout: layout) else {
+            return XCTFail("expected .point on the finite row")
+        }
+        XCTAssertEqual(point.column, .cell(ColumnLocation(columnIndex: 2, clamp: .inRange)))
+    }
+
     // ---- The vertical rungs, propagated verbatim from visualRowAt ----
 
     func testNegativeLineCountFails() {

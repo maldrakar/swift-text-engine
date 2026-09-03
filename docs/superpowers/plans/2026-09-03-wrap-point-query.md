@@ -2075,16 +2075,34 @@ private struct SingleLinePointWrap: WrapMetricsSource {
 /// This mode's own layout, so the long line is not fighting an O(N x cells) setup.
 ///
 /// `BenchmarkWrapLayout.init` deliberately re-packs EVERY line -- its init IS
-/// `--wrap-compute`'s measured reindex -- and at `long_line_deep_row`'s 1 000 x 2 000
-/// cells a layout built that way would spend ~10^9 packing steps before the first
-/// measurement, appear to hang, and the nearest remedy to hand is a shorter line, which
-/// silently deletes the term the scenario exists to expose. A QUERY mode measures no
-/// reindex and has no use for that property, and every line in these fixtures is
-/// identical by construction, so this packs ONE line and fills the prefix sum by
-/// multiplication: O(lineCount + cells). `BenchmarkWrapLayout` is NOT touched, and the
-/// two constructions' agreement is asserted on a small shape in
-/// `WrapBenchmarkLineShapeTests` -- the shortcut is valid because of the FIXTURE, not the
-/// type.
+/// `--wrap-compute`'s measured reindex -- so a layout built that way would pay
+/// O(lineCount x cells) before the first measurement, and the nearest remedy to hand is a
+/// shorter line, which silently deletes the term the scenario exists to expose. A QUERY
+/// mode measures no reindex and has no use for that property, and every line in these
+/// fixtures is identical by construction, so this packs ONE line and fills the prefix sum
+/// by multiplication: O(lineCount + cells). Packing one line is O(cells), NOT
+/// O(cells x rows) -- `greedyEnd` breaks at the FIRST legal end that overflows the width,
+/// so each row's scan is bounded by its own cells and the scans partition the line.
+/// `BenchmarkWrapLayout` is NOT touched, and the two constructions' agreement is asserted
+/// on a small shape in `WrapBenchmarkLineShapeTests` -- the shortcut is valid because of
+/// the FIXTURE, not the type.
+```
+
+> **[Editorial note — fix round 2, added after implementation.]** The doc comment above
+> originally prescribed the sentence "a layout built that way would spend ~10^9 packing
+> steps before the first measurement, appear to hang, and the nearest remedy to hand is a
+> shorter line". **That claim was false by roughly three orders of magnitude and has been
+> retracted.** `greedyEnd` (`Sources/TextEngineCore/VisualRowCursor.swift:76-93`) `break`s
+> at the first legal end that overflows the width, so each row's scan is bounded by its own
+> cells and the rows' scans partition the line: packing one line is O(`cells`), and
+> re-packing every line is O(`lineCount` × `cells`) — not a step count in the billions, and
+> not a hang. The retraction landed in the source comment (commit `de10e37`) and the spec
+> (commit `e563794`, Revision History entry 13); the text above is now the cost-class
+> framing those carry, with **no substituted step count or timing** — a comment naming a
+> measured number is falsified by the next machine that runs it (see MEMORY,
+> "Comments that restate measured values rot"). Git history is deliberately not rewritten.
+
+```swift
 struct WrapPointQueryLayout: VisualRowLayoutSource {
     let lineCount: Int
     let rowHeight: Double
@@ -2514,9 +2532,9 @@ exist; long_line_deep_row is new -- 400 rows per line queried at the last row,
 so the within-line walk is measured instead of averaged away.
 
 Its own O(lineCount + cells) layout type: BenchmarkWrapLayout re-packs every
-line on purpose (its init IS --wrap-compute's measured reindex) and would spend
-~10^9 packing steps on this fixture, whose nearest remedy is a shorter line --
-the failure mode that looks like a passing benchmark. The two constructions'
+line on purpose (its init IS --wrap-compute's measured reindex), which is
+O(lineCount x cells) on this fixture, and whose nearest remedy is a shorter line
+-- the failure mode that looks like a passing benchmark. The two constructions'
 prefix sums are compared element for element.
 
 Not gateable, --gate rejected, latency keys prefixed so no corpus row is
@@ -2531,6 +2549,16 @@ Claude-Session: https://claude.ai/code/session_017mqDLc9fAUHbw7Bkw6uv2f
 MSG
 )"
 ```
+
+> **[Editorial note — fix round 2, added after implementation.]** The commit body above
+> originally read "would spend ~10^9 packing steps on this fixture, whose nearest remedy is
+> a shorter line". **That step count was false by roughly three orders of magnitude and has
+> been retracted**, for the reason recorded at the doc-comment site in Task 8 Step 1:
+> `greedyEnd` breaks at the first legal end that overflows the width, so packing one line is
+> O(`cells`) and re-packing every line is O(`lineCount` × `cells`). The text above is now
+> that cost class with **no substituted step count or timing**. The commit this block
+> produced (`8ad909f`) still carries the superseded sentence in its own message and is
+> deliberately **not** rewritten — the correction lives in `de10e37`, `e563794`, and here.
 
 ---
 
