@@ -128,13 +128,30 @@ final class WrapPointQueryCountTests: XCTestCase {
 
     // ---- Counter 1: the layout axis ----
 
+    /// The IN-RANGE branch, at the target where the bound carries ZERO slack.
+    ///
+    /// The target is load-bearing, and picking it by convenience is the D-25 defect this
+    /// same slice discharges on the sibling axis: over 1 024 lines the default
+    /// `logicalLine` search costs 10 probes at almost every row, so row 700 measures
+    /// `2 + 10 + 1 = 13` against a bound of 14 — one probe of slack, and a `visualPointAt`
+    /// that added a layout-axis probe would pass. Only rows 1 022 and 1 023 reach the
+    /// search's 11-probe worst case, where the count is exactly `ceilLog2(lineCount) + 4`.
+    /// `testClampedQueriesDoNotWidenTheLayoutBound` also reaches 14, but on the clamp
+    /// branch — a different path, exactly as `WrapRowQueryCountTests` records for its own
+    /// pair.
+    ///
+    /// The claim this pins is node 4's: it adds NO layout-axis probe over node 3.
     func testLayoutAxisStaysLogarithmicInLineCount() {
         let counter = ProbeCounter()
         let layout = CountingLayout(base: Self.fittingLines(), counter: counter)
-        guard case .point = ViewportVirtualizer.visualPointAt(
-            x: 4.0, y: 700.0 * Self.rowHeight + 3.0, layout: layout) else {
+        guard case .point(let point) = ViewportVirtualizer.visualPointAt(
+            x: 4.0, y: 1_022.0 * Self.rowHeight + 3.0, layout: layout) else {
             return XCTFail("expected .point")
         }
+        // Fixture guards: the target must be the row the doc comment names, and it must be
+        // IN RANGE -- a clamped target would measure the branch the sibling below covers.
+        XCTAssertEqual(point.row.globalRow, 1_022)
+        XCTAssertEqual(point.row.clamp, .inRange)
         // node 3's constant, copied and NOT widened: 2 ladder probes + <= ceilLog2 + 1
         // inside the default logicalLine search + 1 for the rowInLine subtraction.
         XCTAssertLessThanOrEqual(counter.layoutCalls, expectedMax)

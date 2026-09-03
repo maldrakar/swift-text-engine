@@ -12,14 +12,21 @@ final class WrapPointQueryTests: XCTestCase {
 
     /// line 0: 6 cells x 10, breakable everywhere -> rows [0,2) [2,4) [4,6), each 20 wide
     /// line 1: blank                              -> one [0,0) row
-    /// line 2: advances [30, 10], break before 1  -> rows [0,1) width 30 (OVERFLOW), [1,2) width 10
+    /// line 2: 5 cells x 10, break before 4 ONLY  -> rows [0,4) width 40 (OVERFLOW), [4,5) width 10
     /// firstVisualRow = [0, 3, 4, 6]; totalRows 6; total height 60.
+    ///
+    /// The overflow run is FOUR cells wide, not one, and that is the fixture's whole point:
+    /// with a one-cell row `startColumn`, `endColumn - 1` and the hook's own answer are the
+    /// SAME index, so no assertion in the index can tell the branches apart — the defect
+    /// this suite already found once, on Decision 14's `>= total` fixture. At four cells the
+    /// overflow band `(wrapWidth, rowSpan.width) = (20, 40)` still spans two whole cells, so
+    /// an `x` inside it lands on a cell that is neither end of the span.
     static func layout() -> TestVisualRowLayout {
         TestVisualRowLayout(
             lines: [
                 (advances: Array(repeating: 10.0, count: 6), breaks: Set(1..<6)),
                 (advances: [], breaks: []),
-                (advances: [30.0, 10.0], breaks: [1]),
+                (advances: Array(repeating: 10.0, count: 5), breaks: [4]),
             ],
             rowHeight: rowHeight,
             wrapWidth: wrapWidth)
@@ -78,9 +85,15 @@ final class WrapPointQueryTests: XCTestCase {
     func testXBetweenWrapWidthAndRowWidthOnAnOverflowRowStaysInRange() {
         guard let point = located(x: 25.0, y: 45.0) else { return }
         XCTAssertEqual(point.row, VisualRowLocation(globalRow: 4, logicalLine: 2, rowInLine: 0, clamp: .inRange))
-        XCTAssertEqual(point.rowSpan, VisualRow(logicalLine: 2, rowInLine: 0, startColumn: 0, endColumn: 1, width: 30.0))
+        XCTAssertEqual(point.rowSpan, VisualRow(logicalLine: 2, rowInLine: 0, startColumn: 0, endColumn: 4, width: 40.0))
         XCTAssertGreaterThan(25.0, Self.wrapWidth, "the fixture must put x past the wrap width, or this covers nothing")
-        XCTAssertEqual(point.column, .cell(ColumnLocation(columnIndex: 0, clamp: .inRange)))
+        // Fixture guard: the row must be wide enough that the RIGHT index is neither end of
+        // the span, or this test pins the flag and nothing else. Cell 2 spans [20, 30).
+        XCTAssertGreaterThanOrEqual(point.rowSpan.endColumn - point.rowSpan.startColumn, 3,
+                                    "fixture: the overflow run must hold at least three cells")
+        XCTAssertEqual(point.column, .cell(ColumnLocation(columnIndex: 2, clamp: .inRange)))
+        XCTAssertNotEqual(2, point.rowSpan.startColumn, "fixture: the answer must differ from a clamp-to-left")
+        XCTAssertNotEqual(2, point.rowSpan.endColumn - 1, "fixture: the answer must differ from a clamp-to-right")
     }
 
     // Both clamp flags observed together: the vertical one on `row`, the horizontal one
@@ -92,12 +105,14 @@ final class WrapPointQueryTests: XCTestCase {
 
         guard let bottomRight = located(x: 100.0, y: 1_000.0) else { return }
         XCTAssertEqual(bottomRight.row, VisualRowLocation(globalRow: 5, logicalLine: 2, rowInLine: 1, clamp: .clampedToBottom))
-        XCTAssertEqual(bottomRight.rowSpan, VisualRow(logicalLine: 2, rowInLine: 1, startColumn: 1, endColumn: 2, width: 10.0))
-        XCTAssertEqual(bottomRight.column, .cell(ColumnLocation(columnIndex: 1, clamp: .clampedToRight)))
+        XCTAssertEqual(bottomRight.rowSpan, VisualRow(logicalLine: 2, rowInLine: 1, startColumn: 4, endColumn: 5, width: 10.0))
+        XCTAssertEqual(bottomRight.column, .cell(ColumnLocation(columnIndex: 4, clamp: .clampedToRight)))
 
         guard let bottomInterior = located(x: 5.0, y: 1_000.0) else { return }
         XCTAssertEqual(bottomInterior.row.clamp, .clampedToBottom)
-        XCTAssertEqual(bottomInterior.column, .cell(ColumnLocation(columnIndex: 1, clamp: .inRange)))
+        // Line-absolute (Decision 2): the last row is [4, 5), so a row-relative x = 5 is the
+        // LINE's cell 4 -- the bridge is rowSpan.startColumn.
+        XCTAssertEqual(bottomInterior.column, .cell(ColumnLocation(columnIndex: 4, clamp: .inRange)))
     }
 
     /// Every row boundary, every row interior and BOTH clamp edges.
