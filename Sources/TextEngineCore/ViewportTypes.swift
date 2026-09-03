@@ -334,3 +334,48 @@ public enum ColumnGeometryResolution: Equatable {
     case cell(ColumnGeometryLocation)     // a real cell was located, with its box
     case blankLine                        // located line has no cells (columnCount(inLine:) == 0)
 }
+
+/// The wrap-aware 2D result: `visualPointAt`'s answer — a located visual row plus the
+/// cell within it. The visual-row mirror of `PointQuery`.
+public enum VisualPointQuery: Equatable {
+    case point(VisualPointLocation)       // a visual row was located (its cell may be blank)
+    case empty                            // empty document: lineCount == 0
+    case failure(ViewportValidationError) // vertical, horizontal or layout validation failure
+}
+
+/// Where a point `(x, y)` lands in a soft-wrapped document.
+///
+/// `x` is measured from the located ROW's left edge (spec Decision 1) while
+/// `column.cell.columnIndex` is an index into the LOGICAL LINE (Decision 2);
+/// `rowSpan.startColumn` is the bridge in both directions. Both quantities are in visual
+/// order, which is what the brief promises — bidi is out of scope today, so visual and
+/// logical order coincide, and the day they stop coinciding a caller needs to know this
+/// index was never the logical one.
+public struct VisualPointLocation: Equatable {
+    /// The located row, carried VERBATIM from `visualRowAt(y:layout:)`.
+    ///
+    /// Type note: this is a `VisualRowLocation` (globalRow + logicalLine + rowInLine +
+    /// vertical clamp), NOT a `VisualRow` — unlike `VisualRowGeometry.row`, which is a
+    /// `VisualRow`. The two families deliberately spell `.row` differently: this one
+    /// mirrors `PointLocation.line: LineLocation`, that one composes node 1's span type.
+    /// The span lives under `rowSpan` here.
+    public let row: VisualRowLocation
+    /// The located row's half-open cell span and advance-sum width.
+    ///
+    /// Type note: this IS node 1's `VisualRow`. Returned because the core derives it
+    /// anyway to rebase `x`, and re-deriving it would cost the caller a second within-line
+    /// walk; without it, `.clampedToRight` cannot be told from a soft break at the row's
+    /// end. `logicalLine` and `rowInLine` appear here and on `row`; they agree by
+    /// construction (one walk, `advanceVisualRows(by: rowInLine + 1)`).
+    public let rowSpan: VisualRow
+    /// The located cell within the row (index + horizontal clamp), or `.blankLine` when
+    /// the located line has no cells. Reused from `PointLocation` — the question is
+    /// identical.
+    public let column: ColumnResolution
+
+    public init(row: VisualRowLocation, rowSpan: VisualRow, column: ColumnResolution) {
+        self.row = row
+        self.rowSpan = rowSpan
+        self.column = column
+    }
+}
