@@ -512,9 +512,138 @@ self_test=pass
 
 ## 7. Hosted proof
 
-**Pending.** Step 6 (PR-head run, step-level) and Step 7 (post-merge push run, step-level)
-are explicitly out of this task's scope per the controller's instruction and are performed
-after this record's commit and the PR are created. This section is appended by a later
+### PR-head run (Task 11 Step 6)
+
+PR **#135** (`slice-55b-wrap-point-query` -> `main`), workflow run **33772207907**, head
+**`334a94f`** — the current HEAD, i.e. the **post-fix-wave** head, not the earlier one. Read
+at **step** level, not job conclusion: this repo's standing lesson is that a green job can
+hide a dead `continue-on-error` step (Slice 16).
+
+**Which run covers what.** An earlier run, **33758940527**, was green on the pre-fix-wave
+head `6913fe7`; it is superseded by this run, which covers the fix wave (`334a94f`, six
+findings, two new recorded reds per §9 item 7) as well as everything the earlier run covered.
+
+Three jobs, all `success`:
+
+```
+$ gh run view 33772207907 -R maldrakar/swift-text-engine --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
+WASM cross-target compile: success
+Host tests and benchmark gate: success
+iOS cross-target compile: success
+```
+
+Every step of every job concluded `success` (the docs-only detector correctly declined this
+PR — `result=not_docs_only docs_only_pr=false file_count=24 non_doc_count=18` in all three
+jobs — so all three ran the heavy path, not the docs-only skip):
+
+```
+Host tests and benchmark gate | 4 Detect PR change scope: success
+Host tests and benchmark gate | 5 Complete docs-only PR: skipped
+Host tests and benchmark gate | 6 Show toolchain: success
+Host tests and benchmark gate | 7 Run host tests: success
+Host tests and benchmark gate | 8 Run synthetic benchmark gate: success
+Host tests and benchmark gate | 9 Run variable-height benchmark gate: success
+Host tests and benchmark gate | 10 Run variable-height mutation benchmark gate: success
+Host tests and benchmark gate | 11 Run structural mutation benchmark gate: success
+Host tests and benchmark gate | 12 Run bulk structural mutation benchmark gate: success
+Host tests and benchmark gate | 13 Run line query benchmark gate: success
+Host tests and benchmark gate | 14 Run line geometry query benchmark gate: success
+Host tests and benchmark gate | 15 Run column query benchmark gate: success
+Host tests and benchmark gate | 16 Run column geometry query benchmark gate: success
+Host tests and benchmark gate | 17 Run point query benchmark gate: success
+Host tests and benchmark gate | 18 Run point geometry query benchmark gate: success
+Host tests and benchmark gate | 19 Run realistic provider benchmark gate: success
+Host tests and benchmark gate | 20 Run memory shape diagnostic: success
+Host tests and benchmark gate | 21 Run RSS memory observation diagnostic: success
+iOS cross-target compile | 4 Complete docs-only PR: skipped
+iOS cross-target compile | 6 Compile cross-target packages for iOS: success
+WASM cross-target compile | 4 Complete docs-only PR: skipped
+WASM cross-target compile | 7 Compile cross-target packages for WASM: success
+```
+
+Counts over the run log (fetched fresh; both fetches were byte-identical to the
+pre-downloaded copy, 452453 bytes):
+
+```
+$ RUN=33772207907
+$ gh run view "$RUN" -R maldrakar/swift-text-engine --log > hosted-prhead.log 2>&1
+$ L=hosted-prhead.log
+$ echo "gate=pass lines: $(grep -c 'gate=pass' "$L") (expect 46)"
+gate=pass lines: 46 (expect 46)
+$ echo "gate=fail lines: $(grep -c 'gate=fail' "$L") (expect 0)"
+gate=fail lines: 0 (expect 0)
+$ grep -oE 'Executed [0-9]+ tests, with [0-9]+ failures' "$L" | tail -1
+Executed 480 tests, with 0 failures
+```
+
+46 `gate=pass` / 0 `gate=fail`, and **480 tests, 0 failures** on hosted Linux x86_64 — the
+same 480 the local suite reports in §4.
+
+**The WASM job's four `result=pass … blocking=true` lines** (two kinds x two packages), and
+the iOS job's own four (two targets x two packages), counted **job-scoped** — an unscoped
+whole-log grep prints 8 and reads as a mislabelled "WASM" counter (the plan-assertion defect
+recorded in the 55a trap-repairs record):
+
+```
+$ echo "WASM blocking: $(awk -F'\t' '$1=="WASM cross-target compile" && /result=pass.*blocking=true/' "$L" | wc -l | tr -d ' ') (expect 4)"
+WASM blocking: 4 (expect 4)
+$ echo "iOS blocking:  $(awk -F'\t' '$1=="iOS cross-target compile" && /result=pass.*blocking=true/' "$L" | wc -l | tr -d ' ') (expect 4)"
+iOS blocking:  4 (expect 4)
+```
+
+```
+WASM cross-target compile | mode=cross_target_compile target=wasm          package=core      result=pass reason=none blocking=true
+WASM cross-target compile | mode=cross_target_compile target=wasm_embedded package=core      result=pass reason=none blocking=true
+WASM cross-target compile | mode=cross_target_compile target=wasm          package=providers result=pass reason=none blocking=true
+WASM cross-target compile | mode=cross_target_compile target=wasm_embedded package=providers result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_device    package=core      result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_simulator package=core      result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_device    package=providers result=pass reason=none blocking=true
+iOS cross-target compile  | mode=cross_target_compile target=ios_simulator package=providers result=pass reason=none blocking=true
+```
+
+**Zero `mode=wrap_point_query` lines, and that absence is correct** — not a missing step.
+`--wrap-point-query` is deliberately observational (§6) and is not wired into
+`.github/workflows/swift-ci.yml`, so no CI step ever invokes it:
+
+```
+$ echo "wrap_point_query lines in CI: $(grep -c 'mode=wrap_point_query' "$L") (expect 0 - not wired)"
+wrap_point_query lines in CI: 0 (expect 0 - not wired)
+```
+
+**The 46 hosted checksum tuples diff empty against slice 55a's recorded hosted baseline**
+(the `### The 46 hosted checksum tuples` table in
+`docs/superpowers/verification/2026-08-28-wrap-point-query-trap-repairs.md`):
+
+```
+$ grep -v -e 'mode=memory_shape' -e 'mode=memory_observation' "$L" \
+    | sed -nE 's/.*mode=([a-z_]+).*scenario=([^ ]+).*checksum=([0-9-]+).*/\1|\2\t\3/p' | sort -u > checksums-hosted.tsv
+$ awk '/^### The 46 hosted checksum tuples/,0' docs/superpowers/verification/2026-08-28-wrap-point-query-trap-repairs.md \
+    | awk '/^```/{n++; next} n==1' | sort -u > checksums-baseline.tsv
+$ echo "hosted=$(wc -l < checksums-hosted.tsv | tr -d ' ') baseline=$(wc -l < checksums-baseline.tsv | tr -d ' ')"
+hosted=46 baseline=46
+$ D="$(diff checksums-baseline.tsv checksums-hosted.tsv || true)"
+$ if [ -z "$D" ]; then echo "hosted_checksum_diff=empty"; else echo "hosted_checksum_diff=NON_EMPTY"; fi
+hosted_checksum_diff=empty
+```
+
+This slice touches no gated code path, so any movement here would have been a finding, not
+noise — none was observed.
+
+**One extra thing this run discharges.** The Task 8 review of the `1e16` floating-point
+fixtures (`Tests/TextEngineCoreTests/WrapPointQueryTests.swift`, the two fixtures around
+lines 200/219 and the IEEE rounding-property assertions
+`XCTAssertEqual(1e16 + 3.9, 1e16 + 4.0, …)` at lines 228 and 247) left an open note that the
+property `1e16 + 3.9 == 1e16 + 4.0` had only ever been exercised on local macOS arm64. This
+run's hosted x86_64 job ran the full 480-test suite green, and that suite contains both
+`1e16` fixtures, so the property is now confirmed on the CI architecture too — IEEE 754
+double rounding at that magnitude behaves identically on both architectures, not just
+locally.
+
+### Post-merge push run (Task 11 Step 7)
+
+**Pending — out of this task's scope.** The branch is not merged; Step 7 (the post-merge
+push run, read at step level) is performed after the PR merges and lands as a separate
 commit.
 
 ## 8. D-32, stated
