@@ -58,7 +58,7 @@ pre-merge validation pass) each falsified it. The stable formulation is the one 
 | 13 (Foundation scan empty, suite green, release build clean, gated checksums byte-identical) | **Met** — `foundation_scan=empty`; `Executed 479 tests, with 0 failures` at Task 11 and `Executed 480 tests, with 0 failures` after the fix wave; `Build complete!`, 46/46 checksum tuples, `checksum_diff=empty` (the wave changes no gated output — its only `Sources/` edit is a doc comment) | §4, §5 |
 | 14 (every standing guarantee carries a recorded red) | **NOT met as shipped at Task 11; met after the post-review fix wave.** Fourteen drills plus the bonus fifteenth were recorded — but the final whole-branch review found **two shipped guards that survived deletion with the whole suite green**: Decision 14's `>= total` *answer* (the fixture's located row held one cell, where the right answer and a plausible wrong one are the same index) and step 7's `!rebased.isFinite` guard (no test at all). Both now carry a recorded red — drills **(p)** and **(q)**. One guarantee remains **deliberately** without one: Decision 6's lower clamp half, unreachable by any conforming provider (§9 item 7). This row is not rewritten into having always been met | §3, §9 |
 | 15 (D-18 discharged unconditionally) | **Met** — the checksum-extraction step (§5) uses the `grep -v -e 'mode=memory_shape' -e 'mode=memory_observation'` filter; no `${PIPESTATUS[0]}` anywhere in this record's commands | §5 |
-| 16 (hosted evidence, both runs, step level) | **Pending — out of this task's scope.** Step 6 (PR-head) and Step 7 (post-merge) are performed by the controller after this record's commit and PR are created; §7 is a placeholder | §7 |
+| 16 (hosted evidence, both runs, step level) | **Met.** PR-head: run 33790617260 on `04fb75d`, the head PR #135 was merged from. Post-merge: run 33791182282 on merge commit `7390107`. Both read at STEP level — 46 `gate=pass` / 0 `gate=fail`, 480 tests 0 failures, 4 + 4 `blocking=true`, no non-success step, checksum diff empty — never job conclusion | §7 |
 | 19 (D-33 discharged, Decision 15) | **Met** — `wrapComputeChecksum(compute:drain:)` extracted as a pure function pinned to read both operands (drill (n)); `drainVisualRows` pinned to fold every row's `endColumn` (drill (o)); printed `checksum=` byte-identical to 55a's final column on all three widths | §6, §8 |
 
 ## 2. Test files added this piece
@@ -591,17 +591,20 @@ PR **#135** (`slice-55b-wrap-point-query` -> `main`), workflow run **33772207907
 **`334a94f`** — the **post-fix-wave** head. Read at **step** level, not job conclusion: this
 repo's standing lesson is that a green job can hide a dead `continue-on-error` step (Slice 16).
 
-**Which run covers what, and why this section names three.** A hosted-proof section committed
-to its own branch moves the head it is proving, so "the current HEAD" is a claim this record
-cannot keep — it was written here once and was false two commits later. What is durable is
-the per-head table:
+**Which run covers what, and why this section names five.** A hosted-proof section committed
+to *the branch it is proving* moves that branch's head, so "the current HEAD" is a claim this
+record cannot keep — it was written here once and was false two commits later. What is
+durable is the per-head table. (The lesson is applied to the post-merge fill-in below: it
+lands on a **separate** branch, `slice-55b-hosted-proof`, exactly as slices 54 and 55a did,
+so proving `7390107` cannot move `7390107`.)
 
 | head | what it added | run | verdict |
 |---|---|---|---|
 | `6913fe7` | the record's first draft | 33758940527 | success (superseded) |
 | `334a94f` | the fix wave (six findings, drills (p)/(q)) | **33772207907** | success — read at step level below |
 | `9dddc10` | §7 itself, i.e. this section's first fill-in | 33775496545 | success — 3 jobs, 46 `gate=pass`, 0 `gate=fail`, 480/0, 8 `blocking=true`, `docs_only_pr=false` |
-| validation round 3 (`20a8351` + this commit) | drills (r)/(s), §9 items 8–9 | recorded in the merge note below | — |
+| `04fb75d` | validation round 3 — drills (r)/(s), §9 items 8–9 | 33790617260 | success — the head PR #135 was merged from |
+| `7390107` | the merge commit on `main` | 33791182282 | success — the post-merge run, below |
 
 Every row after `334a94f` is docs plus test-only strengthening: no `Sources/` change reaches
 the engine after the fix wave (validation round 3 touches two test files and this record), so
@@ -728,9 +731,74 @@ locally.
 
 ### Post-merge push run (Task 11 Step 7)
 
-**Pending — out of this task's scope.** The branch is not merged; Step 7 (the post-merge
-push run, read at step level) is performed after the PR merges and lands as a separate
-commit.
+PR #135 merged at 2026-09-03T18:33:07Z as merge commit **`7390107`**; the `push` run on
+`main` is **33791182282**. This is the run AC16's second half asks for, and the one the
+repo's standing rule cares about most — *anchor proof of merged code in the post-merge run,
+not just the PR run*, because the PR run tests the branch head against a base that may have
+moved, while this one tests what `main` actually is.
+
+Three jobs, all `success`, and **every step of every job** `success` or `skipped` — the
+Slice 16 lesson is that a green job can hide a dead `continue-on-error` step, so the check
+is per-step and its result is an empty list:
+
+```
+$ gh run view 33791182282 -R maldrakar/swift-text-engine --json jobs \
+    --jq '.jobs[] | .name as $j | .steps[] | select(.conclusion != "success" and .conclusion != "skipped") | "\($j) | \(.number) \(.name): \(.conclusion)"'
+(no output — no step concluded anything but success or skipped)
+
+$ gh run view 33791182282 -R maldrakar/swift-text-engine --json status,conclusion,jobs \
+    --jq '"\(.status)/\(.conclusion)", (.jobs[] | "\(.name): \(.conclusion)")'
+completed/success
+Host tests and benchmark gate: success
+iOS cross-target compile: success
+WASM cross-target compile: success
+```
+
+Counts over the run log (445196 bytes):
+
+```
+$ RUN=33791182282
+$ gh run view "$RUN" -R maldrakar/swift-text-engine --log > postmerge.log 2>&1
+$ L=postmerge.log
+$ echo "gate=pass lines: $(grep -c 'gate=pass' "$L") (expect 46)"
+gate=pass lines: 46 (expect 46)
+$ echo "gate=fail lines: $(grep -c 'gate=fail' "$L") (expect 0)"
+gate=fail lines: 0 (expect 0)
+$ grep -oE 'Executed [0-9]+ tests, with [0-9]+ failures' "$L" | tail -1
+Executed 480 tests, with 0 failures
+$ echo "WASM blocking: $(awk -F'\t' '$1=="WASM cross-target compile" && /result=pass.*blocking=true/' "$L" | wc -l | tr -d ' ') (expect 4)"
+WASM blocking: 4 (expect 4)
+$ echo "iOS blocking:  $(awk -F'\t' '$1=="iOS cross-target compile" && /result=pass.*blocking=true/' "$L" | wc -l | tr -d ' ') (expect 4)"
+iOS blocking:  4 (expect 4)
+$ echo "wrap_point_query lines in CI: $(grep -c 'mode=wrap_point_query' "$L") (expect 0 - not wired)"
+wrap_point_query lines in CI: 0 (expect 0 - not wired)
+```
+
+**480 tests on merged `main`**, the same count as the PR head and as the local suite (§4),
+and the same 46 `gate=pass` — so validation round 3's two strengthened pins hold on hosted
+Linux x86_64, not only on local macOS arm64. The absence of `mode=wrap_point_query` is
+correct, not a missing step: the mode is observational and deliberately unwired (§6).
+
+The 46 hosted checksum tuples diff empty against slice 55a's recorded hosted baseline, with
+the D-18 filter:
+
+```
+$ grep -v -e 'mode=memory_shape' -e 'mode=memory_observation' "$L" \
+    | sed -nE 's/.*mode=([a-z_]+).*scenario=([^ ]+).*checksum=([0-9-]+).*/\1|\2\t\3/p' | sort -u > checksums-postmerge.tsv
+$ awk '/^### The 46 hosted checksum tuples/,0' docs/superpowers/verification/2026-08-28-wrap-point-query-trap-repairs.md \
+    | awk '/^```/{n++; next} n==1' | sort -u > checksums-baseline.tsv
+$ echo "hosted=$(wc -l < checksums-postmerge.tsv | tr -d ' ') baseline=$(wc -l < checksums-baseline.tsv | tr -d ' ')"
+hosted=46 baseline=46
+$ if diff -q checksums-baseline.tsv checksums-postmerge.tsv > /dev/null; then echo "postmerge_checksum_diff=empty"; else echo "postmerge_checksum_diff=NON_EMPTY"; fi
+postmerge_checksum_diff=empty
+```
+
+**Both halves of AC16 are now discharged**, and the §7 head table above gains its last row:
+the branch's final head `04fb75d` ran green as **33790617260** (46 `gate=pass`, 0
+`gate=fail`, 480/0, 4 + 4 `blocking=true`, no non-success step, checksum diff empty) and is
+the commit the merge took. Every head this branch ever presented therefore carries its own
+green hosted run, which is what the strict required-check policy asks for and what the
+per-head table exists to make re-checkable.
 
 ## 8. D-32, stated
 
