@@ -10,23 +10,32 @@ import XCTest
 // redundant with any other:
 //   - the script's own exit 0 over the whole (non-exempt) plans directory closes a SWAP
 //     that displaces an exempt plan the linter would flag DIRTY: the displaced plan
-//     re-enters the linted set and fails it. Measured on 2026-09-04: 35 of the 56 exempt
-//     plans lint dirty on their own (e.g.
-//     2026-06-08-hosted-baseline-relative-realistic-observation.md), so this check closes
-//     the swap for those 35.
+//     re-enters the linted set and fails it.
 //   - testNoExemptEntryIsDatedOnOrAfterTheCutoff closes the SAME kind of swap when the
 //     displaced plan happens to lint CLEAN on its own -- the exit-0 check cannot see that
-//     swap at all, because the newly-linted plan passes. Measured on 2026-09-04: the other
-//     21 of 56 exempt plans lint clean (e.g. 2026-08-09-wrap-row-query.md), and only the
-//     cutoff check catches a swap that displaces one of those.
+//     swap at all, because the newly-linted plan passes.
 //   - testExemptListHasExactlyTheExpectedCount closes a bare removal with nothing swapped
 //     in (and, since fix round 1, a duplicated entry masquerading as two).
 //   - testEveryExemptEntryExistsOnDisk closes a phantom entry that never displaced
 //     anything real.
-// The 35/21 split is a measured property of TODAY's corpus, not a stable invariant -- it
-// will drift as exempt plans are edited or as new violation rules are added -- which is
-// exactly why neither the exit-0 check nor the cutoff check is redundant with the other:
-// which one binds for a given swap depends on which entry gets displaced.
+//
+// Which of the first two binds depends on the dirty/clean split of the exempt set, and
+// that split is a property of the CURRENT rule set, not an invariant: it moves whenever a
+// rule is added, widened, or repaired. It is therefore RE-DERIVED, never transcribed --
+//
+//   for f in $(.github/scripts/lint-plan-assertions.sh --list-exempt); do \
+//     .github/scripts/lint-plan-assertions.sh "docs/superpowers/plans/$f" >/dev/null 2>&1 \
+//       && echo clean || echo dirty; done | sort | uniq -c
+//
+// -- because the first version of this comment quoted a 35/21 split that the SAME BRANCH
+// falsified two commits later: widening R4 to two-hash headings moved every exempt plan
+// into the dirty set, and the comment went on naming 2026-08-09-wrap-row-query.md as an
+// example of a clean one. Run the command; do not trust a number written here. What is
+// stable, and is the reason all four checks stay, is the SHAPE: an exempt plan that lints
+// dirty is closed by the exit-0 check, one that lints clean is closed by the cutoff check
+// alone, and which set a given plan falls into is not fixed. At the time of writing every
+// exempt plan lints dirty, so the cutoff check currently has no live inhabitant -- that is
+// a fact about today's rules, not a reason to delete it.
 private let scriptPath = ".github/scripts/lint-plan-assertions.sh"
 private let plansDirectory = "docs/superpowers/plans"
 private let expectedExemptCount = 56
@@ -47,8 +56,8 @@ private func runScript(_ arguments: [String]) throws -> (stdout: String, stderr:
 // Minor 5. The cutoff check is a lexicographic string compare (`<`), not a date parse, so
 // it accepts anything that sorts below "2026-09-04" -- including an undated or backdated
 // name ("1999-...", "0000-...", a leading space). Since the ratchet-header comment above
-// establishes this is the ONLY check standing between a swap and 21 of the 56 exempt
-// entries, it must reject anything that is not shaped like a date before comparing it.
+// establishes this is the ONLY check standing between a swap and any exempt entry that
+// lints clean, it must reject anything that is not shaped like a date before comparing it.
 // Four digits, hyphen, two digits, hyphen, two digits -- nothing more, since a plan
 // filename is always at least "YYYY-MM-DD-something.md".
 private func isDateShaped(_ prefix: String) -> Bool {
@@ -78,8 +87,8 @@ private func firstDuplicate(in entries: [String]) -> String? {
 }
 
 final class PlanLintTests: XCTestCase {
-    // G12, and the check that closes the swap for the 35 of 56 exempt plans that lint
-    // dirty on their own (see the file header). Every non-exempt plan must lint clean.
+    // G12, and the check that closes the swap for every exempt plan that lints dirty on
+    // its own (see the file header). Every non-exempt plan must lint clean.
     func testEveryNonExemptPlanLintsClean() throws {
         let result = try runScript([])
         XCTAssertEqual(
@@ -163,9 +172,10 @@ final class PlanLintTests: XCTestCase {
     }
 
     // G12, the half that stops the list from growing, and (per the file header) the ONLY
-    // check that closes a swap displacing one of the 21 of 56 exempt plans that lint
-    // clean on their own. A plan dated on or after the cutoff was written with the linter
-    // in place and has no claim on an exemption.
+    // check that closes a swap displacing an exempt plan that lints clean on its own --
+    // the swap the exit-0 check cannot see, whether or not any such plan exists today. A
+    // plan dated on or after the cutoff was written with the linter in place and has no
+    // claim on an exemption.
     func testNoExemptEntryIsDatedOnOrAfterTheCutoff() throws {
         let result = try runScript(["--list-exempt"])
         XCTAssertEqual(result.exitCode, 0, "--list-exempt failed: \(result.stderr)")
