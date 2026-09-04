@@ -827,8 +827,9 @@ a control, so the rules are written down:
    genuinely unavoidable, wrap the whole of it — `bash -c 'set -o pipefail; …'` — and
    test that `bash -c`'s own status. The ban is addressed to plans and verification
    records, not to scripts: all five `.github/scripts/*.sh` are bash with a shebang,
-   and none uses `PIPESTATUS`. `.github/scripts/lint-plan-assertions.sh` enforces
-   this rule mechanically (R1) for every non-exempt plan.
+   and none uses `PIPESTATUS`. `.github/scripts/lint-plan-assertions.sh` mechanizes
+   this rule's `PIPESTATUS` half (R1) for every non-exempt plan; the pipe-position
+   half stays a reader's job (D-40).
 2. Never write `echo "…=$?"` after a command whose exit status is insensitive to
    the invariant. `git diff --name-only`, `git status`, `gh pr list`, `jq`,
    `sed -i`, and every pipeline exit 0 regardless; `rg`/`grep` exit 1 on **no**
