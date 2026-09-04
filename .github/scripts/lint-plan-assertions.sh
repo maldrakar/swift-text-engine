@@ -145,6 +145,12 @@ function is_insensitive_predecessor(pred) {
   # git diff is insensitive UNLESS it carries --quiet/--exit-code -- those are exactly
   # the status-SENSITIVE forms (Finding 3); the other four prefixes are unchanged.
   if (pred ~ /^[ \t]*git[ \t]+diff/ && pred !~ /--quiet/ && pred !~ /--exit-code/) return 1
+  # A '|' inside a quoted regex (e.g. `rg -n "Foundation|Bar" ...`) is an ALTERNATION,
+  # not a shell pipeline -- strip quoted spans before testing for a real pipe (round 2
+  # fix). Single-quoted first, then double-quoted; only the pipeline test needs this,
+  # so this happens after the prefix checks above, not before them.
+  gsub(/'[^']*'/, "", pred)
+  gsub(/"[^"]*"/, "", pred)
   if (pred ~ /\|/) return 1
   return 0
 }
@@ -407,6 +413,32 @@ git status ; echo "x=$?"
 ```
 FIXTURE
 
+  # Round-2 control: a GENUINE same-line pipeline predecessor must still fire R2 after
+  # the quote-stripping fix below -- the fix must not turn an unquoted '|' blind too.
+  cat > "$self_test_dir/bad-r2-semicolon-pipe.md" <<'FIXTURE'
+### Task 1: something
+
+**Guarantees added:** none
+
+```bash
+cat file | wc -l ; echo "n=$?"
+```
+FIXTURE
+
+  # Round-2 fix: a '|' inside a QUOTED regex alternation (rg/grep pattern) is not a
+  # shell pipeline and must not be flagged. Covers both quoting forms so both `gsub`
+  # lines in is_insensitive_predecessor are exercised.
+  cat > "$self_test_dir/good-r2-quoted-alternation.md" <<'FIXTURE'
+### Task 1: something
+
+**Guarantees added:** none
+
+```bash
+rg -n "Foundation|Bar" Sources/TextEngineCore; echo "exit=$?"
+grep -c 'a|b' file; echo "n=$?"
+```
+FIXTURE
+
   cat > "$self_test_dir/clean-r2-semicolon-after-pipe.md" <<'FIXTURE'
 ### Task 1: something
 
@@ -541,15 +573,23 @@ FIXTURE
   assert_equal "0" "$rc" "clean_r2_diff_quiet_exit"
   assert_equal "lint=pass files=1 violations=0" "$out" "clean_r2_diff_quiet_output"
 
+  # Round 2: a '|' inside a quoted rg/grep alternation is not a shell pipeline and must
+  # not be flagged, in EITHER quoting form.
+  set +e
+  out="$(run_lint "$self_test_dir/good-r2-quoted-alternation.md")"; rc=$?
+  set -e
+  assert_equal "0" "$rc" "good_r2_quoted_alternation_exit"
+  assert_equal "lint=pass files=1 violations=0" "$out" "good_r2_quoted_alternation_output"
+
   local name expected
-  for name in r1 r2 r2-semicolon r2-diff-name-only r3 r3-herestring \
+  for name in r1 r2 r2-semicolon r2-semicolon-pipe r2-diff-name-only r3 r3-herestring \
               fence-in-heredoc unterminated-heredoc r4 r4-missing; do
     case "$name" in
-      r1)                                 expected="R1" ;;
-      r2|r2-semicolon|r2-diff-name-only)  expected="R2" ;;
-      r3|r3-herestring|fence-in-heredoc)  expected="R3" ;;
-      unterminated-heredoc)               expected="scanner" ;;
-      *)                                  expected="R4" ;;
+      r1)                                                 expected="R1" ;;
+      r2|r2-semicolon|r2-semicolon-pipe|r2-diff-name-only) expected="R2" ;;
+      r3|r3-herestring|fence-in-heredoc)                   expected="R3" ;;
+      unterminated-heredoc)                                expected="scanner" ;;
+      *)                                                   expected="R4" ;;
     esac
     set +e
     out="$(run_lint "$self_test_dir/bad-$name.md")"; rc=$?
