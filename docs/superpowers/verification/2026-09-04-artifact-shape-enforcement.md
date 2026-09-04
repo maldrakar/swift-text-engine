@@ -41,6 +41,11 @@ reason row 12 once was. This is the D-37 hazard behaving exactly as the row pred
 — a table entry can only be completed by a later commit, so the section is written to
 be *appended to*, never to assert a total.
 
+The table covers `slice-56-artifact-shape-enforcement` only. Rows 1–16 merged as
+[PR #138](https://github.com/maldrakar/swift-text-engine/pull/138) (merge commit
+`7d75eb74b3c03701e8bb81e89dba3e22ce6046a5`); §8's hosted proof was written afterwards,
+on the separate `slice-56-hosted-proof` branch, for the reason §8 gives.
+
 ## 1. Scope recap
 
 Six repository artifacts whose shape nothing verified became verifiable: the twelve
@@ -1184,26 +1189,35 @@ set; re-measured, the split is **56 dirty, 0 clean**, and the named plan reports
 violations. The comment now carries the re-deriving command instead of a number, and says
 why: this is the same defect class the slice exists to end, committed by the slice itself.
 
-## 8. Hosted evidence — PARTIAL, outstanding
+## 8. Hosted evidence — AC17 DISCHARGED
 
-One hosted run exists and is **red**; the green PR-head and post-merge readings AC17 asks
-for do not yet exist. The table below is in the "commit → run id" shape the convention this
-slice writes (§2 of `AGENTS.md`'s `Conventions that matter`, added by Task 6 / D-37)
-requires — a row per head SHA, never a bare run id, never "the current HEAD":
+Recorded from the separate `slice-56-hosted-proof` branch, per D-37 and the convention this
+slice itself writes (`AGENTS.md`, `Conventions that matter`): the proof of merged code
+cannot live on the branch whose merge it proves. The table is in the "commit → run id"
+shape that convention requires — **a row per head SHA**, never a bare run id, never "the
+current HEAD" — so every row stays re-checkable after any later commit:
 
-| Commit (SHA) | Context | Run type | Run id | Step-level reading | Notes |
-|---|---|---|---|---|---|
-| `7aa2879` | Host tests and benchmark gate | PR-head (#138) | 33882695798 | **fail** — `Run host tests`: 497 tests, 3 failures, all `ScriptSelfTestTests.testEveryScriptSelfTestPasses`; `Lint plan assertions`: `lint=pass files=1 violations=0` (vacuous for R4) | the `#{2,3}` interval-regex defect above; no gate step reached |
-| `7aa2879` | iOS cross-target compile | PR-head (#138) | 33882695798 | pass | unaffected by the defect |
-| `7aa2879` | WASM cross-target compile | PR-head (#138) | 33882695798 | pass | unaffected by the defect |
-| *(pending)* | Host tests and benchmark gate | PR-head | | | after the `###?` fix |
-| *(pending)* | Host tests and benchmark gate | post-merge push | | | |
-| *(pending)* | iOS cross-target compile | post-merge push | | | |
-| *(pending)* | WASM cross-target compile | post-merge push | | | |
+| Commit (SHA) | Context | Run type | Run id | Step-level reading |
+|---|---|---|---|---|
+| `7aa2879` | Host tests and benchmark gate | PR-head (#138) | 33882695798 | **fail** — `Run host tests`: 497 tests, **3 failures**, all `ScriptSelfTestTests.testEveryScriptSelfTestPasses`; `Lint plan assertions`: `lint=pass files=1 violations=0` (**vacuous for R4**); no gate step reached |
+| `7aa2879` | iOS cross-target compile | PR-head (#138) | 33882695798 | pass — 4 × `result=pass blocking=true` |
+| `7aa2879` | WASM cross-target compile | PR-head (#138) | 33882695798 | pass — 4 × `result=pass blocking=true` |
+| `369d2cf` | Host tests and benchmark gate | PR-head (#138) | 33893974939 | **pass** — `Lint plan assertions`: `lint=pass files=1 violations=0`; `Run host tests`: 497 tests, 0 failures; **46 `gate=pass`, 0 `gate=fail`** across all twelve gated modes; 5 × `invariant=pass` |
+| `369d2cf` | iOS cross-target compile | PR-head (#138) | 33893974939 | pass — 4 × `result=pass blocking=true` |
+| `369d2cf` | WASM cross-target compile | PR-head (#138) | 33893974939 | pass — 4 × `result=pass blocking=true` |
+| `7d75eb7` (merge of #138) | Host tests and benchmark gate | post-merge `push` | 33894750111 | **pass** — `lint=pass files=1 violations=0`; 497 tests, 0 failures; **46 `gate=pass`, 0 `gate=fail`**; 5 × `invariant=pass` |
+| `7d75eb7` (merge of #138) | iOS cross-target compile | post-merge `push` | 33894750111 | pass — `ios_device` + `ios_simulator` × core/providers, all `result=pass reason=none blocking=true` |
+| `7d75eb7` (merge of #138) | WASM cross-target compile | post-merge `push` | 33894750111 | pass — `wasm` + `wasm_embedded` × core/providers, all `result=pass reason=none blocking=true` |
 
-**AC17 is not discharged.** When the remaining evidence is gathered it belongs on a
-separate `slice-56-hosted-proof` branch (per D-37, added by Task 6, discharged by this same
-convention) — not appended to this commit — because a record cannot carry facts about its
-own branch: the commit that records a fact changes it. The red row above is exempt from
-that hazard for the reason the convention gives: it is keyed to a SHA that is already
-in the past, so it stays re-checkable no matter what lands after it.
+**46 `gate=pass` / 0 `gate=fail` on the post-merge run**, matching the local fingerprint of
+§4 and slice 55b's baseline exactly — the invariant fingerprint holds on merged code, not
+only in a working tree.
+
+**The red row is kept, and is the most informative row in the table.** It is what makes the
+green rows mean something: run `33882695798` is the recorded evidence that the plan linter's
+CI step can print `lint=pass files=1 violations=0` while one of its four rules checks
+nothing, and that the guard which actually caught it was `--self-test` driven from
+`swift test`. A table containing only green rows would have documented a gate nobody had
+seen fail.
+
+**AC17 is discharged**, and with it every acceptance criterion in §5 of the spec.
