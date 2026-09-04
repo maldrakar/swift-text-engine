@@ -39,7 +39,7 @@ Every row in scope is the same shape, and each carries evidence rather than a cl
 | D-27 | `.github/workflows/swift-ci.yml` | 10 of 12 blocking gate steps have no shape pin | `pinnedGateSteps` has 2 rows; the file has **12** `--gate` invocations. Drill H (slice 54): `\|\| true` on the `--line-query` step leaves `swift test` green |
 | D-34 | plan documents | D-2's four conventions are prose; nothing executes them | Slice 55a's plan shipped **4** defective checks *after* an explicit self-audit in its own preamble. **None of the four is shape-detectable** — §2.1 |
 | D-35 | spec drill lists | a closed list read as authority against an AC that says "every standing guarantee" | Slice 55b: **4** guarantees shipped undrilled, caught by two later passes |
-| D-17 | `AGENTS.md` rule 1 | the recommended idiom inverts to a pass under this repo's shell | **10 live usages**, all in slice 51's plan; under zsh `${PIPESTATUS[0]}` expands empty and `[ "" -eq 0 ]` is true. A raw grep counts 22 sites in 5 plans, but **12 of those are the prohibition line** — which is why R1 is fence-scoped (D56-7) |
+| D-17 | `AGENTS.md` rule 1 | the recommended idiom inverts to a pass under this repo's shell | **10 live usages**, every one inside a `bash` fence and all in slice 51's plan; under zsh `${PIPESTATUS[0]}` expands empty and `[ "" -eq 0 ]` is true. A raw grep counts 22 occurrences over 21 lines in 5 plans; the other 11 lines are **mentions, not usages** — which is why R1 is fence-scoped (D56-7) |
 | D-37 | verification records | "a record cannot carry facts about its own branch" is unwritten | 3 instances of the fix (slices 54, 55a, 55b), 0 written rules; 55b's record stated its own commit count wrong twice |
 | D-39 | `docs/superpowers/debt-ledger.md` | table shape unchecked; `\|` in a code span splits the cell | D-9's **status** column — the one the escalation rule reads — rendered as the tail of a code span instead of `scheduled(slice-56)` |
 
@@ -58,6 +58,14 @@ both shape-detectable; **D-35** rides along as a structural prompt (R4), and §8
 explicit that R4 buys a prompt rather than a proof. Saying so here is the point: a spec
 claiming R1–R4 close D-34 would be an unfalsifiable claim about enforcement, which is the
 exact defect class this slice exists to end.
+
+One consequence of the exemption list belongs here rather than in a footnote: **all 10
+live `PIPESTATUS` sites are in slice 51's plan, which is grandfathered**, so R1 fires on
+nothing in today's tree. Its value is prospective, and the evidence that it is
+load-bearing anyway is that `AGENTS.md` recommended the idiom **by name** until this
+slice (D56-10) while the four most recent plans each hand-wrote a prohibition against it
+in their own preamble — authors reaching for the rule precisely because nothing enforced
+it.
 
 ## 3. Decisions
 
@@ -120,18 +128,20 @@ already measured as failing.
 
 | Rule | Fails when | Convention it enforces |
 |---|---|---|
-| R1 | a `bash` fence contains `PIPESTATUS` (prose outside fences is exempt) | D-17 |
+| R1 | a `bash` or `sh` fence contains `PIPESTATUS` (prose and other fence languages are exempt) | D-17 |
 | R2 | `echo "…=$?"` whose previous non-empty line is a command from a named insensitive list (`git diff`, `git status`, `gh `, `jq`, `sed -i`) or a pipeline | D-2 rule 2 |
-| R3 | a `$VAR` used in a `bash` fence is not assigned in that same fence, is not in the environment allow-list, and the fence does not open `: "${VAR:?}"` | D-2 rule 4 |
+| R3 | a `$VAR` used in a `bash`/`sh` fence is not assigned in that same fence, is not in the environment allow-list, and the fence does not open `: "${VAR:?}"` | D-2 rule 4 |
 | R4 | a task section lacks a **Guarantees added** block, or lists guarantees without a drill step for each | D-35 |
 
-**R1 is fence-scoped on evidence, not caution.** Of the 22 raw `PIPESTATUS`
-occurrences under `docs/superpowers/plans/`, **12 are the prohibition itself** — the
-"do NOT use `${PIPESTATUS[0]}`" line the four most recent plans carry in their preamble,
-which is exactly the practice the rule wants. Only 10 are live usages, all in slice 51's
-plan. An anywhere-match would redden the most compliant plans *for being compliant*, in
-a tool whose whole value is that its findings are trustworthy. Fences are the scope R3
-needs anyway.
+**R1 is fence-scoped on evidence, not caution.** Fence-classified 2026-09-04, the 22
+raw `PIPESTATUS` occurrences under `docs/superpowers/plans/` fall over 21 lines and split
+cleanly: **10 are live usages, every one inside a `bash` fence, and all 10 are in slice
+51's plan**. The other 11 lines are **mentions** — 8 in prose in the four most recent
+plans (four of them the "do NOT use `${PIPESTATUS[0]}`" preamble line itself, one per
+plan, and four more in those plans' own self-review sections), plus 3 in slice 51's plan
+(2 in prose, 1 inside a fenced `markdown` block). An anywhere-match would therefore
+redden the four most compliant plans *for carrying the prohibition*, in a tool whose
+whole value is that its findings are trustworthy. Fence scope is also what R3 needs.
 
 Three classes are **not** mechanized. D-2 rule 1 (a check on the left of a pipe) and
 rule 3 (a plan asserting its own HEAD) need semantics, not shape, and a heuristic for
@@ -220,11 +230,18 @@ restates its subject rather than reading it is the two-awk-programs residual (D-
 new place, and it would make the Swift ratchet pin vacuous — the pin would prove the seam
 agrees with itself.
 
-**R3's recognizers are named here** so they are not invented rule-by-rule: only `bash`
-fences are scanned (plans carry `swift`, `yaml`, `python` and `text` fences too); a
-variable counts as assigned by `VAR=`, `for VAR in`, `read [-r] VAR`, `local VAR`, or an
-opening `: "${VAR:?}"`; and the environment allow-list is `$?`, `$#`, `$@`, positional
-`$1`…`$9`, `$HOME`, `$PWD`, `$TMPDIR`, `$GITHUB_*`, `$RUNNER_*`.
+**R3's recognizers are named here** so they are not invented rule-by-rule. Scope:
+`bash` **and `sh`** fences. Measured over the plans on 2026-09-04 — 1 357 `bash`, 434
+`swift`, 320 `text`, 67 `yaml`, 58 `markdown`, 16 `diff`, 10 `json`, **8 `sh`**, 5 `awk`,
+4 `ruby`, and **no `python` fence at all**: a `bash`-only scan would skip eight shell
+blocks, and the `python` fence the earlier draft named does not exist, because
+plan-supplied Python arrives **heredoc'd inside a bash fence** (slice 55a's
+`cat > /tmp/slice55a-predict.py <<'PY'`). So **heredoc bodies are skipped** — an
+unskipped heredoc makes R3 analyse Python as shell, which is a false-positive factory in
+the one tool that must not have one. A variable counts as assigned by `VAR=`,
+`for VAR in`, `read [-r] VAR`, `local VAR`, or an opening `: "${VAR:?}"`; the environment
+allow-list is `$?`, `$#`, `$@`, positional `$1`…`$9`, `$HOME`, `$PWD`, `$TMPDIR`,
+`$GITHUB_*`, `$RUNNER_*`.
 
 `PlanLintTests` (new, `Tests/ViewportBenchmarksTests`) runs the script over the
 repository and asserts exit 0, then pins the ratchet per D56-8.
@@ -286,8 +303,8 @@ Markdown allow rule, so such a PR already runs the full heavy path from its own 
    after `Run host tests` and before `Run memory shape diagnostic`.
 6. The workflow contains no `--gate` invocation outside the pinned set, **in any job**.
 7. `lint-plan-assertions.sh` implements R1–R4, exits non-zero on violation, prints one
-   `violation=` line per finding, and passes `--self-test`; R1 matches only inside `bash`
-   fences.
+   `violation=` line per finding, and passes `--self-test`; R1 and R3 match only inside
+   `bash`/`sh` fences, with heredoc bodies excluded.
 8. The script is enrolled in `ScriptSelfTestTests.selfTestScripts`.
 9. The exemption list is a single array in the script, `--list-exempt` prints that array,
    and it holds exactly the 56 plans present on 2026-09-04; the Swift ratchet pin (count,
@@ -364,6 +381,10 @@ class §2 tabulates.
   checks document structure; only a reader checks that a drill drills. Accepted and named
   rather than implied: R4's value is that the question is *asked at authoring time*, which
   is precisely what D-35 measured as missing.
+- **R1's measured base is entirely exempt.** Its 10 live sites sit in a grandfathered
+  plan, so R1 is a recurrence guard, not a cleanup, and it will pass on day one having
+  found nothing. That is the expected shape, not a defect — but a reader who mistakes it
+  for "the linter cleaned up 10 sites" would be wrong.
 - **The linter answers D-17 and D-2 rule 4, not D-34** (§2.1). D-34's four measured
   defects stay unmechanized.
 - **`flagName` is a pinned third copy, not a deleted one** (D56-1a). Deriving `parse`
