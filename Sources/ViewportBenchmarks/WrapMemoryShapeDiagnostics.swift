@@ -186,6 +186,67 @@ func runWrapMemoryShapeScenario(_ scenario: WrapMemoryShapeScenario) -> WrapMemo
         checksum: checksum)
 }
 
+/// The wrap half's cross-scenario invariants (spec §4A, 8-12). Pure, for the same reason
+/// `memoryShapeComparisonFailures` is. Every comparison is either against a DECLARED
+/// constant or between a named PAIR -- never against `summaries.first`.
+func wrapMemoryShapeCrossScenarioFailures(
+    _ summaries: [WrapMemoryShapeSummary]
+) -> [String] {
+    var failed: Set<String> = []
+
+    // (8) flatness, and (10) the width-independent window: both against constants.
+    for summary in summaries {
+        if summary.computeProbes != wrapMemoryShapeComputeProbes {
+            failed.insert(summary.scenarioName)
+        }
+        if summary.bufferedRows != expectedMemoryShapeWindow
+            || summary.streamedRows != expectedMemoryShapeWindow {
+            failed.insert(summary.scenarioName)
+        }
+    }
+
+    // (9) the shape bound and (12) the size half of provider bytes: pair the two sizes at
+    // each width. A relational invariant fails BOTH scenarios of its pair -- neither is
+    // the baseline for the other.
+    for widthLabel in Set(summaries.map(\.widthLabel)).sorted() {
+        let atWidth = summaries.filter { $0.widthLabel == widthLabel }
+        guard let small = atWidth.min(by: { $0.lineCount < $1.lineCount }),
+              let large = atWidth.max(by: { $0.lineCount < $1.lineCount }),
+              small.lineCount != large.lineCount else { continue }
+        let deltas = [
+            large.drainProbes - small.drainProbes,
+            large.rowQueryProbes - small.rowQueryProbes,
+            large.pointQueryProbes - small.pointQueryProbes,
+        ]
+        if deltas.contains(where: { $0 > wrapMemoryShapeProbeShapeBound })
+            || large.providerOwnedBytes < small.providerOwnedBytes * 9 {
+            failed.insert(small.scenarioName)
+            failed.insert(large.scenarioName)
+        }
+    }
+
+    for lineCount in Set(summaries.map(\.lineCount)).sorted() {
+        let atSize = summaries.filter { $0.lineCount == lineCount }
+
+        // (11) the walk is a width term: the narrow width costs more point probes than
+        // the infinite one, or the counter is not tracking the walk at all.
+        if let narrow = atSize.first(where: { $0.widthLabel == "10" }),
+           let wide = atSize.first(where: { $0.widthLabel == "inf" }),
+           narrow.pointQueryProbes <= wide.pointQueryProbes {
+            failed.insert(narrow.scenarioName)
+            failed.insert(wide.scenarioName)
+        }
+
+        // (12) the width half: one prefix entry per LOGICAL line, so the provider's
+        // footprint does not move with the width.
+        if Set(atSize.map(\.providerOwnedBytes)).count > 1 {
+            for summary in atSize { failed.insert(summary.scenarioName) }
+        }
+    }
+
+    return failed.sorted()
+}
+
 func formatWrapMemoryShapeSummary(
     _ summary: WrapMemoryShapeSummary, invariantPasses: Bool
 ) -> String {
