@@ -4,22 +4,13 @@
 // already links Foundation anyway.
 import Foundation
 import XCTest
+@testable import ViewportBenchmarks
 
 // The shape these tests pin is the one the Slice 16 dead-step trap destroyed once
 // already: a `continue-on-error` step swallows EVERY non-zero exit, so a gated step under
 // it is budget-blind AND failure-blind. Nothing else in the repo reads swift-ci.yml, so
 // without these tests each gate's blocking shape is verified exactly once, by hand, into a
 // verification record: the failure mode GateFloorTests.swift was created to end.
-//
-// `pinnedGateSteps` is a small EXPLICIT table of the gate steps whose shape is pinned
-// (currently --point-geometry-query and --realistic-provider; a gate joins by hand when it
-// is promoted). It is deliberately NOT `BenchmarkMode.allCases where isGateable`: that
-// quantifier is false for the `.pipeline` default mode, which has no flag at all (it runs
-// as a bare `--gate`), and there is no BenchmarkMode -> flag mapping to match against --
-// BenchmarkMode exposes only snake_case `outputName`, while the flags live as hand-written
-// `case` labels inside BenchmarkOptions.parse. Generalizing to every CI-gated mode needs a
-// `flagName` property, a named-and-justified exemption set, and a test pinning the two
-// together -- a design of its own.
 
 private let workflowPath = ".github/workflows/swift-ci.yml"
 private let hostJobKey = "host-tests-and-benchmark-gate"
@@ -40,9 +31,6 @@ private let requiredCheckContexts: [(jobKey: String, context: String)] = [
     (wasmJobKey, "WASM cross-target compile"),
 ]
 private let docsOnlyGuard = "steps.change-scope.outputs.docs_only_pr != 'true'"
-private let memoryShapeStepName = "Run memory shape diagnostic"
-private let pointGeometryFlag = "--point-geometry-query"
-private let realisticFlag = "--realistic-provider"
 
 // The pinned WASM SDK bundle. Declared once here so both the exact-env test and the
 // container-version cross-pin test read the same literal rather than two copies that could
@@ -52,40 +40,57 @@ private let wasmSdkURL =
         + "swift-6.2.1-RELEASE_wasm.artifactbundle.tar.gz"
 private let wasmSdkChecksum = "482b9f95462b87bedfafca94a092cf9ec4496671ca13b43745097122d20f18af"
 
-// The exact whitespace-joined `run:` payload every gate step must carry. Pinned as a
-// whole command rather than probed for tokens: a step-level token count cannot see a
-// second invocation inside one `|` block scalar or a trailing `|| true`, and both
-// disarm the gate.
-private func gateCommand(_ flag: String) -> String {
-    "swift run -c release --scratch-path /tmp/text-engine-host-build ViewportBenchmarks "
-        + "-- \(flag) --gate"
+// The exact whitespace-joined `run:` payload every gate step must carry. Takes an
+// OPTIONAL flag so the default mode -- which has no flag and runs as a bare `--gate` --
+// is this same helper with a nil, not a second literal that could drift.
+private func gateCommand(_ flag: String?) -> String {
+    let head = "swift run -c release --scratch-path /tmp/text-engine-host-build "
+        + "ViewportBenchmarks --"
+    guard let flag else { return head + " --gate" }
+    return head + " \(flag) --gate"
 }
 
-// One row per gate step whose blocking shape is pinned, with the ordering anchors it
-// must sit between. A gate joins this table by hand when it is promoted (see the header
-// note above).
+// One row per GATEABLE mode, in the order the host job runs them. Two things this table
+// is NOT: it is not a hand-picked subset (testPinnedGateStepsCoverExactlyTheGateableModes
+// pins it to BenchmarkMode.isGateable in both directions), and it is not keyed by flag
+// (the default mode's flag IS `--gate`, which all twelve steps carry, so a flag-token
+// probe cannot identify it -- identification is by exact payload equality, which is also
+// strictly stronger: a token probe cannot see a second invocation inside one `|` block
+// scalar, or a trailing `|| true`).
 private struct GateStepSpec {
-    let flag: String            // the mode flag whose presence identifies the step
+    let mode: BenchmarkMode     // the gateable mode this step runs
     let stepName: String        // the exact `- name:` the step must carry
-    let command: String         // the exact whitespace-joined `run:` payload
-    let afterStepName: String   // the step it must sit after
-    let beforeStepName: String  // the step it must sit before
+
+    var command: String { gateCommand(mode.flagName) }
 }
 
 private let pinnedGateSteps: [GateStepSpec] = [
-    GateStepSpec(
-        flag: pointGeometryFlag,
-        stepName: "Run point geometry query benchmark gate",
-        command: gateCommand(pointGeometryFlag),
-        afterStepName: "Run point query benchmark gate",
-        beforeStepName: memoryShapeStepName),
-    GateStepSpec(
-        flag: realisticFlag,
-        stepName: "Run realistic provider benchmark gate",
-        command: gateCommand(realisticFlag),
-        afterStepName: "Run point geometry query benchmark gate",
-        beforeStepName: memoryShapeStepName),
+    GateStepSpec(mode: .pipeline, stepName: "Run synthetic benchmark gate"),
+    GateStepSpec(mode: .variableHeight, stepName: "Run variable-height benchmark gate"),
+    GateStepSpec(mode: .variableHeightMutation,
+                 stepName: "Run variable-height mutation benchmark gate"),
+    GateStepSpec(mode: .structuralMutation,
+                 stepName: "Run structural mutation benchmark gate"),
+    GateStepSpec(mode: .bulkStructuralMutation,
+                 stepName: "Run bulk structural mutation benchmark gate"),
+    GateStepSpec(mode: .lineQuery, stepName: "Run line query benchmark gate"),
+    GateStepSpec(mode: .lineGeometryQuery,
+                 stepName: "Run line geometry query benchmark gate"),
+    GateStepSpec(mode: .columnQuery, stepName: "Run column query benchmark gate"),
+    GateStepSpec(mode: .columnGeometryQuery,
+                 stepName: "Run column geometry query benchmark gate"),
+    GateStepSpec(mode: .pointQuery, stepName: "Run point query benchmark gate"),
+    GateStepSpec(mode: .pointGeometryQuery,
+                 stepName: "Run point geometry query benchmark gate"),
+    GateStepSpec(mode: .realisticProvider,
+                 stepName: "Run realistic provider benchmark gate"),
 ]
+
+// The gate block's boundaries. A total order pins the twelve against each other but not
+// against the file: all twelve could migrate past the diagnostics together and stay in
+// order. Two anchors, not the twenty-four the per-row before/after pairs cost.
+private let gateBlockAfterStepName = "Run host tests"
+private let gateBlockBeforeStepName = "Run memory shape diagnostic"
 
 private struct WorkflowStep {
     let name: String
@@ -264,18 +269,21 @@ private func stepNamed(_ name: String, in steps: [WorkflowStep]) -> WorkflowStep
 
 final class WorkflowShapeTests: XCTestCase {
 
-    // Resolve a spec's step(s) by FLAG, asserting the set is non-empty first: a test that
-    // quantified over an empty set would be vacuously green the day the gate was deleted.
+    // Resolve a spec's step by exact PAYLOAD, not by flag. `.pipeline`'s flag is `--gate`,
+    // which every gate step carries, so a flag probe is false by construction for that row;
+    // payload equality is uniform across all twelve and strictly stronger. Asserts the set
+    // is non-empty first: a test quantified over an empty set is vacuously green the day
+    // the gate is deleted.
     private func steps(for spec: GateStepSpec, in all: [WorkflowStep]) -> [WorkflowStep] {
-        let matches = all.filter { $0.runTokens.contains(spec.flag) }
+        let matches = all.filter { $0.runTokens.joined(separator: " ") == spec.command }
         XCTAssertFalse(
             matches.isEmpty,
-            "\(workflowPath): no step in \(hostJobKey) runs \(spec.flag) — the "
-                + "\"\(spec.stepName)\" gate is gone")
+            "\(workflowPath): no step in \(hostJobKey) runs exactly `\(spec.command)` — the "
+                + "\"\(spec.stepName)\" gate is gone, renamed, or had its payload edited")
         return matches
     }
 
-    // Invariant 1. Exactly one step runs each pinned flag. Two steps ran a mode while its
+    // Invariant 1. Exactly one step runs each pinned command. Two steps ran a mode while its
     // budget was observational (a bare correctness run + a continue-on-error gated run);
     // one step cannot be both, and a second printing step double-weights the mode in every
     // future harvest of that run.
@@ -285,8 +293,8 @@ final class WorkflowShapeTests: XCTestCase {
             let matches = steps(for: spec, in: all)
             XCTAssertEqual(
                 matches.count, 1,
-                "\(workflowPath): \(matches.count) steps run \(spec.flag), want exactly 1 — "
-                    + "\(matches.map(\.name))")
+                "\(workflowPath): \(matches.count) steps run `\(spec.command)`, want "
+                    + "exactly 1 — \(matches.map(\.name))")
         }
     }
 
@@ -341,37 +349,83 @@ final class WorkflowShapeTests: XCTestCase {
             for step in steps(for: spec, in: all) {
                 XCTAssertEqual(
                     step.name, spec.stepName,
-                    "step running \(spec.flag) is named \"\(step.name)\", want "
+                    "step running `\(spec.command)` is named \"\(step.name)\", want "
                         + "\"\(spec.stepName)\"")
             }
         }
     }
 
-    // Invariant 6. Every pinned gate stays contiguous, ahead of the diagnostics, in the
-    // order point-query < point-geometry < realistic < memory-shape.
-    func testEachPinnedGateSitsBetweenItsAnchors() throws {
+    // Invariant 7 (new). The table is the gateable set, in both directions. A gateable mode
+    // with no pinned step is a blocking budget nothing pins; a pinned step whose mode is not
+    // gateable is a row that can never match. Same construction as GateFloorTests' pin of
+    // everyGatedBudget() to isGateable.
+    func testPinnedGateStepsCoverExactlyTheGateableModes() {
+        let pinned = pinnedGateSteps.map(\.mode.outputName).sorted()
+        let gateable = BenchmarkMode.allCases.filter(\.isGateable).map(\.outputName).sorted()
+        XCTAssertEqual(
+            pinned, gateable,
+            "pinnedGateSteps and BenchmarkMode.isGateable disagree. Every gateable mode "
+                + "needs a pinned CI step, and every pinned step needs a gateable mode.\n"
+                + "  pinned:   \(pinned)\n  gateable: \(gateable)")
+        XCTAssertEqual(
+            pinned.count, Set(pinned).count,
+            "a mode appears twice in pinnedGateSteps: \(pinned)")
+    }
+
+    // Invariant 8 (new). The twelve run in the declared order. Order is part of the shape:
+    // the synthetic gate first and the realistic provider last is how a reader of a hosted
+    // log knows which budget a `gate=fail` belongs to before scrolling.
+    func testGateStepsAppearInTheDeclaredOrder() throws {
         let all = try hostJobSteps()
+        var previous = -1
         for spec in pinnedGateSteps {
-            let matches = all.filter { $0.runTokens.contains(spec.flag) }
-            XCTAssertFalse(matches.isEmpty, "no step runs \(spec.flag)")
+            guard let step = steps(for: spec, in: all).first else { continue }
+            XCTAssertLessThan(
+                previous, step.index,
+                "\(spec.stepName) sits out of the declared gate order (index \(step.index) "
+                    + "after index \(previous)); pinnedGateSteps declares the order the host "
+                    + "job must run them in")
+            previous = step.index
+        }
+    }
 
-            guard let after = stepNamed(spec.afterStepName, in: all),
-                  let before = stepNamed(spec.beforeStepName, in: all) else {
-                XCTFail("\(workflowPath): missing \"\(spec.afterStepName)\" or "
-                    + "\"\(spec.beforeStepName)\" — the ordering anchors for \(spec.flag) "
-                    + "are gone")
-                continue
-            }
-
-            for step in matches {
+    // Invariant 9 (new). The block's boundaries, which the total order does not pin: all
+    // twelve could migrate past the diagnostics together and stay in order.
+    func testGateBlockSitsBetweenItsBoundaryAnchors() throws {
+        let all = try hostJobSteps()
+        guard let after = stepNamed(gateBlockAfterStepName, in: all),
+              let before = stepNamed(gateBlockBeforeStepName, in: all) else {
+            XCTFail("\(workflowPath): missing \"\(gateBlockAfterStepName)\" or "
+                + "\"\(gateBlockBeforeStepName)\" — the gate block's boundary anchors are gone")
+            return
+        }
+        for spec in pinnedGateSteps {
+            for step in steps(for: spec, in: all) {
                 XCTAssertLessThan(
                     after.index, step.index,
-                    "\(step.name) must sit after \"\(spec.afterStepName)\"")
+                    "\(step.name) must sit after \"\(gateBlockAfterStepName)\"")
                 XCTAssertLessThan(
                     step.index, before.index,
-                    "\(step.name) must sit before \"\(spec.beforeStepName)\"")
+                    "\(step.name) must sit before \"\(gateBlockBeforeStepName)\"")
             }
         }
+    }
+
+    // Invariant 10 (new). THE one-level-up check: a per-step pin cannot see a step it does
+    // not know about. Every `--gate` token in the WHOLE FILE must belong to a pinned step,
+    // so a thirteenth gate -- in this job or in either cross-target job, where the narrower
+    // host-job-scoped count would not have looked -- cannot ship unpinned.
+    func testEveryGateInvocationInTheWorkflowIsPinned() throws {
+        let url = repositoryRoot().appendingPathComponent(workflowPath)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let tokens = text.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" })
+        let gateTokens = tokens.filter { $0 == "--gate" }
+        XCTAssertEqual(
+            gateTokens.count, pinnedGateSteps.count,
+            "\(workflowPath) carries \(gateTokens.count) `--gate` tokens but "
+                + "\(pinnedGateSteps.count) steps are pinned. Every gate invocation anywhere "
+                + "in this workflow must be a pinned step: an unpinned one can carry "
+                + "`|| true` or continue-on-error and no test would see it.")
     }
 
     // The WASM job is now a real blocking gate; pin its compile step's shape so a
