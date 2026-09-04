@@ -77,7 +77,7 @@ jobs:
       # including the absence of the guard, is pinned in WorkflowShapeTests: an edit that
       # adds a guard here has to show up as a diff to that test.
       - name: Lint plan assertions
-        run: ./.github/scripts/lint-plan-assertions.sh
+        run: ./.github/scripts/lint-plan-assertions.sh --self-test && ./.github/scripts/lint-plan-assertions.sh
 
       - name: Complete docs-only PR
         if: steps.change-scope.outputs.docs_only_pr == 'true'

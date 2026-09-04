@@ -576,7 +576,8 @@ final class WorkflowShapeTests: XCTestCase {
     // to check, and every other test in this file would stay green.
     func testPlanLintStepIsBlockingAndUnguarded() throws {
         let all = try hostJobSteps()
-        let expected = "./.github/scripts/lint-plan-assertions.sh"
+        let expected = "./.github/scripts/lint-plan-assertions.sh --self-test "
+            + "&& ./.github/scripts/lint-plan-assertions.sh"
         let matches = all.filter { $0.runTokens.joined(separator: " ") == expected }
         XCTAssertEqual(
             matches.count, 1,
