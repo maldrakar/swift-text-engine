@@ -301,6 +301,32 @@ over the wrap path, criterion 2 — the only wrap criterion with no evidence at 
 *feature* node and should not wait past slice 57. First genuine fork remains node 8 (host
 order) / fork V, now joined by fork R.
 
+Map pass 2026-09-04 (Slice 56 review): Slice 56 took the **infrastructure route** and
+consumed **no map node** — the sixth slice of that shape (process 48, debt 51, calibration
+52/54, infrastructure 56) and the second consecutive slice to advance no criterion, both
+facts known and accepted at selection. Nothing it shipped touches wrap feasibility, so nodes
+5-9, fork R and fork V stand unrevised and un-relearned.
+
+What it changed for **node 6** is, for once, a row *leaving* the reading list rather than
+joining it: **D-9 is now `scheduled(node-6)`** by user call of 2026-09-04, rehomed rather
+than deferred a third time. Node 6's precondition set is therefore D-20/D-21, D-28, D-30,
+D-31 **plus D-9** — six rows, and the newest of them edits the p95 budget arithmetic for all
+46 committed budgets, which is why it must land *before* that node's first harvest and not
+inside the same PR as a shape-pin diff.
+
+What it taught, and what belongs on any node that touches CI or a shell script: **this
+repository's shell tools are authored on macOS awk and enforced on Linux awk, and the two
+disagree silently rather than erroring.** Slice 56's own final fix wave shipped an interval
+expression `#{2,3}` that the CI container's awk ignores, which made the plan linter's R4
+inert there for *both* heading forms while the CI step still printed `lint=pass`
+(run `33882695798`). The detection guarantee held — every rule has a `bad-*` self-test
+fixture, and `ScriptSelfTestTests` reddened — but only inside `swift test`, which a docs-only
+PR skips (**D-43**, the review's one new P2, folded into node 5).
+
+Next step is **topological** (node 5 = `--memory-shape` over the wrap path, criterion 2 — the
+only wrap criterion with no evidence at all); the 55b pass said it should not wait past slice
+57, and this is slice 57. First genuine fork remains node 8 (host order) / fork V / fork R.
+
 ## Decision log
 
 - 2026-07-20 — User chose the soft-wrap arc over `pointOf(line:column:)`
@@ -562,3 +588,21 @@ order) / fork V, now joined by fork R.
   **Slice 56 is confirmed as the infrastructure slice: D-27 + D-34 + D-17 + D-9.** Four P2s,
   all now `scheduled(slice-56)` in the ledger rather than open-and-aging. It consumes no map
   node; nodes 5-9 and fork V are untouched by this call.
+- 2026-09-04 — **Slice 56 merged** ([PR #138](https://github.com/maldrakar/swift-text-engine/pull/138),
+  merge `7d75eb7`; hosted proof [PR #139](https://github.com/maldrakar/swift-text-engine/pull/139),
+  post-merge push run `33894750111` green at step level: `lint=pass files=1 violations=0`,
+  497/0, 46 `gate=pass` / 0 `gate=fail`, 5 `invariant=pass`, 8 cross-target
+  `result=pass blocking=true`). No map node consumed, no criterion advanced — the
+  infrastructure slice, as selected. Discharged **D-27**, **D-17**, **D-37**, **D-39**;
+  **D-34** and **D-35** keep their semantic halves `open` by design; **D-9** rehomed to
+  `scheduled(node-6)`. New rows: **D-40**, **D-41**, **D-42** (from the slice), **D-43**
+  (P2) and **D-44** (P3) (from its review), with **D-42 (g)** amended in place.
+  AC17 needed two hosted attempts: the first (`33882695798`) was red, and that red is kept
+  in the record because it is the recorded evidence that the plan linter's CI step can print
+  `lint=pass` while one of its four rules checks nothing.
+  Its post-slice review **selects Slice 57 = node 5** (`--memory-shape` over the wrap path,
+  criterion 2), folding in D-43 — a topological step, not a fork, so it is selected rather
+  than routed. Options weighed and rejected: node 6 (its six-row precondition set includes a
+  budget-arithmetic change landed one day earlier, and it would leave criterion 2 with no
+  evidence for a third slice) and a second infrastructure slice (D-43 is one YAML line and
+  folds in at no cost).
