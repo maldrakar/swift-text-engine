@@ -8,9 +8,13 @@
 ## 0. Commits, by SHA — not "the current HEAD"
 
 Per the convention this slice itself writes (D-37, `AGENTS.md`'s "A record cannot carry
-facts about its own branch"): this branch carries **eleven commits by SHA, plus the
-commit that adds this record**, listed oldest first. No bare commit count is asserted
-elsewhere in this document, and no commit is called "the current HEAD."
+facts about its own branch"): the commits below are named **by SHA**, oldest first, and
+the list is **open at the end** — commits that land after a row is written cannot
+falsify a row, but they do falsify any total. No bare commit count is asserted anywhere
+in this document, and no commit is called "the current HEAD." Re-derive the current
+list with `git log --format='%H %s' --reverse eacb50d..HEAD`; rows 1–11 were confirmed
+against it before the table was first written, and rows 12–14 were appended afterwards
+by the same command.
 
 | # | SHA (full) | Subject |
 |---|---|---|
@@ -25,10 +29,17 @@ elsewhere in this document, and no commit is called "the current HEAD."
 | 9 | `f902749944b5441c4c241bc32e0db3a418f0a7ea` | test: PlanLintTests fix round 1 — measured ratchet claims, close four vacuity gaps |
 | 10 | `deaddf058f080c0b328c9a11e54a46cd810c1509` | docs: rewrite D-2 rule 1, add the guarantee-inventory convention, settle the ledger |
 | 11 | `6e310fb5328b67250bf1e68e210e40176f2da126` | docs: fix round 1 — narrow rule 1's enforcement claim, correct D-27/D-34/D-9/D-17 |
-| 12 | *(this commit)* | docs: slice 56 verification record |
+| 12 | `137397434009eba3721844bacbd8a48b48e29c12` | docs: slice 56 verification record |
+| 13 | `5e99b8a27b10ad255cc48f16c7fc19b9160fbe20` | docs: slice 56 verification record fix round 1 — eight re-checkability fixes |
+| 14 | `7aa28793751ea3495ed106401e3167904c154746` | fix: slice 56 final fix wave — R4 heading gap, R3 false positive, tautological test |
+| 15 | `3d376479f6a67d4d6397069d4f41a596cbd1bbf1` | fix: lint-plan-assertions.sh — R4's heading pattern was inert on the CI awk |
+| 16 | `012b99981f9ad38b04404c86ada13e4ef9646013` | test: PlanLintTests — re-derive the exempt split instead of quoting it |
 
-Confirmed via `git log --format='%H %s' eacb50d..HEAD` before writing this table — it
-matches the eleven-commit list exactly, in the same order.
+Row 12 was written as *(this commit)* and is now named by its SHA; rows 13–16 landed
+after it, and the commit carrying this edit is itself unnamed here for the same
+reason row 12 once was. This is the D-37 hazard behaving exactly as the row predicts
+— a table entry can only be completed by a later commit, so the section is written to
+be *appended to*, never to assert a total.
 
 ## 1. Scope recap
 
@@ -1094,9 +1105,10 @@ built-ins) is narrower than what shipped (the script also allows `SHELL`, `IFS`,
 `OLDPWD`, `RANDOM`, `SECONDS`, `PIPESTATUS`, and the `BASH_` prefix) — benign and
 necessary (`PIPESTATUS` must be allow-listed so R3 does not double-report what R1
 reports), but recorded rather than resolved by editing the spec, the slice's binding
-authority, written before execution. Both appended to ledger row **D-42**, which now
-reads "Six residuals" and still carries exactly six unescaped pipes (verified with
-the same parity rule `DebtLedgerShapeTests` uses).
+authority, written before execution. Both appended to ledger row **D-42**, which read
+"Six residuals" at that point and still carried exactly six unescaped pipes (verified
+with the same parity rule `DebtLedgerShapeTests` uses). The post-record validation pass
+below adds four more, taking the row to "Ten residuals".
 
 After the fix wave: `swift test` — 497 tests, 0 failures;
 `./.github/scripts/lint-plan-assertions.sh` — `lint=pass files=1 violations=0`;
@@ -1106,28 +1118,92 @@ G8/R1, G9/R2, G10/R3, G11/R4 neutralized in turn) were re-run against the final 
 and every one reddened as before, since Fixes 1 and 3 edited the very awk rules they
 neutralize.
 
-## 8. Hosted evidence — RESERVED, outstanding
+### The first hosted run turned red, and what it caught
 
-**Not yet performed.** Per this task's scope limit, Steps 4–5 of the plan (open the
-PR, read both hosted runs at step level; record the post-merge proof on a separate
-`slice-56-hosted-proof` branch, per D-37) are **explicitly out of scope for this
-commit**. Pushing this branch and opening the PR are the user's outward-facing
-actions and are offered separately, not performed here.
+The fix wave above widened R4's heading pattern to `/^#{2,3} Task [0-9]+:/` and was
+verified on macOS only. **The interval expression `{2,3}` is not honoured by the awk in
+the `swift:6.2.1-bookworm` container**, so on the first hosted run the heading matched
+nothing at all, `in_task` was never set, `check_task()` was never called, and R4 was
+inert for **both** heading forms — the very defect the fix wave existed to repair,
+reintroduced one level down and on the other platform.
 
-This section is reserved for that evidence, in the "commit → run id" table shape the
-convention this slice writes (§2 of `AGENTS.md`'s `Conventions that matter`, added by
-Task 6 / D-37) requires — never a bare run id, never "the current HEAD":
+The failure is isolated by construction, not by inspection: line 185 was the only
+interval expression in any of the five scripts, and the heading rule is the only place
+`in_task` is assigned 1. The self-test's `bad-r4.md` fixture returned `rc=0` with **zero**
+`violation=` lines — no violation at all, not even the "task has no `**Guarantees
+added:**` block" branch — which is possible only if `check_task()` never ran.
 
-| Commit (SHA) | Context | Run type | Run id | Step-level readings | Notes |
+Hosted reading, run `33882695798` on commit `7aa2879`:
+```
+ScriptSelfTestTests.testEveryScriptSelfTestPasses: XCTAssertEqual failed: ("1") is not
+  equal to ("0") - self-test exited non-zero
+  script: .../.github/scripts/lint-plan-assertions.sh
+  exit: 1
+  self_test=fail label=bad_r4_exit
+    expected: [1]
+    actual:   [0]
+ Executed 497 tests, with 3 failures (0 unexpected)
+```
+
+**Two facts worth keeping.** First, the CI step `Lint plan assertions` printed
+`lint=pass files=1 violations=0` on that same run — a pass that was VACUOUS for R4. The
+only thing that caught the defect was `--self-test` driven from `swift test`
+(`ScriptSelfTestTests`), which is precisely the redundancy D56-6 argued for: a linter
+that only ever runs as a linter cannot report that one of its rules stopped existing.
+Second, R1–R3's fixtures all stayed red on that run; the self-test's rule-by-rule loop is
+what made the blast radius readable at a glance.
+
+**Fix.** `#{2,3}` → `###?` — two hashes plus an optional third, plain POSIX ERE, no
+interval expression. Locally a no-op (macOS awk honoured both spellings), on the CI awk
+the difference between a live rule and a silent one. The file now states the standing
+rule beside the pattern: POSIX-portable ERE only, because authoring runs on macOS awk and
+enforcement runs on Linux awk, and the two disagree *silently* rather than erroring. The
+`bad-r4.md` / `bad-r4-hash2.md` fixture pair is the portability guard — whichever awk runs
+the script, a heading spelling it cannot see shows up as a bad-r4 fixture that refuses to
+fail. Verified after the fix: `--self-test` → `self_test=pass`; the repository lint →
+`lint=pass files=1 violations=0`; `## Task 1:` and `### Task 1:` each still produce
+`violation=R4`, `#### Task 1:` and `# Task 1:` still produce none.
+
+**No mechanical guard prevents the next non-portable construct** — laddered as D-42 (g).
+
+### Post-record validation pass — three further residuals
+
+Found while re-checking this record against the tree, and laddered onto D-42 rather than
+fixed, since each would change a scanner or recognizer semantics the spec fixes as closed:
+(h) `$((1 << BITS))` is read as a heredoc opener with tag `BITS`, abandoning the rest of
+the file with a wrong diagnosis (loud, exit 1); (i) the fence-language census behind the
+`bash`/`sh` scope omits **unlabelled** fences, of which the corpus carries roughly 205 —
+measured impact today is 10, all documentation snippets; (j) R1 fires on a shell *comment*
+that merely mentions `PIPESTATUS`.
+
+One measured claim was **corrected, not laddered**: `PlanLintTests.swift`'s header quoted a
+"35 of 56 dirty / 21 clean" split of the exempt set and named
+`2026-08-09-wrap-row-query.md` as an example of a clean plan. The fix wave's R4 heading
+widening — two commits later, on this same branch — moved every exempt plan into the dirty
+set; re-measured, the split is **56 dirty, 0 clean**, and the named plan reports eight
+violations. The comment now carries the re-deriving command instead of a number, and says
+why: this is the same defect class the slice exists to end, committed by the slice itself.
+
+## 8. Hosted evidence — PARTIAL, outstanding
+
+One hosted run exists and is **red**; the green PR-head and post-merge readings AC17 asks
+for do not yet exist. The table below is in the "commit → run id" shape the convention this
+slice writes (§2 of `AGENTS.md`'s `Conventions that matter`, added by Task 6 / D-37)
+requires — a row per head SHA, never a bare run id, never "the current HEAD":
+
+| Commit (SHA) | Context | Run type | Run id | Step-level reading | Notes |
 |---|---|---|---|---|---|
-| *(not yet run)* | Host tests and benchmark gate | PR-head | | | |
-| *(not yet run)* | Host tests and benchmark gate | post-merge push | | | |
-| *(not yet run)* | iOS cross-target compile | PR-head | | | |
-| *(not yet run)* | iOS cross-target compile | post-merge push | | | |
-| *(not yet run)* | WASM cross-target compile | PR-head | | | |
-| *(not yet run)* | WASM cross-target compile | post-merge push | | | |
+| `7aa2879` | Host tests and benchmark gate | PR-head (#138) | 33882695798 | **fail** — `Run host tests`: 497 tests, 3 failures, all `ScriptSelfTestTests.testEveryScriptSelfTestPasses`; `Lint plan assertions`: `lint=pass files=1 violations=0` (vacuous for R4) | the `#{2,3}` interval-regex defect above; no gate step reached |
+| `7aa2879` | iOS cross-target compile | PR-head (#138) | 33882695798 | pass | unaffected by the defect |
+| `7aa2879` | WASM cross-target compile | PR-head (#138) | 33882695798 | pass | unaffected by the defect |
+| *(pending)* | Host tests and benchmark gate | PR-head | | | after the `###?` fix |
+| *(pending)* | Host tests and benchmark gate | post-merge push | | | |
+| *(pending)* | iOS cross-target compile | post-merge push | | | |
+| *(pending)* | WASM cross-target compile | post-merge push | | | |
 
-No row is populated. When this evidence is gathered, it belongs on a separate
-`slice-56-hosted-proof` branch (per D-37, added by Task 6, discharged by this same
-convention) — not appended to this commit — because a record cannot carry facts about
-its own branch: the commit that records a fact changes it.
+**AC17 is not discharged.** When the remaining evidence is gathered it belongs on a
+separate `slice-56-hosted-proof` branch (per D-37, added by Task 6, discharged by this same
+convention) — not appended to this commit — because a record cannot carry facts about its
+own branch: the commit that records a fact changes it. The red row above is exempt from
+that hazard for the reason the convention gives: it is keyed to a SHA that is already
+in the past, so it stays re-checkable no matter what lands after it.

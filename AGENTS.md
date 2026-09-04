@@ -859,7 +859,11 @@ a control, so the rules are written down:
    closed list as authority for not drilling a fifth. `lint-plan-assertions.sh` checks
    the structure (R4) — that each task names its guarantees and that each named
    guarantee has a step mentioning a drill for it. It cannot check that a drill drills;
-   that half is yours.
+   that half is yours. R4 reads two literal shapes, so write them exactly: a task
+   heading is `## Task N:` or `### Task N:`, and its inventory is a line beginning
+   `**Guarantees added:**` listing `G<n>` ids — a task that adds none still writes the
+   line (`**Guarantees added:** none`), because a missing block and a deliberate
+   empty one are the same absence to a reader.
 
 ## When you change the core
 
