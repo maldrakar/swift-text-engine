@@ -316,7 +316,11 @@ never against `summaries.first`, per Decision 4.
 `runMemoryShapeDiagnostics()` gains a mode-wide structural comparison: every summary — fixed,
 variable and wrap — contributes `(scenarioName, bufferedWindow, streamedElements,
 touchedElements)`, and every one of the eleven must equal the driver's declared
-`expectedMemoryShapeWindow` (90) on all three counts. The comparison itself is the pure
+`expectedMemoryShapeWindow` (90) on the first two. `touchedElements` is `Int?`: the five
+non-wrap scenarios have a third, independent traversal (a document-source walk, or the
+metrics the geometry cursor resolves) and must equal 90 on it too; a wrap scenario has none,
+and reporting its streamed rows a second time under another name would be exactly the
+vacuity this repair removes. The comparison itself is the pure
 `memoryShapeComparisonFailures(_:) -> [String]` of Decision 4; `runMemoryShapeDiagnostics`
 calls it, prints, and returns.
 
