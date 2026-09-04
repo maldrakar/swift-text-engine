@@ -85,6 +85,7 @@ from `return nil` to `return "--pipeline"`; the brief's own multi-line `sed` for
 not work, so this was a hand edit):
 ```
 /Users/aabanschikov/swift-text-engine/Tests/ViewportBenchmarksTests/BenchmarkModeFlagNameTests.swift:13: error: -[ViewportBenchmarksTests.BenchmarkModeFlagNameTests testEveryFlagNameRoundTripsThroughParse] : failed - pipeline: parse rejected its own flagName --pipeline
+/Users/aabanschikov/swift-text-engine/Tests/ViewportBenchmarksTests/BenchmarkModeFlagNameTests.swift:28: error: -[ViewportBenchmarksTests.BenchmarkModeFlagNameTests testEveryGateableFlagNameAcceptsTheGateFlag] : failed - pipeline: parse rejected --pipeline --gate
 /Users/aabanschikov/swift-text-engine/Tests/ViewportBenchmarksTests/BenchmarkModeFlagNameTests.swift:53: error: -[ViewportBenchmarksTests.BenchmarkModeFlagNameTests testOnlyThePipelineModeLacksAFlagName] : XCTAssertEqual failed: ("[]") is not equal to ("["pipeline"]") - only the default mode may have no flag; got []
 /Users/aabanschikov/swift-text-engine/Tests/ViewportBenchmarksTests/BenchmarkModeFlagNameTests.swift:40: error: -[ViewportBenchmarksTests.BenchmarkModeFlagNameTests testPipelineHasNoFlagAndIsSelectedByABareGate] : XCTAssertNil failed: "--pipeline"
 Test Suite 'BenchmarkModeFlagNameTests' failed at 2026-09-04 11:08:14.583.
@@ -112,7 +113,7 @@ four new invariants are added. No workflow, budget, corpus, or checksum file cha
 
 **Guarantees added:** G1, G2, G3, G4, G5, G6, G7, G18, G19.
 
-**Deviation (Ruling F2, see §5):** the old `testEachPinnedGateSitsBetweenItsAnchors`
+**Deviation (Ruling F2, see §7):** the old `testEachPinnedGateSitsBetweenItsAnchors`
 (invariant 6) was deleted rather than adapted — the new `GateStepSpec` carries no
 `afterStepName`/`beforeStepName` fields — and its content is exactly what the two new
 total-order/boundary-anchor tests replace. Net: 10 (baseline) − 1 (deleted) + 4 (new)
@@ -162,6 +163,9 @@ command census on the *final* eleven-commit tree (14 `WorkflowShapeTests` after 
 ```
 .../WorkflowShapeTests.swift:337: error: -[...testEachPinnedGateCarriesTheDocsOnlyGuard] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("steps.change-scope.outputs.docs_only_pr != 'true'")") - Run structural mutation benchmark gate: does not carry the sibling docs-only guard
 ```
+(Normalized from the source task report's shell-escaped `!= \'true\'` to the literal
+`!= 'true'` — confirmed against `WorkflowShapeTests.swift`'s own string, which carries
+the unescaped spelling; no other character changed.)
 `Executed 13 tests, with 1 failure (0 unexpected)`. `restored=yes`.
 
 **Drill (g) — G7, `continue-on-error: true` on the synthetic gate step:**
@@ -293,7 +297,7 @@ minors), `f2a3f74` (fix round 2: R2 quoted-alternation false positive). Creates
 **Guarantees added:** G8 (R1), G9 (R2), G10 (R3), G11 (R4), G15 (self-test
 enrollment).
 
-**Deviations (see §5 for full text):** Ruling F5 (fence rule must not fire inside a
+**Deviations (see §7 for full text):** Ruling F5 (fence rule must not fire inside a
 heredoc body), Ruling F7 (cwd-independent `PLANS_DIR`), and an undocumented third fix
 (the self-test's `trap` used single-quoted `$dir` expansion, which fired after
 `local dir` went out of scope under `set -u` — fixed to double-quoted expansion at
@@ -356,32 +360,150 @@ the new one's assertions cannot fail a build
 `drill_p=red_as_expected`. Restored; confirmed matches the pre-drill state via `diff`.
 
 **Fix round 1 (`7f1ccf6`) — 5 false positives/negatives + 3 minors, each proven
-RED-before/GREEN-after against a dedicated fixture** (full detail in the Task 4
-report; summarized):
-1. Ruling F5 (fence-in-heredoc guard) was undrilled — added `bad-fence-in-heredoc.md`.
-2. R2 read the previous **line**, not the previous **command** — a same-line `;`
-   split now locates the segment preceding the echo match.
-3. R2 flagged its own prescribed remedy (`git diff --quiet` + `echo "…=$?"`) — now
-   excluded when `--quiet`/`--exit-code` is present.
-4. F5 traded a noisy corruption for a silent one (an unterminated heredoc read as
-   `lint=pass`) — the awk `END` block now reports an unterminated heredoc as
-   `violation=scanner`.
-5. An unrecognized flag (`--bogus`) fell through to awk and either read stdin (hang)
-   or silently passed — now rejected with `unknown option: …` and exit 2.
-   Minors: an awk temp-file leak on every invocation (one `trap cleanup EXIT` now);
-   `"${files[@]}"` fatal on an empty array under bash 3.2 + `set -u` (guarded); a
-   `<<<` here-string phantom-matched as a heredoc opener (guarded by checking the
-   preceding character).
+RED-before/GREEN-after against a dedicated fixture.** Essential evidence (fixture
+name, command, RED-before/GREEN-after) is inlined below, rather than pointed at the
+gitignored Task 4 report, so this record does not depend on it:
+
+1. **Ruling F5 was undrilled** — the fence-in-heredoc guard
+   (`/^```/ && !in_heredoc`) had no fixture proving it load-bearing. Added
+   `bad-fence-in-heredoc.md` (a `bash` fence containing a heredoc whose body carries
+   one markdown fence delimiter, then a second `bash` fence with a genuine
+   unassigned `$SOMETHING`):
+   ```
+   $ /usr/bin/env bash lint.pre-F5-reverted.sh fixtures/finding1-bad-fence-in-heredoc.md   # guard reverted to /^```/ {
+   lint=pass files=1 violations=0
+   exit=0                                          # RED -- the miss, confirmed
+
+   $ /usr/bin/env bash lint.pre-fixround1.bak fixtures/finding1-bad-fence-in-heredoc.md    # committed (post-F5) script
+   violation=R3 file=fixtures/finding1-bad-fence-in-heredoc.md line=12 detail=$SOMETHING is used in this fence but assigned nowhere in it; each command block is a fresh shell, so it expands empty (D-2 rule 4)
+   lint=fail files=1 violations=1
+   exit=1                                          # GREEN -- caught
+   ```
+   Enrolled in `run_self_test` with `expected="R3"`.
+
+2. **R2 read the previous LINE, not the previous COMMAND** — a same-line `;` now
+   splits the line and locates the segment immediately preceding the echo match:
+   ```
+   $ /usr/bin/env bash lint.pre-fixround1.bak fixtures/finding2a-semicolon-fires.md    # same-line ; must fire R2
+   lint=pass files=1 violations=0
+   exit=0                                          # RED -- missed, prev_shell was empty
+
+   $ .github/scripts/lint-plan-assertions.sh fixtures/finding2a-semicolon-fires.md
+   violation=R2 file=fixtures/finding2a-semicolon-fires.md line=6 detail=echo "...=$?" after a command whose exit status is insensitive to the invariant; ...
+   lint=fail files=1 violations=1
+   exit=1                                          # GREEN -- now fires
+   ```
+   Regression control (a pipeline on the line ABOVE, a clean `;`-joined command on
+   this line, must stay CLEAN):
+   ```
+   $ /usr/bin/env bash lint.pre-fixround1.bak fixtures/finding2b-semicolon-after-pipe-clean.md
+   violation=R2 file=fixtures/finding2b-semicolon-after-pipe-clean.md line=7 detail=... (D-2 rule 2) ...
+   lint=fail files=1 violations=1
+   exit=1                                          # RED -- false positive, used prev_shell's pipe
+
+   $ .github/scripts/lint-plan-assertions.sh fixtures/finding2b-semicolon-after-pipe-clean.md
+   lint=pass files=1 violations=0
+   exit=0                                          # GREEN -- now clean
+   ```
+   Both fixtures (`bad-r2-semicolon.md`, `clean-r2-semicolon-after-pipe.md`) enrolled.
+
+3. **R2 flagged its own prescribed remedy** — `git diff --quiet` + `echo "…=$?"` is
+   the exact idiom `AGENTS.md` recommends, and R2 was flagging it:
+   ```
+   $ /usr/bin/env bash lint.pre-fixround1.bak fixtures/finding3a-diff-quiet-clean.md
+   violation=R2 file=fixtures/finding3a-diff-quiet-clean.md line=7 detail=... Assert with [ -z "$(...)" ], git diff --quiet, or an if/else printing both branches
+   lint=fail files=1 violations=1
+   exit=1                                          # RED -- flags its own prescribed remedy
+
+   $ .github/scripts/lint-plan-assertions.sh fixtures/finding3a-diff-quiet-clean.md
+   lint=pass files=1 violations=0
+   exit=0                                          # GREEN -- now clean
+   ```
+   Regression control (plain `git diff --name-only` + `echo "changed=$?"`, must
+   still fire): both the pre- and post-fix runs produced `violation=R2 ... lint=fail
+   files=1 violations=1` — unaffected by the exclusion, as intended.
+
+4. **F5 traded a noisy corruption for a silent one** — an unterminated heredoc was
+   silently swallowed to EOF and read as clean:
+   ```
+   $ /usr/bin/env bash lint.pre-fixround1.bak fixtures/finding4-unterminated-heredoc.md
+   lint=pass files=1 violations=0
+   exit=0                                          # RED -- silently swallowed to EOF
+
+   $ .github/scripts/lint-plan-assertions.sh fixtures/finding4-unterminated-heredoc.md
+   violation=scanner file=fixtures/finding4-unterminated-heredoc.md line=6 detail=heredoc <<'EOF' opened at line 6 was never terminated; the scan was abandoned at that point, so everything after it in this file went unchecked (Finding 4 -- an unterminated heredoc must not read as a clean plan)
+   lint=fail files=1 violations=1
+   exit=1                                          # GREEN -- reported and fails
+   ```
+
+5. **An unrecognized flag was a vacuous pass / stdin hang:**
+   ```
+   $ timeout 5 /usr/bin/env bash lint.pre-fixround1.bak --bogus </dev/null
+   awk: unknown option --bogus ignored
+   lint=pass files=1 violations=0
+   exit=0                                          # RED -- vacuous pass on a typo'd flag
+
+   $ timeout 5 .github/scripts/lint-plan-assertions.sh --bogus </dev/null
+   unknown option: --bogus
+   exit=2                                          # GREEN -- rejects loudly
+   ```
+
+   Minors: an awk temp-file leak on every invocation, measured across 15 invocations
+   (`before=157 after=172` on the unfixed script vs. `before=157 after=157` on the
+   fixed one) — now one `trap cleanup EXIT`; `"${files[@]}"` fatal on an empty array
+   under bash 3.2 + `set -u` (guarded, isolated repro confirmed on
+   `GNU bash, version 3.2.57(1)-release`); a `<<<` here-string phantom-matched as a
+   heredoc opener:
+   ```
+   $ /usr/bin/env bash lint.pre-fixround1.bak fixtures/minor8-herestring-bad-r3.md
+   lint=pass files=1 violations=0
+   exit=0                                          # RED -- $SOMETHING swallowed as phantom heredoc body
+
+   $ .github/scripts/lint-plan-assertions.sh fixtures/minor8-herestring-bad-r3.md
+   violation=R3 file=fixtures/minor8-herestring-bad-r3.md line=7 detail=$SOMETHING is used in this fence but assigned nowhere in it; ...
+   lint=fail files=1 violations=1
+   exit=1                                          # GREEN -- now caught
+   ```
 
 **Fix round 2 (`f2a3f74`)** — Round 1's same-line `;` fix made a latent defect live:
 `is_insensitive_predecessor`'s pipe test read a `|` inside a **quoted regex
-alternation** (`rg -n "Foundation|Bar" ...`, this repository's own idiom) as a shell
-pipeline, false-positiving R2. Fixed by stripping single- and double-quoted spans
-before the pipe test. Proven RED-before/GREEN-after against
-`good-r2-quoted-alternation.md` (both quoting forms) with a control fixture
-(`bad-r2-semicolon-pipe.md`) confirming a genuine same-line pipeline still fires. All
-four original rule drills (h/i/j/k) re-run after each fix round with identical labels
-— no regression.
+alternation** (`rg -n "Foundation|Bar" ...`, this repository's own idiom — including
+its own standing Foundation scan) as a shell pipeline, false-positiving R2. Fixed by
+stripping single- and double-quoted spans from the predecessor string before the pipe
+test:
+```
+$ SCRATCH=$(mktemp -d)   # outside the repo
+$ cp .github/scripts/lint-plan-assertions.sh "$SCRATCH/lint.sh"
+$ # reverted, in $SCRATCH/lint.sh only: the two new gsub lines removed
+
+$ /usr/bin/env bash "$SCRATCH/lint.sh" fixtures/good-r2-quoted-alternation.md
+violation=R2 file=.../good-r2-quoted-alternation.md line=6 detail=echo "...=$?" after a command whose exit status is insensitive to the invariant; ...
+violation=R2 file=.../good-r2-quoted-alternation.md line=7 detail=echo "...=$?" after a command whose exit status is insensitive to the invariant; ...
+lint=fail files=1 violations=2
+exit=1                                              # RED -- both quoting forms false-positive
+
+$ .github/scripts/lint-plan-assertions.sh fixtures/good-r2-quoted-alternation.md
+lint=pass files=1 violations=0
+exit=0                                              # GREEN -- clean on the real, fixed script
+```
+Control fixture (`bad-r2-semicolon-pipe.md`, a genuine same-line pipeline —
+`cat file | wc -l ; echo "n=$?"` — must still fire, confirming the quote-stripping
+fix does not turn the pipe test blind):
+```
+$ .github/scripts/lint-plan-assertions.sh fixtures/bad-r2-semicolon-pipe.md
+violation=R2 file=.../bad-r2-semicolon-pipe.md line=6 detail=echo "...=$?" after a command whose exit status is insensitive to the invariant; ...
+lint=fail files=1 violations=1
+exit=1
+```
+**Measured on the repository's 57-plan corpus** (56 exempt plans + this slice's own,
+run through the pre- and post-round-2 script): R2's violation count went **12 → 8**;
+all four dropped hits confirmed quoted-alternation false positives, all eight
+remaining confirmed genuine (the same measurement is repeated in §7, since it is the
+single strongest piece of evidence that this linter's findings are trustworthy rather
+than noisy).
+
+All four original rule drills (h/i/j/k) re-run after each fix round with identical
+labels — no regression.
 
 **Post-fix-round verification (both rounds):**
 ```
@@ -512,7 +634,7 @@ sections that matter for a future reader:
 - **New rows:** D-40 (three assertion classes stay unmechanized — pipe-position,
   own-HEAD assertion, plan-supplied analysis code), D-41 (`flagName` is a pinned
   third copy of every flag spelling, not a deleted one), D-42 (four residuals
-  measured during this slice's own implementation — see §5).
+  measured during this slice's own implementation — see §7).
 - **D-34/D-35:** amended in place (statement grew a sentence), **status left
   unchanged** per the brief's explicit instruction — D-34 initially misworded as
   `scheduled(slice-56)`-with-narrative in the round-0 commit, corrected to bare
@@ -664,17 +786,29 @@ $ grep -c 'gate=fail' gates.txt
 **46 `gate=pass`, 0 `gate=fail`** — matches the expected count exactly.
 
 **Checksum diff against slice 55b's baseline**, using the same D-18 filter and
-extraction the prior record used, with the baseline's 46 tuples read from
-`docs/superpowers/verification/2026-09-03-wrap-point-query.md` (§5, "The twelve gates
-and the checksum baseline diff" — the 46-line output block there, which is itself the
-committed record of slice 55b's local run):
+extraction the prior record used. The baseline's 46 tuples are re-derivable from the
+repository alone — extracted from
+`docs/superpowers/verification/2026-09-03-wrap-point-query.md`'s own §5 ("The twelve
+gates and the checksum baseline diff"), taking that section's **second** fenced block
+(the 46-line output, not the twelve invocation commands — the first, third and fourth
+blocks are the commands, the `gate_pass`/`gate_fail` summary, and the diff commands
+respectively):
+```
+$ awk '/^## 5\. The twelve gates and the checksum baseline diff$/{p=1} p{print} p && /^## 6\./{exit}' \
+    docs/superpowers/verification/2026-09-03-wrap-point-query.md \
+    | awk '/^```$/{n++; next} n==3' > baseline-gates-raw.txt
+$ sed -nE 's/.*mode=([a-z_]+).*scenario=([^ ]+).*checksum=([0-9-]+).*/\1|\2\t\3/p' baseline-gates-raw.txt \
+    | sort -u > checksums-baseline.tsv
+$ wc -l checksums-baseline.tsv
+      46 checksums-baseline.tsv
+```
+Local run, same filter and extraction:
 ```
 $ grep -v -e 'mode=memory_shape' -e 'mode=memory_observation' gates.txt \
     | sed -nE 's/.*mode=([a-z_]+).*scenario=([^ ]+).*checksum=([0-9-]+).*/\1|\2\t\3/p' \
     | sort -u > checksums-local.tsv
-$ wc -l checksums-local.tsv checksums-baseline.tsv
+$ wc -l checksums-local.tsv
       46 checksums-local.tsv
-      46 checksums-baseline.tsv
 $ DIFF="$(diff checksums-baseline.tsv checksums-local.tsv || true)"
 $ if [ -z "$DIFF" ]; then echo "checksum_diff=empty"; else echo "checksum_diff=NON_EMPTY"; fi
 checksum_diff=empty
@@ -685,15 +819,33 @@ was observed.
 
 ## 5. Test-count pair, delta, and enumeration (AC16)
 
-- **Slice 55b's count (baseline, from its own record):** 480 tests, 0 failures.
-  Independently re-measured on this branch's base commit `eacb50d`, before Task 1:
-  480/0 (confirmed).
+- **Slice 55b's count (baseline, from its own record):** 480 tests, 0 failures. A
+  controller-session run of `swift test` at `eacb50d`, before Task 1 was dispatched,
+  agreed (480/0). That run's transcript lives in a session, not in this repository,
+  so stating it as "independently re-measured" would be an assertion, not evidence —
+  this repository's own rule. It is recorded here as provenance only, not offered as
+  the check.
+- **Re-checkable substitute, from git alone.** A static count of `func test`
+  declarations across `Tests/`, at the base commit and at the last implementation
+  commit (`6e310fb`, chosen over a self-referential "HEAD" per §0's convention — it
+  is commit #11 in the table above), using `git grep` against a commit argument with
+  no checkout needed:
+  ```
+  $ git grep -o "func test" eacb50d -- Tests | wc -l
+       480
+  $ git grep -o "func test" 6e310fb -- Tests | wc -l
+       497
+  ```
+  **480 at `eacb50d`, 497 at `6e310fb`** — reproducing the delta of 17 from the
+  repository alone, with no historical session run required. Matches the controller
+  session's figure exactly; had it not, that would be the signal to investigate
+  rather than adjust the prose.
 - **This slice's count, measured after Task 6 (the last task that adds or removes a
   test), and re-confirmed after §3's drill restore:** **497 tests, 0 failures.**
 - **Delta:** 497 − 480 = **17**.
 
 **Enumeration, matching the delta by different arithmetic than the plan's stated
-`4+4+4+4+1=17`** (the plan was not retro-edited — see Deviation F4 in §5.1 below):
+`4+4+4+4+1=17`** (the plan was not retro-edited — see Deviation F4 in §7 below):
 
 | Task | New test functions | Running total |
 |---|---|---|
@@ -722,8 +874,8 @@ drill (c) restore:
 ```
 $ swift test --scratch-path /tmp/text-engine-host-build > slice56-t7-suite.txt 2>&1
 $ grep -n "Executed .* tests, with .* failures" slice56-t7-suite.txt | tail -2
-	 Executed 497 tests, with 0 failures (0 unexpected) in 7.281 (7.311) seconds
-	 Executed 497 tests, with 0 failures (0 unexpected) in 7.281 (7.312) seconds
+1232:	 Executed 497 tests, with 0 failures (0 unexpected) in 7.494 (7.527) seconds
+1234:	 Executed 497 tests, with 0 failures (0 unexpected) in 7.494 (7.528) seconds
 ```
 
 ## 6. Plan linter output
@@ -812,8 +964,14 @@ backslash-run rule. (2) `XCTAssertEqual(numbers, Array(1...numbers.count))` trap
 an empty id set (`Array(1...0)` is a Swift fatal error); guarded. A fifth test,
 `testEscapeParityHandlesRunsOfBackslashes`, covers the parity rule.
 
-**Task 4, two rounds — five Important, four Minor.** Summarized in §2's Task 4
-section above; full detail in the Task 4 report.
+**Task 4, two rounds — five Important, four Minor.** Full RED-before/GREEN-after
+evidence is inlined in §2's Task 4 section above (fence-in-heredoc, same-line `;`,
+own-prescribed-remedy, unterminated heredoc, unrecognized flag, here-string) — not
+pointed at the gitignored Task 4 report. **Measured on the repository's 57-plan
+corpus:** round 2's quote-stripping fix moved R2's violation count from **12 → 8**;
+all four dropped hits confirmed quoted-alternation false positives, all eight
+remaining confirmed genuine — the strongest single piece of evidence that this
+linter's findings are trustworthy rather than noisy.
 
 **Task 5, one round — two Important, four Minor.** Summarized in §2's Task 5 section
 above.
@@ -864,11 +1022,14 @@ This section is reserved for that evidence, in the "commit → run id" table sha
 convention this slice writes (§2 of `AGENTS.md`'s `Conventions that matter`, added by
 Task 6 / D-37) requires — never a bare run id, never "the current HEAD":
 
-| Commit (SHA) | Context | Run id | Step-level readings | Notes |
-|---|---|---|---|---|
-| *(not yet run)* | Host tests and benchmark gate | | | |
-| *(not yet run)* | iOS cross-target compile | | | |
-| *(not yet run)* | WASM cross-target compile | | | |
+| Commit (SHA) | Context | Run type | Run id | Step-level readings | Notes |
+|---|---|---|---|---|---|
+| *(not yet run)* | Host tests and benchmark gate | PR-head | | | |
+| *(not yet run)* | Host tests and benchmark gate | post-merge push | | | |
+| *(not yet run)* | iOS cross-target compile | PR-head | | | |
+| *(not yet run)* | iOS cross-target compile | post-merge push | | | |
+| *(not yet run)* | WASM cross-target compile | PR-head | | | |
+| *(not yet run)* | WASM cross-target compile | post-merge push | | | |
 
 No row is populated. When this evidence is gathered, it belongs on a separate
 `slice-56-hosted-proof` branch (per D-37, added by Task 6, discharged by this same
