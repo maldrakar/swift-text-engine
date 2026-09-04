@@ -236,12 +236,26 @@ agrees with itself.
 4 `ruby`, and **no `python` fence at all**: a `bash`-only scan would skip eight shell
 blocks, and the `python` fence the earlier draft named does not exist, because
 plan-supplied Python arrives **heredoc'd inside a bash fence** (slice 55a's
-`cat > /tmp/slice55a-predict.py <<'PY'`). So **heredoc bodies are skipped** — an
-unskipped heredoc makes R3 analyse Python as shell, which is a false-positive factory in
-the one tool that must not have one. A variable counts as assigned by `VAR=`,
-`for VAR in`, `read [-r] VAR`, `local VAR`, or an opening `: "${VAR:?}"`; the environment
-allow-list is `$?`, `$#`, `$@`, positional `$1`…`$9`, `$HOME`, `$PWD`, `$TMPDIR`,
-`$GITHUB_*`, `$RUNNER_*`.
+`cat > /tmp/slice55a-predict.py <<'PY'`).
+
+**Heredoc bodies are skipped at the scanner, for every fence-scoped rule** — R1 and R2
+as much as R3, not as a per-rule courtesy. Two reasons, and the second is load-bearing:
+an unskipped heredoc makes R3 analyse Python as shell, a false-positive factory in the
+one tool that must not have one; and a plan that *builds* a shell tool carries that
+tool's source, including its own known-bad fixtures, inside heredocs. This slice's plan
+is the first instance — it writes the linter via `cat > … <<'SCRIPT'`, and that body
+necessarily contains `PIPESTATUS` and `echo "…=$?"`. A rule scoped per-line rather than
+per-heredoc would make the linter unable to be built by a compliant plan.
+
+**R3's names are `SCREAMING_SNAKE` only.** A variable counts as assigned by `VAR=`,
+`export VAR=`, `for VAR in`, `read [-r] VAR`, `local VAR`, or an opening
+`: "${VAR:?}"`; a use is `$VAR` or `${VAR…}` where the name matches `[A-Z][A-Z0-9_]*`.
+Lower-case names are excluded because a bash fence routinely embeds an `awk` or `sed`
+program whose `$i`, `$1` and `$NF` are not shell variables at all — and the defect the
+rule exists for, slice 47's `$SCRATCH`, is upper-case, as is every plan variable in this
+repository. `$?`, `$#`, `$@` and `$1`…`$9` fall outside the name pattern by construction.
+The allow-list is `$HOME`, `$PWD`, `$TMPDIR`, `$PATH`, `$USER`, `$GITHUB_*`, `$RUNNER_*`,
+plus the awk built-ins `NF`, `NR`, `FS`, `OFS`, `ORS`, `RS`, `FILENAME`, `SUBSEP`.
 
 `PlanLintTests` (new, `Tests/ViewportBenchmarksTests`) runs the script over the
 repository and asserts exit 0, then pins the ratchet per D56-8.
