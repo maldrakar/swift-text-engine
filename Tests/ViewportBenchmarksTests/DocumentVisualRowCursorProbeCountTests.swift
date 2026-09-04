@@ -28,8 +28,27 @@ final class DocumentVisualRowCursorProbeCountTests: XCTestCase {
     //
     // A 100x jump in lineCount buys at most the extra levels of one binary search --
     // log2(100) is under 7, and the bound is deliberately loose against that.
+    //
+    // Widths: infinity (unwrapped) and 4.0 (genuinely wrapped -- the same width
+    // testDrainProbesMoveWithTheWidth and WrapComputeDrainTests already use). NOT 10.0:
+    // the fixture is 8 cells at advance 1.0, an 8.0-wide line, so any width >= 8.0 packs
+    // to one row and is the infinite case under another name -- the fixture guard below
+    // exists so that coincidence cannot recur silently.
     func testDrainProbesDoNotGrowWithTheDocument() {
-        for width in [Double.infinity, 10.0] {
+        // Fixture guard. The fixture is 8 cells at advance 1.0, so the line is 8.0 wide and
+        // ANY width >= 8.0 is the infinite case under another name -- the originally-planned
+        // 10.0 was exactly that, and the pair measured one regime twice while reading as two.
+        let wrapped = BenchmarkWrapLayout(
+            lineCount: 1_000, cells: 8, advance: 1.0, rowHeight: 16.0, wrapWidth: 4.0)
+        XCTAssertGreaterThan(
+            wrapped.visualRowCount(inLine: 0), 1,
+            "fixture: width 4.0 must actually wrap the line, or this loop measures one regime twice")
+        let unwrapped = BenchmarkWrapLayout(
+            lineCount: 1_000, cells: 8, advance: 1.0, rowHeight: 16.0, wrapWidth: .infinity)
+        XCTAssertEqual(
+            unwrapped.visualRowCount(inLine: 0), 1, "fixture: the infinite width must not wrap")
+
+        for width in [Double.infinity, 4.0] {
             let small = drainProbes(lineCount: 1_000, wrapWidth: width)
             let large = drainProbes(lineCount: 100_000, wrapWidth: width)
             XCTAssertGreaterThan(small, 0, "width=\(width): the drain must probe something")
