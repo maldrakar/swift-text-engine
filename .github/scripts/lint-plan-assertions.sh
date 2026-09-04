@@ -182,7 +182,17 @@ function close_fence(   name) {
 }
 
 # ---- task-section tracking (R4 operates OUTSIDE fences) -------------------------
-!in_fence && /^#{2,3} Task [0-9]+:/ {
+# `###?` (two hashes plus an optional third), NOT the interval expression `#{2,3}`.
+# The interval form was shipped once and was INERT on the CI container's awk, which does
+# not honour `{n,m}` by default (mawk needs `-W repetitions`; it otherwise reads the braces
+# as literal characters): the heading never matched, so `in_task` was never set, `check_task()`
+# was never called, and R4 -- both heading forms, not just the two-hash one -- silently
+# checked nothing while the step still printed `lint=pass`. Caught only because
+# `--self-test` runs from `swift test` (ScriptSelfTestTests) and reddened on the hosted
+# run. The rule for this file: POSIX-portable ERE only, no interval expressions -- the
+# authoring runs happen on macOS, the enforcing run happens on Linux, and a construct one
+# awk accepts and the other ignores turns a rule into a no-op rather than an error.
+!in_fence && /^###? Task [0-9]+:/ {
   if (in_task) check_task()
   in_task = 1; task_name = $0; task_start = FNR; guarantee_line = 0
   delete listed; delete drilled
@@ -581,6 +591,13 @@ FIXTURE
   # never entered task tracking for a `##` heading, `check_task()` was never called, and
   # this fixture -- missing its `**Guarantees added:**` block -- linted CLEAN. 31 of the
   # repository's 57 plans use `## Task N:` headings.
+  #
+  # This fixture and `bad-r4.md` are also the PORTABILITY guard on the heading pattern:
+  # the first widening spelled it `#{2,3}`, which the CI container's awk reads as literal
+  # braces, and `bad-r4.md` refused to fail there while every R1-R3 fixture stayed red
+  # (the loop below aborts at the first mismatch, so this fixture was never reached).
+  # Whichever awk runs this script, a heading spelling it cannot see shows up here as a
+  # bad-r4 fixture that will not go red -- not as a silent `lint=pass` in the CI log.
   cat > "$self_test_dir/bad-r4-hash2.md" <<'FIXTURE'
 ## Task 1: something
 
