@@ -97,6 +97,61 @@ enum BenchmarkMode: CaseIterable {
         }
     }
 
+    // The CLI flag that selects this mode, or nil for the default mode, which has no flag
+    // at all and runs as a bare `--gate`. EXHAUSTIVE, never a deny-list -- the same
+    // discipline as isGateable and absoluteCeiling: a `default` here hands the next mode a
+    // flag spelling nobody chose, or hides it from the workflow pin that reads this
+    // property.
+    //
+    // This is the THIRD copy of every flag spelling: BenchmarkOptions.parse's case labels
+    // are the first, swift-ci.yml's step payloads the second. It is PINNED in both
+    // directions rather than deleted -- BenchmarkModeFlagNameTests pins it to parse,
+    // WorkflowShapeTests pins it to the workflow. Deriving parse's cases from this property
+    // would delete the copy instead of pinning it and is the better fix; it rewrites every
+    // per-flag "cannot be combined with another mode" message and its tests, which is
+    // option-parsing surgery a slice whose fingerprint is "nothing measured moves" does not
+    // do. See the debt ledger.
+    var flagName: String? {
+        switch self {
+        case .pipeline:
+            return nil
+        case .rangeOnly:
+            return "--range-only"
+        case .realisticProvider:
+            return "--realistic-provider"
+        case .variableHeight:
+            return "--variable-height"
+        case .variableHeightMutation:
+            return "--variable-height-mutation"
+        case .structuralMutation:
+            return "--structural-mutation"
+        case .bulkStructuralMutation:
+            return "--bulk-structural-mutation"
+        case .lineQuery:
+            return "--line-query"
+        case .lineGeometryQuery:
+            return "--line-geometry-query"
+        case .columnQuery:
+            return "--column-query"
+        case .columnGeometryQuery:
+            return "--column-geometry-query"
+        case .pointQuery:
+            return "--point-query"
+        case .pointGeometryQuery:
+            return "--point-geometry-query"
+        case .memoryShape:
+            return "--memory-shape"
+        case .memoryObservation:
+            return "--memory-observation"
+        case .wrapCompute:
+            return "--wrap-compute"
+        case .wrapRowQuery:
+            return "--wrap-row-query"
+        case .wrapPointQuery:
+            return "--wrap-point-query"
+        }
+    }
+
     // Which absolute product ceiling this mode is held to. Exhaustive, never a
     // deny-list -- the same discipline as isGateable.
     //
