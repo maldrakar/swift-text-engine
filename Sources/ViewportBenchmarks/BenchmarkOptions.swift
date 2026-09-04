@@ -157,9 +157,13 @@ enum BenchmarkMode: CaseIterable {
     //
     // The six non-gateable modes (rangeOnly, memoryShape, memoryObservation,
     // wrapCompute, wrapRowQuery, wrapPointQuery) must classify under a total function but
-    // never reach the gate, so their value is inert. Worth knowing: the class-membership
-    // pin filters on isGateable and therefore does NOT cover them. Their class is a compile-time
-    // obligation, not a pinned one -- do not expect a test to catch a wrong choice here.
+    // never reach the gate, so their value stays inert AT RUNTIME -- the gate never reads
+    // it for them. Their class is now pinned regardless:
+    // testNonGateableModesClassifyAsScrollFrame (GateLogicTests) derives the non-gateable
+    // set from allCases rather than transcribing it, so a seventh non-gateable mode fails
+    // that test until someone makes its class a decision. The inertness still ends the
+    // moment a wrap mode becomes gateable at node 6 -- which is exactly why the pin exists
+    // ahead of need, not only after the fact.
     var absoluteCeiling: AbsoluteCeiling {
         switch self {
         case .bulkStructuralMutation:
