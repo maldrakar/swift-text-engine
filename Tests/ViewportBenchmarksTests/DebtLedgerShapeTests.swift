@@ -15,30 +15,49 @@ private let knownStatusPrefixes = [
     "open", "discharged(", "scheduled(", "deferred(", "accepted-risk",
 ]
 
+// A pipe is escaped by an ODD number of immediately preceding backslashes, not by a
+// one-character lookback: `\|` (one backslash) escapes, but `\\|` (two) is an escaped
+// backslash followed by a REAL separator, `\\\|` (three) escapes again, and so on. A
+// lookback of exactly one character cannot tell `\|` and `\\|` apart -- it calls both
+// "escaped", which is a false negative on the second case. So both helpers below track
+// the length of the run of backslashes immediately before each `|` and test its parity.
 private func unescapedPipeCount(_ line: String) -> Int {
     var count = 0
-    var previous: Character?
+    var backslashRun = 0
     for character in line {
-        if character == "|", previous != "\\" { count += 1 }
-        previous = character
+        if character == "|" {
+            if backslashRun % 2 == 0 { count += 1 }
+            backslashRun = 0
+        } else {
+            backslashRun = character == "\\" ? backslashRun + 1 : 0
+        }
     }
     return count
 }
 
 // Split on unescaped pipes only, dropping the empty head and tail a `| a | b |` row
-// produces. `\|` inside a code span is the CORRECT escape and must not split.
+// produces. `\|` inside a code span is the CORRECT escape and must not split; `\\|`
+// (an escaped backslash followed by a real pipe) must. See the parity-rule comment above
+// `unescapedPipeCount` -- this helper applies the identical rule and must stay in
+// agreement with it, since `testEveryStatusCellStartsWithAKnownStatus` silently skips any
+// row where the two disagree on column count.
 private func columns(of line: String) -> [String] {
     var cells: [String] = []
     var current = ""
-    var previous: Character?
+    var backslashRun = 0
     for character in line {
-        if character == "|", previous != "\\" {
-            cells.append(current)
-            current = ""
+        if character == "|" {
+            if backslashRun % 2 == 0 {
+                cells.append(current)
+                current = ""
+            } else {
+                current.append(character)
+            }
+            backslashRun = 0
         } else {
             current.append(character)
+            backslashRun = character == "\\" ? backslashRun + 1 : 0
         }
-        previous = character
     }
     cells.append(current)
     if cells.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { cells.removeFirst() }
@@ -103,6 +122,15 @@ final class DebtLedgerShapeTests: XCTestCase {
             }
             numbers.append(number)
         }
+        // `Array(1...numbers.count)` traps (`Range requires lowerBound <= upperBound`) when
+        // `numbers` is empty, which would abort the whole `swift test` binary instead of
+        // reporting one clean red -- guard it the same way the sibling test above guards its
+        // own degenerate case.
+        guard !numbers.isEmpty else {
+            return XCTFail(
+                "\(ledgerPath): no `| D-` rows found; the table is gone or its id cells no "
+                    + "longer match")
+        }
         XCTAssertEqual(
             numbers, Array(1...numbers.count),
             "\(ledgerPath): ids must run D-1…D-\(numbers.count) with no gaps and no "
@@ -129,5 +157,32 @@ final class DebtLedgerShapeTests: XCTestCase {
                     + "none of \(knownStatusPrefixes). The header of this file lists the "
                     + "legal statuses; the escalation rule reads this cell.")
         }
+    }
+
+    // Covers Finding 1 from the slice-56 Task 3 fix round: the escape rule must count the
+    // RUN of backslashes immediately preceding a pipe, not just one character back. Two
+    // consecutive backslashes are an escaped backslash in GFM, so the pipe that follows
+    // them is a REAL separator -- a one-character lookback calls it escaped instead (a
+    // false negative), which is exactly the `\\|` case below. `unescapedPipeCount` and
+    // `columns(of:)` are file-private, so this test reaches them directly on synthetic
+    // strings rather than through the committed ledger.
+    func testEscapeParityHandlesRunsOfBackslashes() throws {
+        // A raw `|` is a real separator.
+        XCTAssertEqual(unescapedPipeCount("a|b"), 1)
+        XCTAssertEqual(columns(of: "a|b"), ["a", "b"])
+
+        // `\|` (one backslash, odd run) is escaped -- not a separator.
+        XCTAssertEqual(unescapedPipeCount("a\\|b"), 0)
+        XCTAssertEqual(columns(of: "a\\|b"), ["a\\|b"])
+
+        // `\\|` (two backslashes, even run) is an escaped backslash followed by a REAL
+        // separator. This is the case a one-character lookback gets wrong.
+        XCTAssertEqual(unescapedPipeCount("a\\\\|b"), 1)
+        XCTAssertEqual(columns(of: "a\\\\|b"), ["a\\\\", "b"])
+
+        // The two helpers must agree: for a well-formed row, pipe count is column count + 1
+        // (the leading/trailing pipes produce two boundary cells that get trimmed away).
+        let wellFormed = "| a | b |"
+        XCTAssertEqual(unescapedPipeCount(wellFormed), columns(of: wellFormed).count + 1)
     }
 }
