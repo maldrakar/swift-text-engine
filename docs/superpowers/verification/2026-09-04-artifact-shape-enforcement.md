@@ -934,6 +934,14 @@ because its stray delimiters come in even pairs, so the corruption cancels; the 
 4 review proved the pre-F5 script passes both the self-test and this plan
 identically.
 
+**F6 — withdrawn.** A preflight finding that `"${files[@]}"` on an empty array is
+fatal under bash 3.2 with `set -u` (this project's macOS default) was tested during
+the preflight scan and found not to apply as stated, so it was withdrawn before
+execution rather than shipped as a ruling; there is no F6 fix in the tree. The
+related empty-array hazard that **is** real — the same construct reachable when
+every plan under `PLANS_DIR` is exempt — was found later, by the Task 4 review, and
+is recorded there (see the Task 4 minors list in this section, below).
+
 **F7 — `PLANS_DIR` resolves from `${BASH_SOURCE[0]}` (Task 4).** The plan sets it to
 the relative literal `docs/superpowers/plans`, but `PlanLintTests` invokes the script
 without setting a working directory. Uses the repository's existing idiom
@@ -1009,6 +1017,94 @@ miss for a false positive" instruction in Task 4's fix round 2); (d) gate-block
 contiguity is pinned by neither the total order nor the two boundary anchors (the old
 per-row anchor form did not pin it either — not a regression, but the retired
 comment's "contiguous" claim implied coverage that never existed).
+
+### Post-review findings, addressed in the final fix wave
+
+A whole-branch review returned one Important and six Minor findings against the tree
+this record otherwise describes. All seven were addressed in one fix-wave commit; the
+two below are additions to artifacts §7 already covers, recorded here rather than
+retro-editing the sections above (same rationale as F9: this record does not rewrite
+history, it appends the reconciliation).
+
+**R4 was INERT on `## Task N:` headings (Important).** The task-heading pattern
+`lint-plan-assertions.sh` used to enter task tracking was `/^### Task [0-9]+:/` —
+three hashes only. A plan whose task headings use two hashes never entered task
+tracking, `check_task()` was never called, and R4 emitted nothing while the run
+reported `lint=pass`. Measured: **31 of the repository's 57 plans use `## Task N:`**.
+Widened to `/^#{2,3} Task [0-9]+:/` (two or three hashes; a single `#` stays excluded
+as a document title). Drilled with a new `bad-r4-hash2.md` self-test fixture (a
+`## Task 1:` section with no `**Guarantees added:**` block, expected rule `R4`),
+proven live by reverting the widened pattern on a scratch copy outside the repo and
+confirming the committed `--self-test` reddens naming that fixture
+(`self_test=fail label=bad_r4-hash2_exit`) before restoring the widened pattern and
+seeing `self_test=pass` again. `./.github/scripts/lint-plan-assertions.sh` over the
+repository still prints `lint=pass files=1 violations=0` afterward, since this
+slice's own plan (the only non-exempt file) already carries `###` headings.
+
+**R3's assignment recognizer was `^`-anchored, producing a false positive on correct
+shell (Minor, but load-bearing).** `mkdir -p /tmp/x && SCRATCH=/tmp/x` followed by
+`echo "$SCRATCH"` reported `violation=R3`, telling the author their variable expands
+empty when it does not. The recognizer now splits each line on `&&`, `||`, `;` and
+`(` and re-runs the same anchored pattern against every resulting segment — strictly
+additive, never removing a prior match. Covered by a new `good-r3-assignment-after-and.md`
+self-test fixture; proven live by reverting the change on a scratch copy and
+confirming the fixture then false-positives (`violation=R3`) before the fix restores
+a clean lint. `declare -r`, `readonly` and `VAR+=` were deliberately **not** added —
+the design document enumerates the recognizer list as closed — and stay recorded as
+residual (b), below.
+
+**`testEachPinnedGateRunsExactlyTheExpectedCommand` was tautological (Minor).** It
+resolved its step set through `steps(for:in:)`, which already filters on the exact
+payload equality the test's own body re-asserted — so the test's own
+`XCTAssertEqual` could never fail; any drift reddened via `steps(for:in:)`'s
+`XCTAssertFalse(matches.isEmpty)` instead. Rewritten to resolve the step by **name**
+against the unfiltered host-job step list (via the existing `stepNamed(_:in:)`
+helper), then assert that step's payload equals the expected command — the exact
+dual of `testEachPinnedGateIsNamedForItsSiblings` (which resolves by payload and
+asserts the name), so together the two pin the name↔payload pairing in both
+directions. A missing name now fails with an explicit `XCTFail`, not a silent skip.
+Drilled: appended ` || true` to the "Run synthetic benchmark gate" step's `run:`
+payload in `swift-ci.yml` (backed up outside the repo first), confirmed the test
+reddens from its own assertion with a want/got message, restored from the backup,
+confirmed `git diff --quiet -- .github/workflows/swift-ci.yml`, and confirmed
+`--filter WorkflowShapeTests` is still 14/0.
+
+**`AGENTS.md`'s `## CI` section never mentioned the plan-lint step (Minor).** The
+host-job step list and the docs-only paragraph both predated Task 1's CI wiring.
+Added the lint step to the step list (noting it is, uniquely among the host job's
+steps, not guarded by `docs_only_pr`) and one sentence to the docs-only paragraph:
+a docs-only PR that adds or edits a non-exempt plan can now fail CI on that step
+where it previously always passed.
+
+**§7 (this section) skipped F6 with no note (Minor).** See the new F6 entry inserted
+between F5 and F7 above: F6 was a preflight finding, about bash 3.2's handling of
+`"${files[@]}"` on an empty array, that was tested during the preflight scan and
+found not to apply as stated, so it was withdrawn before execution. The related
+empty-array hazard that **is** real was found later, by the Task 4 review, and was
+already recorded in this section's Task 4 minors list.
+
+**Two further residuals, recorded rather than fixed (Minor):** (e) R1–R3 are scoped
+to `bash`/`sh` fences only, so a plan using a `shell`, `zsh` or `console` fence gets
+them as a silent no-op — the same shape as the R4 heading defect one level down. Not
+widened: the spec's AC7 states the scope explicitly, and a fence-language census over
+all 57 plans found none of those spellings in use (bash 1391, swift 443, text 320,
+yaml 68, markdown 62, diff 16, json 10, sh 8, awk 5, ruby 4). (f) The spec's §4B R3
+allow-list (`$HOME, $PWD, $TMPDIR, $PATH, $USER, $GITHUB_*, $RUNNER_*` plus awk
+built-ins) is narrower than what shipped (the script also allows `SHELL`, `IFS`,
+`OLDPWD`, `RANDOM`, `SECONDS`, `PIPESTATUS`, and the `BASH_` prefix) — benign and
+necessary (`PIPESTATUS` must be allow-listed so R3 does not double-report what R1
+reports), but recorded rather than resolved by editing the spec, the slice's binding
+authority, written before execution. Both appended to ledger row **D-42**, which now
+reads "Six residuals" and still carries exactly six unescaped pipes (verified with
+the same parity rule `DebtLedgerShapeTests` uses).
+
+After the fix wave: `swift test` — 497 tests, 0 failures;
+`./.github/scripts/lint-plan-assertions.sh` — `lint=pass files=1 violations=0`;
+`--self-test` — `self_test=pass`; `--filter DebtLedgerShapeTests` — 5/0;
+`--filter WorkflowShapeTests` — 14/0. The four original rule drills (h, i, j, k —
+G8/R1, G9/R2, G10/R3, G11/R4 neutralized in turn) were re-run against the final tree
+and every one reddened as before, since Fixes 1 and 3 edited the very awk rules they
+neutralize.
 
 ## 8. Hosted evidence — RESERVED, outstanding
 

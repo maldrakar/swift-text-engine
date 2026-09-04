@@ -182,7 +182,7 @@ function close_fence(   name) {
 }
 
 # ---- task-section tracking (R4 operates OUTSIDE fences) -------------------------
-!in_fence && /^### Task [0-9]+:/ {
+!in_fence && /^#{2,3} Task [0-9]+:/ {
   if (in_task) check_task()
   in_task = 1; task_name = $0; task_start = FNR; guarantee_line = 0
   delete listed; delete drilled
@@ -263,9 +263,21 @@ function check_task(   g) {
     }
   }
 
-  if (match($0, /^[ \t]*(export[ \t]+|local[ \t]+)?[A-Z][A-Z0-9_]*=/)) {
-    a = substr($0, RSTART, RLENGTH); sub(/=$/, "", a)
-    sub(/^[ \t]*(export[ \t]+|local[ \t]+)?/, "", a); assigned[a] = 1
+  # The plain-assignment recognizer is anchored at start-of-LINE, so an assignment
+  # following '&&', '||', ';' or '(' on the SAME line was invisible: correct shell like
+  # `mkdir -p /tmp/x && SCRATCH=/tmp/x` false-positived R3 on the next line's `$SCRATCH`
+  # (fix round 2/56 -- a false positive is worse than a miss, since it tells the author
+  # their variable expands empty when it does not). Split the line on those four
+  # statement-opening separators and re-run the SAME `^`-anchored pattern against each
+  # resulting segment; a line with none of the separators splits into exactly one
+  # segment (itself), so this is strictly ADDITIVE over the prior single-shot match --
+  # it recognizes MORE assignments, never fewer.
+  n_stmt = split($0, stmt, /(&&|\|\||;|\()/)
+  for (si_stmt = 1; si_stmt <= n_stmt; si_stmt++) {
+    if (match(stmt[si_stmt], /^[ \t]*(export[ \t]+|local[ \t]+)?[A-Z][A-Z0-9_]*=/)) {
+      a = substr(stmt[si_stmt], RSTART, RLENGTH); sub(/=$/, "", a)
+      sub(/^[ \t]*(export[ \t]+|local[ \t]+)?/, "", a); assigned[a] = 1
+    }
   }
   if (match($0, /for[ \t]+[A-Z][A-Z0-9_]*[ \t]+in/)) {
     a = substr($0, RSTART, RLENGTH); sub(/^for[ \t]+/, "", a); sub(/[ \t]+in$/, "", a)
@@ -474,6 +486,22 @@ echo "changed=$?"
 ```
 FIXTURE
 
+  # Fix 3 drill: an assignment following '&&' on the same line is correct shell and
+  # must NOT false-positive R3. Before the widened recognizer, the `^`-anchored match
+  # never saw `SCRATCH=/tmp/x` sitting after `mkdir -p /tmp/x && `, so the next line's
+  # `$SCRATCH` reported R3 -- telling the author their variable expands empty when it
+  # does not (a false positive is worse than a miss).
+  cat > "$self_test_dir/good-r3-assignment-after-and.md" <<'FIXTURE'
+### Task 1: something
+
+**Guarantees added:** none
+
+```bash
+mkdir -p /tmp/x && SCRATCH=/tmp/x
+echo "$SCRATCH"
+```
+FIXTURE
+
   cat > "$self_test_dir/bad-r3.md" <<'FIXTURE'
 ### Task 1: something
 
@@ -548,6 +576,17 @@ FIXTURE
 - [ ] **Step 1: do it**
 FIXTURE
 
+  # Fix 1 drill: a `##`-headed (two-hash) task heading must be tracked identically to a
+  # `###`-headed one. Before the widened pattern, `!in_fence && /^### Task [0-9]+:/`
+  # never entered task tracking for a `##` heading, `check_task()` was never called, and
+  # this fixture -- missing its `**Guarantees added:**` block -- linted CLEAN. 31 of the
+  # repository's 57 plans use `## Task N:` headings.
+  cat > "$self_test_dir/bad-r4-hash2.md" <<'FIXTURE'
+## Task 1: something
+
+- [ ] **Step 1: do it**
+FIXTURE
+
   local out rc
   # The good fixture must be clean -- and it is the heredoc drill: its INNER body carries
   # PIPESTATUS, `git status` + `echo "dirty=$?"`, and an unassigned-looking use, all of
@@ -581,9 +620,17 @@ FIXTURE
   assert_equal "0" "$rc" "good_r2_quoted_alternation_exit"
   assert_equal "lint=pass files=1 violations=0" "$out" "good_r2_quoted_alternation_output"
 
+  # Fix 3 (56): an assignment following '&&' on the same line as its guard command must
+  # NOT false-positive R3.
+  set +e
+  out="$(run_lint "$self_test_dir/good-r3-assignment-after-and.md")"; rc=$?
+  set -e
+  assert_equal "0" "$rc" "good_r3_assignment_after_and_exit"
+  assert_equal "lint=pass files=1 violations=0" "$out" "good_r3_assignment_after_and_output"
+
   local name expected
   for name in r1 r2 r2-semicolon r2-semicolon-pipe r2-diff-name-only r3 r3-herestring \
-              fence-in-heredoc unterminated-heredoc r4 r4-missing; do
+              fence-in-heredoc unterminated-heredoc r4 r4-missing r4-hash2; do
     case "$name" in
       r1)                                                 expected="R1" ;;
       r2|r2-semicolon|r2-semicolon-pipe|r2-diff-name-only) expected="R2" ;;

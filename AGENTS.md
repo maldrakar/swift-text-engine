@@ -392,7 +392,10 @@ needs no toolchain) and let the hosted 6.2.1 container job be the real check.
 Three jobs:
 
 - **Host tests and benchmark gate** on `ubuntu-latest` with
-  `swift:6.2.1-bookworm`: `swift test` → synthetic `--gate` (blocking)
+  `swift:6.2.1-bookworm`: `./.github/scripts/lint-plan-assertions.sh` (blocking,
+  and — unlike every step after it — **not** guarded by `docs_only_pr`, so it runs
+  on every PR including a docs-only one; see the docs-only paragraph below)
+  → `swift test` → synthetic `--gate` (blocking)
   → `--variable-height --gate` (blocking) → `--variable-height-mutation --gate`
   (blocking) → `--structural-mutation --gate` (blocking)
   → `--bulk-structural-mutation --gate` (blocking) → `--line-query --gate`
@@ -450,11 +453,15 @@ loaded from the PR checkout. The detector rejects `.github/workflows/**` and
 policy-sensitive directories are not docs-only regardless of extension. If the
 full PR diff is only `docs/**` or Markdown files outside those policy-sensitive
 directories, the job prints `mode=docs_only_pr ... result=success` and skips the
-heavy Swift/test/compile work. Missing commits, diff failures, and empty runtime
-diffs fail closed. Swift source, tests, package metadata, and all other non-doc
-paths are not docs-only and must run the heavy path. Docs-only pushes to `main`
-may still skip Swift CI through the `push.paths-ignore` rule because PR required
-checks are the merge gate.
+heavy Swift/test/compile work — **except** the plan linter, which runs before the
+`docs_only_pr` branch even splits (see the host-job step list above) and is not
+skipped by it. A plan lives under `docs/**`, so a docs-only PR that adds or edits
+a non-exempt plan is exactly the kind of PR this step exists to catch: it can now
+fail CI on that lint step where, before this slice, it always passed. Missing
+commits, diff failures, and empty runtime diffs fail closed. Swift source, tests,
+package metadata, and all other non-doc paths are not docs-only and must run the
+heavy path. Docs-only pushes to `main` may still skip Swift CI through the
+`push.paths-ignore` rule because PR required checks are the merge gate.
 
 Bypass caveat: the ruleset preserves the existing bypass actor shape, and the
 current admin user can bypass it. Required checks are configured and enforced

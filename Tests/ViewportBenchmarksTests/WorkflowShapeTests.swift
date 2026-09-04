@@ -298,19 +298,31 @@ final class WorkflowShapeTests: XCTestCase {
         }
     }
 
-    // Invariant 2. Exact command equality, not `runTokens.contains("--gate")`. Subsumes the
-    // --gate check and forecloses a double invocation inside one `|` block scalar and a
-    // trailing `|| true`, both of which a token probe reports as green.
+    // Invariant 2. Exact command equality, not `runTokens.contains("--gate")`. Resolves
+    // the step by NAME against the UNFILTERED host-job step list, then asserts that
+    // step's payload equals `spec.command` -- the exact dual of
+    // testEachPinnedGateIsNamedForItsSiblings below (which resolves by PAYLOAD and
+    // asserts the name). Together the two pin the name<->payload pairing in both
+    // directions, and both bodies are now load-bearing: this test used to resolve
+    // through `steps(for:in:)`, which already filters on this same payload equality, so
+    // its own XCTAssertEqual could never fail -- any drift reddened via
+    // `steps(for:in:)`'s XCTAssertFalse(matches.isEmpty) instead, not from this test's
+    // own assertion. Resolving by name first forecloses a double invocation inside one
+    // `|` block scalar and a trailing `|| true`, both of which a mere
+    // `contains("--gate")` token probe would report as green.
     func testEachPinnedGateRunsExactlyTheExpectedCommand() throws {
         let all = try hostJobSteps()
         for spec in pinnedGateSteps {
-            for step in steps(for: spec, in: all) {
-                XCTAssertEqual(
-                    step.runTokens.joined(separator: " "), spec.command,
-                    "\(step.name): run payload is not the expected single gated command.\n"
-                        + "  want: \(spec.command)\n"
-                        + "  got:  \(step.runTokens.joined(separator: " "))")
+            guard let step = stepNamed(spec.stepName, in: all) else {
+                XCTFail("\(workflowPath): no step in \(hostJobKey) named "
+                    + "\"\(spec.stepName)\" — the gate is gone or renamed")
+                continue
             }
+            XCTAssertEqual(
+                step.runTokens.joined(separator: " "), spec.command,
+                "\(step.name): run payload is not the expected single gated command.\n"
+                    + "  want: \(spec.command)\n"
+                    + "  got:  \(step.runTokens.joined(separator: " "))")
         }
     }
 
