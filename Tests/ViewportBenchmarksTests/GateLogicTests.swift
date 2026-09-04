@@ -218,6 +218,50 @@ final class GateLogicTests: XCTestCase {
         XCTAssertEqual(discrete, ["bulk_structural_mutation"])
     }
 
+    // D-20. The NON-GATEABLE modes' AbsoluteCeiling class is pinned by nothing:
+    // testDiscreteActionClassIsExactlyDocumented filters on isGateable, so these six
+    // classify under a total function that no test covers. The ledger row says "five" --
+    // it was written before wrapPointQuery existed. The count is therefore DERIVED from
+    // allCases here rather than transcribed, so the row's stale number cannot become a
+    // stale pin: adding a seventh non-gateable mode fails this test until its class is a
+    // decision somebody made.
+    func testNonGateableModesClassifyAsScrollFrame() {
+        let nonGateable = BenchmarkMode.allCases.filter { !$0.isGateable }
+        XCTAssertEqual(
+            Set(nonGateable.map(\.outputName)),
+            ["range_only", "memory_shape", "memory_observation",
+             "wrap_compute", "wrap_row_query", "wrap_point_query"],
+            "the non-gateable set changed; classify the new mode, do not widen the pin")
+        for mode in nonGateable {
+            XCTAssertEqual(
+                mode.absoluteCeiling, .scrollFrame,
+                "\(mode.outputName): inert today, but it stops being inert the moment a "
+                    + "wrap mode becomes gateable at node 6")
+        }
+    }
+
+    // D-21. The .scrollFrame arm was unpinned in the gateable direction: moving a gated
+    // mode INTO .discreteAction reddens testDiscreteActionClassIsExactlyDocumented, but a
+    // new gateable mode landing in .scrollFrame tripped nothing. Safe by default --
+    // .scrollFrame is the tighter ceiling -- but the safety was an accident. Both arms are
+    // now checked, and the two tests together partition the gateable set.
+    func testGateableScrollFrameClassIsExactlyDocumented() {
+        let scrollFrame = Set(
+            BenchmarkMode.allCases
+                .filter { $0.isGateable && $0.absoluteCeiling == .scrollFrame }
+                .map(\.outputName))
+        XCTAssertEqual(
+            scrollFrame,
+            ["pipeline", "realistic_provider", "variable_height", "variable_height_mutation",
+             "structural_mutation", "line_query", "line_geometry_query", "column_query",
+             "column_geometry_query", "point_query", "point_geometry_query"])
+        let gateable = Set(BenchmarkMode.allCases.filter(\.isGateable).map(\.outputName))
+        XCTAssertEqual(
+            scrollFrame.union(["bulk_structural_mutation"]), gateable,
+            "the two class pins must partition the gateable set, or a mode can sit in "
+                + "neither and be checked by neither")
+    }
+
     // Both ceilings are data, not logic: pin them to the frame math so neither can be
     // silently changed or accidentally corpus-derived. FIXED, never recalibrated.
     func testAbsoluteCeilingsArePinnedToTheFrameMath() {
@@ -229,10 +273,10 @@ final class GateLogicTests: XCTestCase {
         XCTAssertEqual(AbsoluteCeiling.discreteAction.p99Nanoseconds, 16_666_666)
     }
 
-    // The reason this slice exists: a frame-hot-path op blows the 60 FPS frame while its
+    // The reason this slice exists: a scroll-frame op blows the 60 FPS frame while its
     // (legitimately re-derived, looser) regression budget still PASSES. The product gate
     // must catch it -- this is the slow drift the regression gate re-derives around.
-    func testAbsoluteCeilingFiresForFrameHotPathMode() {
+    func testAbsoluteCeilingFiresForScrollFrameMode() {
         let obsP99 = AbsoluteCeiling.scrollFrame.p99Nanoseconds + 1  // one ns over the frame ceiling
         let s = summary(
             mode: .structuralMutation,
@@ -242,7 +286,7 @@ final class GateLogicTests: XCTestCase {
     }
 
     // The scroll-frame ceiling must NOT reach bulk. Same latency/budget shape as the
-    // frame-hot-path test above; under the two-class model 1.67 ms is far below bulk's
+    // scroll-frame test above; under the two-class model 1.67 ms is far below bulk's
     // own 16.67 ms ceiling, so the assertion survives while its meaning changes: not
     // "bulk has no ceiling" but "bulk is not held to the SCROLL-FRAME ceiling".
     //
@@ -295,7 +339,7 @@ final class GateLogicTests: XCTestCase {
         XCTAssertEqual(s.gateFailureReason, .budgetStale)
     }
 
-    // Frame-hot-path gate output carries the fixed ceiling and its headroom, positioned
+    // Scroll-frame gate output carries the fixed ceiling and its headroom, positioned
     // after headroom_p99 and before gate=. 1666666 / 200000 = 8.33 -> "8.3x".
     func testGateOutputCarriesScrollFrameCeiling() {
         let line = formatSummary(
