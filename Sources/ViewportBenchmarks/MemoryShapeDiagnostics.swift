@@ -109,6 +109,17 @@ func variableCoreOwnedBytesEstimate() -> Int {
 
 let variableUniformMemoryShapeProviderName = "variable_uniform"
 
+// The viewport every scenario in this mode shares, and the window it implies. Written as
+// a derivation rather than as the literal 90, because the mode-wide equality (spec
+// Decision 4) is exactly the claim that all eleven scenarios share this configuration --
+// and a comparison against a typed-in 90 would agree with a scenario list that no longer
+// does.
+let memoryShapeViewportRows = 80
+let memoryShapeOverscanBefore = 5
+let memoryShapeOverscanAfter = 5
+let expectedMemoryShapeWindow =
+    memoryShapeViewportRows + memoryShapeOverscanBefore + memoryShapeOverscanAfter
+
 func expectedMemoryShapeVisibleLines(_ scenario: MemoryShapeScenario) -> Int {
     if scenario.lineCount <= 0 || scenario.lineHeight <= 0.0 || scenario.viewportHeight <= 0.0 {
         return 0
@@ -417,6 +428,7 @@ func runVariableMemoryShapeScenario(lineCount: Int) -> MemoryShapeSummary {
 func runMemoryShapeDiagnostics() -> Bool {
     let fixedSummaries = memoryShapeScenarios().map(runMemoryShapeScenario)
     let variableSummaries = [100_000, 1_000_000].map(runVariableMemoryShapeScenario)
+    let wrapSummaries = wrapMemoryShapeScenarios().map(runWrapMemoryShapeScenario)
     let summaries = fixedSummaries + variableSummaries
     let syntheticCoreOwnedBytes = summaries
         .filter { $0.providerName == MemoryShapeProviderKind.synthetic.outputName }
@@ -446,6 +458,11 @@ func runMemoryShapeDiagnostics() -> Bool {
         if !invariantPasses {
             passed = false
         }
+    }
+
+    for summary in wrapSummaries {
+        print(formatWrapMemoryShapeSummary(summary, invariantPasses: summary.baseInvariantPasses))
+        if !summary.baseInvariantPasses { passed = false }
     }
 
     return passed
