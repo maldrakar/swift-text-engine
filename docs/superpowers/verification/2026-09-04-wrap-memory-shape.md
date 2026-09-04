@@ -1043,12 +1043,101 @@ widths were one regime — is §7.6. What all of them have in common is the mech
 names: a drill's prediction about *which* mutation reddens is itself unverified until it is
 run, and a drill that cannot fail certifies nothing while looking exactly like one that can.
 
+### 7.10 Residuals for the debt ledger — carry, don't fix
+
+The whole-branch review triaged five residuals as carry-not-fix: real, but each either
+undrillable without a new seam, narrow in exposure, or latent rather than introduced by this
+slice. Recorded here, one paragraph each, so the post-slice review can lift them into
+`docs/superpowers/debt-ledger.md` as rows without re-deriving them from the transcripts. This
+section is *not* itself a ledger edit — the post-slice review owns that delta.
+
+**M-2 — `touched_lines`'s repair has no test that can fail for the reason D-45 shipped it.**
+`testTheVariablePathCountsTheLinesItTouches` passes identically if `providerLines:
+touchedLines` (the repair) is reverted to `providerLines: bufferedLines` (the pre-D-45
+assignment): the counter and its test survive, unused, because *touched* and *buffered*
+coincide in every reachable configuration of `runVariableMemoryShapeScenario(lineCount:)`,
+which takes no range argument and always drains exactly the buffered window. Structurally
+undrillable without a new seam (a range parameter, or a scenario whose touched set is a
+strict subset of its buffered one) — Drill (p) covered the counter's own wiring at ship time
+(§2, Task 3), but nothing standing distinguishes "counts touched lines" from "counts buffered
+lines" for this column. Trigger to revisit: whichever slice next gives this scenario runner a
+range argument, or otherwise makes touched and buffered diverge.
+
+**M-5 — `testTheEmittedLineCarriesEveryToken` checks substrings, not tokens.** It asserts
+`line.contains(token)` for each of `--memory-shape`'s wrap-half fields, so `"visible_rows=80"`
+would equally satisfy a search for `"visible_rows=801"` (or any string containing it) — the
+exact substring-vs-token hazard `AGENTS.md` writes down for `WorkflowShapeTests`'s own
+`--gate` census (`--variable-height` is a prefix of `--variable-height-mutation`). Exposure is
+narrow here: this test's own sibling tests in the same file (`testEveryWidthReportsTheSameWindowAndStreamsIt`,
+`testTheQueryLandsOffARowStartAtEveryWrappedWidth`, etc.) separately pin the exact values, so a
+wrong number would be caught elsewhere even though this test would not catch it. But the
+project's own rule says tokens, not substrings, and this test does not follow it. Fix: split on
+whitespace and assert exact-token membership, the way the workflow census does.
+
+**M-6 — `cross-target-compile.sh` still carries unguarded array expansions under `set -u`.**
+Five bare `"${SELF_TEST_COVERED[@]}"` / `"${SELF_TEST_EXEMPT[@]}"` expansions remain in
+`cross-target-compile.sh`, where the three scripts this slice's Task 8 touched
+(`derive-gate-budgets.sh`, `harvest-gate-corpus.sh`, `detect-docs-only-pr.sh`) now use the
+bash-3.2-safe `${ARR[@]+"${ARR[@]}"}` form (found and fixed as one of Task 8's two real
+defects — see §2, Task 8, and the ledger's D-14 discharge). `cross-target-compile.sh` runs
+`set -uo pipefail`, so the same "declared-but-empty array expansion is `unbound variable`
+under bash 3.2" trap applies to it too; it is latent only because its own
+`SELF_TEST_COVERED`/`SELF_TEST_EXEMPT` arrays happen to be non-empty today. Not introduced by
+this slice — this slice made the *other* three scripts safer and left the original (the
+script D-14's copies were taken from) as the least-safe of the four. Trigger to revisit: the
+first time either of `cross-target-compile.sh`'s two arrays is emptied, or the next slice that
+touches that script's self-test harness.
+
+**M-7 — `lint-plan-assertions.sh` is now the one self-tested script with no coverage
+partition, and D-14's discharge note justifies the exclusion on the wrong row's axis.**
+Task 8 checked `lint-plan-assertions.sh` (a fifth script, outside D-14's stated three-script
+scope) and correctly left it alone for D-15's purposes — its dispatcher is a bare
+`run_self_test` call with no trailing `exit 0`, so it is not vulnerable to D-15's defect (§2,
+Task 8). But that finding is about the *dispatcher*, which is D-15's axis, not D-14's: D-14 is
+about the `SELF_TEST_COVERED`/`SELF_TEST_EXEMPT` classification partition, and on that axis
+`lint-plan-assertions.sh`'s four helper functions (`cleanup`, `write_awk_program`, `lint_file`,
+`run_lint`) remain unclassified — the literal discharge is correct (D-14's row names exactly
+three scripts, and all three now carry the partition), but the residual is real: a fifth
+script's self-test coverage is unverified by the mechanism the other four now have, and
+nothing documents that as a deliberate scope boundary rather than an oversight. Trigger to
+revisit: extending D-14's classification helpers to a fifth script, or writing down explicitly
+why `lint-plan-assertions.sh` is out of scope for the *classification* partition and not only
+for the dispatcher-shape question D-15 asks.
+
+**M-8 — `WrapComputeProbeCountTests`'s four-width sweep is mostly one regime, undocumented
+where a reader meets it.** `testComputeProbesTheLayoutAConstantNumberOfTimes` sweeps
+`[Double.infinity, 40.0, 10.0, 4.0]` over an 8-cell/advance-1.0 fixture (a line 8.0 wide), so
+any width `>= 8.0` — three of the four swept values — is the unwrapped regime under another
+name; only `4.0` genuinely wraps. Harmless for what this particular pin measures (the layout
+probe count is flat regardless of width — see the test's own scope note), but it reads as a
+four-regime sweep and is really two, which is exactly the coincidence its sibling
+`DocumentVisualRowCursorProbeCountTests.testDrainProbesDoNotGrowWithTheDocument` hit for real
+(G21, §7.6) and now guards against with an explicit fixture assertion. Recorded in this
+record's §7.6 already, but not in the test file itself, where a reader will actually meet it —
+a one-line comment noting the coincidence has now been added directly to
+`WrapComputeProbeCountTests.swift`. Trigger to revisit: adding a fixture guard here too, or
+reshaping the fixture so the four widths are genuinely four regimes.
+
 ## 8. Controller rulings made during execution
 
 Eleven rulings, listed here in the order they were made; the full text of each is in the SDD
 ledger (`.superpowers/sdd/2026-09-04-wrap-memory-shape/progress.md`, gitignored). Several
 correct the plan or the spec, which is why they belong in the record and not only in the
 session.
+
+**Count reconciliation, since a mechanical check of this section reads a different number.**
+`grep -c "Ruling:" .superpowers/sdd/2026-09-04-wrap-memory-shape/progress.md` returns **nine**,
+not eleven — and the gap is not a miscount, it is two different things being counted. This
+list is a **selective account of the load-bearing decisions**, not a literal rendering of that
+grep. Of the eleven items: eight are among the nine ledger lines tagged exactly `Task N:
+Ruling:` (the string the grep matches); items 1 and 2 are two decisions made *before* any task
+was dispatched, logged in the ledger as `Ruling 1 —` and `Ruling 2 —` — no colon after
+`Ruling`, so the grep does not see them; item 6 is a third pre-dispatch decision, logged as
+`Task 3: Ruling (pre-dispatch):`, which the same grep misses for the same reason (the colon
+sits after `(pre-dispatch)`, not after `Ruling`). That accounts for all eleven (8 + 2 + 1). The
+ninth `Ruling:`-tagged ledger line — Task 9's endorsement that the implementer's own catch of
+D-38 should be discharged — is deliberately not one of the eleven: it added no correction of
+its own to the plan or the spec, and is folded into §2's Task 9 account instead.
 
 1. **Pre-flight, Task 3.** `testTheWalkMustCostSomething`'s fixture as planned mutates an
    element whose constructor defaults *also* breach the `<= 32` shape bound, so the function
@@ -1084,7 +1173,7 @@ session.
 11. **Task 8.** D-15's contract is falsified; revert the three dispatcher edits, keep D-14
     whole, and record the falsification as a new ledger row (§7.1).
 
-Three further rulings were made pre-flight and produced no correction to the plan (Ruling 3's
+Two further rulings were made pre-flight and produced no correction to the plan (Ruling 3's
 double-printed `touched_lines`/`provider_lines` token, and Ruling 4's constraint that
 `variableCoreOwnedBytesEstimate()` must not be re-typed by the counting wrapper, both in the
 SDD ledger); they are named here only so the count in this section is not read as the whole
@@ -1111,9 +1200,12 @@ $ swift test --filter DebtLedgerShapeTests
 	 Executed 5 tests, with 0 failures (0 unexpected)
 ```
 
-Run after the ledger edits of this slice, which add three rows (D-45, D-46, D-47) and rewrite
-seven statuses. The shape guard catches a raw `|` inside a code span in a table cell — the
-character a row quoting `run_self_test || exit 1` invites, and D-47 quotes it twice.
+Run after the ledger edits of this slice, which add three rows (D-45, D-46, D-47) and edit
+nine existing rows — verified against `git diff 404feb8..ea1a5dd -- docs/superpowers/debt-ledger.md`:
+eight flip `open` -> `discharged` (D-10, D-11, D-14, D-19, D-20, D-21, D-38, D-43) and one,
+D-15, is amended in place with its status left `open`. The shape guard catches a raw `|`
+inside a code span in a table cell — the character a row quoting `run_self_test || exit 1`
+invites, and D-47 quotes it twice.
 
 ## 10. Hosted evidence — RESERVED, NOT YET DISCHARGED
 

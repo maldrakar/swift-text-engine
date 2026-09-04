@@ -66,12 +66,28 @@ final class CountingWrapLayoutTests: XCTestCase {
         XCTAssertGreaterThan(drainCounter.columnOffset, 0, "the packer reads columnOffset")
         XCTAssertGreaterThan(drainCounter.canBreak, 0, "the packer reads canBreak")
 
-        // `total` is the sum of the six hooks and MUST NOT double-count the by-argument
-        // counter, which is a subset of firstVisualRow.
+        // `total` is the sum of the six hooks. Checked here on the DRAIN counter as a
+        // broader combination -- columnCount, columnOffset, canBreak, firstVisualRow and
+        // logicalLine are all non-zero on this path -- so a `total` formula that omits or
+        // duplicates one of THOSE terms trips it.
         XCTAssertEqual(
             drainCounter.total,
             drainCounter.columnCount + drainCounter.columnOffset + drainCounter.canBreak
                 + drainCounter.visualRowCount + drainCounter.firstVisualRow + drainCounter.logicalLine)
+
+        // The claim that still needs its own falsifiable check is narrower: `total` MUST
+        // NOT double-count the BY-ARGUMENT counter `firstVisualRowAtLineCount`, which is a
+        // strict SUBSET of `firstVisualRow`, not a seventh hook. `drainCounter` cannot
+        // witness that claim -- its `firstVisualRowAtLineCount` is always 0 (the drain
+        // never reads totalRows; G19, pinned separately below), so folding it into the sum
+        // above would change nothing and the identity would stay green even if `total`
+        // mistakenly counted it twice. `counter` -- the COMPUTE counter built at the top of
+        // this test -- has `firstVisualRowAtLineCount == 1`, so asserting the same identity
+        // on it is the version that can actually fail for the reason stated.
+        XCTAssertEqual(
+            counter.total,
+            counter.columnCount + counter.columnOffset + counter.canBreak
+                + counter.visualRowCount + counter.firstVisualRow + counter.logicalLine)
     }
 
     // G19. The by-argument counter, which D-29's discharge rests on: "the drain performs

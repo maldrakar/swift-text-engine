@@ -10,6 +10,37 @@ final class WrapMemoryShapeTests: XCTestCase {
 
     private var allWidths: [(String, Double)] { [("inf", .infinity), ("40", 40.0), ("10", 10.0)] }
 
+    // Pins `wrapMemoryShapeScenarios()`'s exact six-scenario list, in order. Nothing else in
+    // this suite asserts the LIST itself -- every other test here calls the scenario
+    // constructor directly, never the production function. That matters more than it looks:
+    // `wrapMemoryShapeCrossScenarioFailures` reads two of these labels back by STRING --
+    // `$0.widthLabel == "10"` and `$0.widthLabel == "inf"` -- to pair invariant 11 (and the
+    // per-size pairing for 9/12) across the two document sizes. Relabel a width (say "10" ->
+    // "8") and those `first(where:)` lookups simply find nothing: the `if let` fails silently,
+    // invariant 11 evaporates, and every emitted line still prints `invariant=pass`. This test
+    // is what stops that from happening unnoticed -- the same discipline `pinnedGateSteps` and
+    // `everyGatedBudget()` already apply elsewhere in this repository: a downstream check's
+    // read set is pinned at the point the check itself cannot see it move.
+    func testTheScenarioListIsExactlySixInOrder() {
+        let scenarios = wrapMemoryShapeScenarios()
+        let expected: [(name: String, lineCount: Int, widthLabel: String, wrapWidth: Double)] = [
+            (name: "100k_lines_width_inf", lineCount: 100_000, widthLabel: "inf", wrapWidth: .infinity),
+            (name: "100k_lines_width_40", lineCount: 100_000, widthLabel: "40", wrapWidth: 40.0),
+            (name: "100k_lines_width_10", lineCount: 100_000, widthLabel: "10", wrapWidth: 10.0),
+            (name: "1m_lines_width_inf", lineCount: 1_000_000, widthLabel: "inf", wrapWidth: .infinity),
+            (name: "1m_lines_width_40", lineCount: 1_000_000, widthLabel: "40", wrapWidth: 40.0),
+            (name: "1m_lines_width_10", lineCount: 1_000_000, widthLabel: "10", wrapWidth: 10.0),
+        ]
+        XCTAssertEqual(scenarios.count, expected.count, "scenario count")
+        for (index, pair) in zip(scenarios, expected).enumerated() {
+            let (scenario, want) = pair
+            XCTAssertEqual(scenario.name, want.name, "scenario \(index): name")
+            XCTAssertEqual(scenario.lineCount, want.lineCount, "scenario \(index): lineCount")
+            XCTAssertEqual(scenario.widthLabel, want.widthLabel, "scenario \(index): widthLabel")
+            XCTAssertEqual(scenario.wrapWidth, want.wrapWidth, "scenario \(index): wrapWidth")
+        }
+    }
+
     // G13 + G14 + G1. The three per-scenario structural invariants, asserted together
     // because they describe one range: it is ordered and inside the row axis, the window
     // is 80/90 at every width (Decision 3), and the cursor streams the buffer exactly.

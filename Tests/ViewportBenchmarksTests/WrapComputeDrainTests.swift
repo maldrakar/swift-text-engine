@@ -15,6 +15,8 @@ final class WrapComputeDrainTests: XCTestCase {
         let base = BenchmarkWrapLayout(lineCount: 64, cells: 8, advance: 1.0, rowHeight: 16.0, wrapWidth: 4.0)
         let input = VariableViewportInput(scrollOffsetY: 40.0, viewportHeight: 100.0, overscanLinesBefore: 4, overscanLinesAfter: 4)
 
+        // The range is built OUTSIDE the counted region, exactly as the benchmark builds
+        // its drain ranges outside the clock (slice 54 spec, Decision 4).
         guard case .success(let range) = ViewportVirtualizer.compute(input, layout: base) else {
             return XCTFail("expected success")
         }

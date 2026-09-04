@@ -29,6 +29,13 @@ final class WrapComputeProbeCountTests: XCTestCase {
     // neither native inverse hook (D-22), so those boundary searches are binary searches
     // over offset(ofLine:) that this counter cannot see and does not claim to.
     func testComputeProbesTheLayoutAConstantNumberOfTimes() {
+        // Presentational, not a fixture defect: the line is 8 cells at advance 1.0 (8.0
+        // wide), so 40.0 and 10.0 are both the unwrapped regime under another name and only
+        // 4.0 genuinely wraps -- three of these four widths sweep the same regime. Harmless
+        // for THIS pin (the ladder makes no branch on width; see the scope note above), but
+        // it reads as a four-regime sweep and is really two. `DocumentVisualRowCursorProbeCountTests`
+        // hit exactly this coincidence (G21) and now carries a fixture guard for it; this
+        // test has none.
         for lineCount in [1_000, 10_000, 100_000] {
             for width in [Double.infinity, 40.0, 10.0, 4.0] {
                 XCTAssertEqual(
