@@ -555,4 +555,38 @@ final class WorkflowShapeTests: XCTestCase {
                     + "drop-rename-readd sequence.")
         }
     }
+
+    // Invariant 11 (new). The plan linter's CI step. Pinned for the usual reasons -- exact
+    // payload, no continue-on-error -- and for one unusual one: the ABSENCE of the
+    // docs-only guard is deliberate and must stay deliberate. A plan is docs/**, so adding
+    // the guard here would silently switch the linter off for precisely the PRs it exists
+    // to check, and every other test in this file would stay green.
+    func testPlanLintStepIsBlockingAndUnguarded() throws {
+        let all = try hostJobSteps()
+        let expected = "./.github/scripts/lint-plan-assertions.sh"
+        let matches = all.filter { $0.runTokens.joined(separator: " ") == expected }
+        XCTAssertEqual(
+            matches.count, 1,
+            "\(workflowPath): want exactly one step whose run payload is `\(expected)`, "
+                + "found \(matches.count)")
+        guard let step = matches.first else { return }
+        XCTAssertEqual(step.name, "Lint plan assertions")
+        XCTAssertNil(
+            step.continueOnError,
+            "\(step.name): a continue-on-error step cannot be a check")
+        XCTAssertNil(
+            step.ifCondition,
+            "\(step.name): must NOT carry the docs-only guard (it carries "
+                + "\(step.ifCondition ?? "")). A plan is docs/**, so a plan-carrying PR is "
+                + "docs-only; guarding this step switches the linter off for exactly the "
+                + "PRs it exists to check. If you are adding a guard on purpose, change "
+                + "this test in the same commit so the decision is reviewed.")
+        guard let docsOnlyStep = stepNamed("Complete docs-only PR", in: all) else {
+            return XCTFail("\(workflowPath): missing the `Complete docs-only PR` step")
+        }
+        XCTAssertLessThan(
+            step.index, docsOnlyStep.index,
+            "\(step.name) must run before the docs-only completion step, so a plan-only PR "
+                + "is linted before the job short-circuits")
+    }
 }
