@@ -261,19 +261,27 @@ suggests: its vertical half is arithmetic, so it adds one axis's box and fractio
   (with a bijective `derived.count == everyGatedBudget().count` cardinality check), so a
   committed budget that no longer reproduces from the corpus fails the build.
   `WorkflowShapeTests.swift` is the third guard: it reads
-  `.github/workflows/swift-ci.yml` and pins each promoted gate step's shape from a
-  small explicit `pinnedGateSteps` table (currently the point-geometry-query and
-  realistic-provider gates) — for each: exactly one step carries the flag, its `run:`
-  payload **equals** the expected gated command, it is not `continue-on-error`, it
-  carries the docs-only guard, it is named for its siblings, and it sits between its
-  ordering anchors (the tail order is point-query < point-geometry < realistic <
-  memory-shape). Equality rather
-  than a token probe: a step-level count cannot see a second invocation or a
-  trailing `|| true` inside one step's payload, and both disarm the gate. There is
-  no YAML parser in reach (the package is zero-dependency and Foundation ships
-  none), so it hand-rolls a narrow reader and compares whitespace-separated
-  **tokens**, never substrings — `--variable-height` is a prefix of
-  `--variable-height-mutation`.
+  `.github/workflows/swift-ci.yml` and pins every promoted gate step's shape from
+  `pinnedGateSteps`, now one row per **gateable** mode (twelve), pinned to
+  `BenchmarkMode.isGateable` as a bijection in both directions, so a gate cannot
+  join or leave the table by hand — for each: exactly one step's payload **equals**
+  the expected command (derived from `BenchmarkMode.flagName`, round-trip pinned
+  against `BenchmarkOptions.parse`, not a second copy), it is not
+  `continue-on-error`, it carries the docs-only guard, and it is named for its
+  siblings. A step is identified by exact payload equality, not by carrying its
+  flag: the default mode's flag *is* `--gate`, which all twelve steps carry, so a
+  flag probe cannot name it — and equality is also strictly stronger, foreclosing a
+  second invocation inside one step's payload and a trailing `|| true`, both of
+  which a token probe reports as green. The twelve before/after ordering-anchor
+  pairs are gone, replaced by one declared total order plus two boundary anchors
+  (`Run host tests`, `Run memory shape diagnostic`). A whole-file `--gate` census
+  requires every `--gate` token in the file, in any job, to belong to a pinned
+  step, so a thirteenth gate step cannot ship unpinned. A sibling test pins the
+  `Lint plan assertions` CI step, including the deliberate absence of its
+  docs-only guard. There is no YAML parser in reach (the package is
+  zero-dependency and Foundation ships none), so it hand-rolls a narrow reader and
+  compares whitespace-separated **tokens**, never substrings — `--variable-height`
+  is a prefix of `--variable-height-mutation`.
   It also carries `testJobNamesMatchRequiredCheckContexts`, a pin of a different
   *class* from the rest of the file: every other guard here compares the workflow
   against something else in the repository, but this one pins each job's `name:`
@@ -325,7 +333,9 @@ swift run -c release ViewportBenchmarks -- --help            # all flags
 ./.github/scripts/derive-gate-budgets.sh <corpus.tsv> <mode> # corpus -> budgets (re-derive half)
 ./.github/scripts/derive-gate-budgets.sh --window-run-ids <n> < <corpus.tsv> # windowed run ids (Swift-pin test seam)
 ./.github/scripts/cross-target-compile.sh --self-test        # shell logic self-test (no toolchain)
-# All four scripts' --self-test are also driven by `swift test`
+./.github/scripts/lint-plan-assertions.sh                     # lint every non-exempt plan (D-2/D-17/D-35 shape rules)
+./.github/scripts/lint-plan-assertions.sh --self-test         # linter self-test (no repository read)
+# All five scripts' --self-test are also driven by `swift test`
 # (Tests/ViewportBenchmarksTests/ScriptSelfTestTests.swift), so an assertion in any
 # of them can fail the build. Enroll a new self-tested script in that table.
 ./.github/scripts/cross-target-compile.sh                    # local iOS/WASM cross-compile
@@ -382,7 +392,10 @@ needs no toolchain) and let the hosted 6.2.1 container job be the real check.
 Three jobs:
 
 - **Host tests and benchmark gate** on `ubuntu-latest` with
-  `swift:6.2.1-bookworm`: `swift test` → synthetic `--gate` (blocking)
+  `swift:6.2.1-bookworm`: `./.github/scripts/lint-plan-assertions.sh` (blocking,
+  and — unlike every step after it — **not** guarded by `docs_only_pr`, so it runs
+  on every PR including a docs-only one; see the docs-only paragraph below)
+  → `swift test` → synthetic `--gate` (blocking)
   → `--variable-height --gate` (blocking) → `--variable-height-mutation --gate`
   (blocking) → `--structural-mutation --gate` (blocking)
   → `--bulk-structural-mutation --gate` (blocking) → `--line-query --gate`
@@ -440,11 +453,15 @@ loaded from the PR checkout. The detector rejects `.github/workflows/**` and
 policy-sensitive directories are not docs-only regardless of extension. If the
 full PR diff is only `docs/**` or Markdown files outside those policy-sensitive
 directories, the job prints `mode=docs_only_pr ... result=success` and skips the
-heavy Swift/test/compile work. Missing commits, diff failures, and empty runtime
-diffs fail closed. Swift source, tests, package metadata, and all other non-doc
-paths are not docs-only and must run the heavy path. Docs-only pushes to `main`
-may still skip Swift CI through the `push.paths-ignore` rule because PR required
-checks are the merge gate.
+heavy Swift/test/compile work — **except** the plan linter, which runs before the
+`docs_only_pr` branch even splits (see the host-job step list above) and is not
+skipped by it. A plan lives under `docs/**`, so a docs-only PR that adds or edits
+a non-exempt plan is exactly the kind of PR this step exists to catch: it can now
+fail CI on that lint step where, before this slice, it always passed. Missing
+commits, diff failures, and empty runtime diffs fail closed. Swift source, tests,
+package metadata, and all other non-doc paths are not docs-only and must run the
+heavy path. Docs-only pushes to `main` may still skip Swift CI through the
+`push.paths-ignore` rule because PR required checks are the merge gate.
 
 Bypass caveat: the ruleset preserves the existing bypass actor shape, and the
 current admin user can bypass it. Required checks are configured and enforced
@@ -787,6 +804,13 @@ Conventions that matter:
 - **Verification is evidence, not assertion**: record the actual commands and
   outputs, and anchor proof of merged code in the post-merge `push` run, not just
   the PR run.
+- **A record cannot carry facts about its own branch.** The commit that records a
+  fact changes it: slice 55b's record stated its own commit count wrong twice and
+  called a hosted run "the current HEAD", false two commits later. So (a) the
+  post-merge proof lands on a separate `slice-N-hosted-proof` branch — the practice
+  in slices 54, 55a and 55b — and (b) a self-referential fact is phrased
+  **re-checkably**: a per-head "commit → run id" table rather than a bare run id,
+  "nineteen by SHA plus this one" rather than a count that the next commit falsifies.
 - Keep concerns separate: functional core work vs. CI/portability vs.
   repo-policy work each get their own slice, design, and review.
 
@@ -798,8 +822,21 @@ a control, so the rules are written down:
 
 1. Never put a check on the left of a pipe whose right side is
    `tail`/`tee`/`jq`/`wc`/`rg` — the pipeline's status is the right side's, and a
-   script's own `set -o pipefail` does not reach the invoking shell. Use
-   `${PIPESTATUS[0]}`, or do not pipe.
+   script's own `set -o pipefail` does not reach the invoking shell. **Do not reach
+   for `${PIPESTATUS[0]}`**: agent command blocks here run under **zsh**, which does
+   not populate that array at all (it spells it `pipestatus` and indexes from 1), so
+   the expansion is **empty** and `[ "" -eq 0 ]` evaluates **true** — the assertion
+   inverts into a pass, which is the exact defect this section exists to prevent.
+   In order of preference: **do not pipe** —
+   `if ! cmd > /dev/null 2>&1; then echo "check=fail"; else echo "check=pass"; fi`;
+   when both the output and the status are wanted, redirect to a file first
+   (`cmd > out.txt 2>&1; status=$?`) and read the file afterwards; when a pipeline is
+   genuinely unavoidable, wrap the whole of it — `bash -c 'set -o pipefail; …'` — and
+   test that `bash -c`'s own status. The ban is addressed to plans and verification
+   records, not to scripts: all five `.github/scripts/*.sh` are bash with a shebang,
+   and none uses `PIPESTATUS`. `.github/scripts/lint-plan-assertions.sh` mechanizes
+   this rule's `PIPESTATUS` half (R1) for every non-exempt plan; the pipe-position
+   half stays a reader's job (D-40).
 2. Never write `echo "…=$?"` after a command whose exit status is insensitive to
    the invariant. `git diff --name-only`, `git status`, `gh pr list`, `jq`,
    `sed -i`, and every pipeline exit 0 regardless; `rg`/`grep` exit 1 on **no**
@@ -811,6 +848,22 @@ a control, so the rules are written down:
    block must open with `: "${VAR:?}"`. Each Bash invocation is a fresh shell:
    slice 47's `$SCRATCH` was defined in prose and used at 23 command sites, where
    `> "$SCRATCH/x.txt"` resolves to `/x.txt`.
+5. **Every task enumerates the standing guarantees it adds, and carries a drill for
+   each.** The per-task inventory is the AUTHORITY; a spec's drill list is a lower
+   bound, never a closed set. The mechanism this exists for: TDD writes a test
+   red-first when the test *specifies* behaviour, but a cost pin, a probe-count bound,
+   or a fixture that must separate two indices **measures** the implementation instead
+   — so it is written green from birth and nothing forces the question "can this pin
+   fail?" at the moment it is written. Slice 55b shipped four such guarantees undrilled
+   and caught them in two later passes; slice 55b's own record then cited the spec's
+   closed list as authority for not drilling a fifth. `lint-plan-assertions.sh` checks
+   the structure (R4) — that each task names its guarantees and that each named
+   guarantee has a step mentioning a drill for it. It cannot check that a drill drills;
+   that half is yours. R4 reads two literal shapes, so write them exactly: a task
+   heading is `## Task N:` or `### Task N:`, and its inventory is a line beginning
+   `**Guarantees added:**` listing `G<n>` ids — a task that adds none still writes the
+   line (`**Guarantees added:** none`), because a missing block and a deliberate
+   empty one are the same absence to a reader.
 
 ## When you change the core
 

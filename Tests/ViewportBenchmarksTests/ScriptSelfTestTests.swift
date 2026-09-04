@@ -10,6 +10,7 @@ private let selfTestScripts = [
     "derive-gate-budgets.sh",
     "harvest-gate-corpus.sh",
     "detect-docs-only-pr.sh",
+    "lint-plan-assertions.sh",
 ]
 
 private func scriptsDirectory() -> URL {

@@ -70,6 +70,15 @@ jobs:
 
           bash "$trusted_detector" --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT"
 
+      # Deliberately NOT guarded by docs_only_pr. A plan is docs/**, so a plan-carrying PR
+      # is detected as docs-only and skips `swift test` -- the linter would be loud locally
+      # and absent in CI for exactly the PRs that carry plans. This step runs the bash
+      # script directly (no Swift build, ~1s), so running it always is free. Its shape,
+      # including the absence of the guard, is pinned in WorkflowShapeTests: an edit that
+      # adds a guard here has to show up as a diff to that test.
+      - name: Lint plan assertions
+        run: ./.github/scripts/lint-plan-assertions.sh
+
       - name: Complete docs-only PR
         if: steps.change-scope.outputs.docs_only_pr == 'true'
         run: echo "mode=docs_only_pr job=host-tests-and-benchmark-gate result=success"
