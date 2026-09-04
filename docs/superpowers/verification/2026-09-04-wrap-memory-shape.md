@@ -1125,19 +1125,26 @@ ledger (`.superpowers/sdd/2026-09-04-wrap-memory-shape/progress.md`, gitignored)
 correct the plan or the spec, which is why they belong in the record and not only in the
 session.
 
-**Count reconciliation, since a mechanical check of this section reads a different number.**
-`grep -c "Ruling:" .superpowers/sdd/2026-09-04-wrap-memory-shape/progress.md` returns **nine**,
-not eleven — and the gap is not a miscount, it is two different things being counted. This
-list is a **selective account of the load-bearing decisions**, not a literal rendering of that
-grep. Of the eleven items: eight are among the nine ledger lines tagged exactly `Task N:
-Ruling:` (the string the grep matches); items 1 and 2 are two decisions made *before* any task
-was dispatched, logged in the ledger as `Ruling 1 —` and `Ruling 2 —` — no colon after
-`Ruling`, so the grep does not see them; item 6 is a third pre-dispatch decision, logged as
-`Task 3: Ruling (pre-dispatch):`, which the same grep misses for the same reason (the colon
-sits after `(pre-dispatch)`, not after `Ruling`). That accounts for all eleven (8 + 2 + 1). The
-ninth `Ruling:`-tagged ledger line — Task 9's endorsement that the implementer's own catch of
-D-38 should be discharged — is deliberately not one of the eleven: it added no correction of
-its own to the plan or the spec, and is folded into §2's Task 9 account instead.
+**Count reconciliation, recorded from a session ledger that no longer exists.** The gap this
+note explains was worked out during the slice against
+`.superpowers/sdd/2026-09-04-wrap-memory-shape/progress.md`, a git-ignored scratch file that
+does not survive past the session's own workspace — it is deleted once the slice's work
+finishes, so a future reader cannot re-run the grep this paragraph once did, and the reasoning
+is copied here instead of cited to it. At the time, `grep -c "Ruling:"` over that ledger
+returned **nine**, not eleven; the count itself drifted over the course of the session, as
+later bookkeeping kept appending lines matching that same string — one small live case of the
+self-referential-fact hazard this record discusses elsewhere. The gap was never a miscount: it
+is two different things being counted. This list is a **selective account of the load-bearing
+decisions**, not a literal rendering of that grep. Of the eleven items: eight are among the
+nine ledger lines tagged exactly `Task N: Ruling:` (the string the grep matched); items 1 and 2
+are two decisions made *before* any task was dispatched, logged in the ledger as `Ruling 1 —`
+and `Ruling 2 —` — no colon after `Ruling`, so the grep did not see them; item 6 is a third
+pre-dispatch decision, logged as `Task 3: Ruling (pre-dispatch):`, which the same grep missed
+for the same reason (the colon sits after `(pre-dispatch)`, not after `Ruling`). That accounts
+for all eleven (8 + 2 + 1). The ninth `Ruling:`-tagged ledger line — Task 9's endorsement that
+the implementer's own catch of D-38 should be discharged — was deliberately not one of the
+eleven: it added no correction of its own to the plan or the spec, and is folded into §2's
+Task 9 account instead.
 
 1. **Pre-flight, Task 3.** `testTheWalkMustCostSomething`'s fixture as planned mutates an
    element whose constructor defaults *also* breach the `<= 32` shape bound, so the function
