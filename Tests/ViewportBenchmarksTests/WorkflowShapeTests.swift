@@ -201,13 +201,6 @@ private func parseStep(_ block: [String], index: Int) -> WorkflowStep {
                         continueOnError: continueOnError, runTokens: runTokens, env: env)
 }
 
-// Scoped to a single job's own region -- from its 2-space key to the next one. All three
-// jobs indent their steps identically, and four step names (`Check out repository`,
-// `Detect PR change scope`, `Complete docs-only PR`, `Show toolchain`) repeat verbatim
-// across them, so a whole-file split would make every name lookup ambiguous. Shared by
-// `jobSteps` (which further splits it into step blocks) and `jobLevelValue` (which reads a
-// job-level key that sits above `steps:` entirely), so the file-read and job-boundary logic
-// lives in exactly one place.
 // The workflow file's raw lines, split on "\n". The one place the file is read off disk for
 // the job-scoped readers below (`jobLines` and, via it, `jobSteps`/`jobLevelValue`) plus
 // `allJobKeys` -- kept singular so a future reshuffle of the read (encoding, line-ending
@@ -218,6 +211,14 @@ private func workflowLines() throws -> [String] {
     return text.components(separatedBy: "\n")
 }
 
+// Scoped to a single job's own region -- from its 2-space key to the next one. All three
+// jobs indent their steps identically, and four step names (`Check out repository`,
+// `Detect PR change scope`, `Complete docs-only PR`, `Show toolchain`) repeat verbatim
+// across them, so a whole-file split would make every name lookup ambiguous. Shared by
+// `jobSteps` (which further splits it into step blocks) and `jobLevelValue` (which reads a
+// job-level key that sits above `steps:` entirely), so the job-boundary logic lives in
+// exactly one place; the file-read itself lives in `workflowLines`, shared with
+// `allJobKeys`.
 private func jobLines(_ jobKey: String) throws -> [String] {
     let allLines = try workflowLines()
 
