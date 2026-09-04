@@ -460,9 +460,10 @@ final class WorkflowShapeTests: XCTestCase {
     // available -- this pin does not remove it, and does not need to. It only makes
     // engaging it a deliberate, reviewed edit: adding that key (quoted or not) to this
     // step's env makes THIS test fail, so the demotion has to show up as a diff to this
-    // file in code review instead of shipping silently with the whole suite green. This
-    // mirrors how a gate joins `pinnedGateSteps` by hand above -- widening what a step is
-    // allowed to do is always a hand-edit to a test, never free.
+    // file in code review instead of shipping silently with the whole suite green. The
+    // same shape holds above, where a gate step's payload must exactly equal its pinned
+    // command: widening what a step is allowed to do is always a hand-edit to a test,
+    // never free.
     //
     // Verified before this test existed: adding
     // `CROSS_TARGET_WASM_EMBEDDED_BLOCKING: "false"` to the step's env left all existing
