@@ -76,6 +76,18 @@ final class MemoryShapeComparisonTests: XCTestCase {
         var set = healthyWrapSet()
         set[4] = wrapSummary("1m_lines_width_40", lineCount: 1_000_000, widthLabel: "40", compute: 3)
         XCTAssertEqual(wrapMemoryShapeCrossScenarioFailures(set), ["1m_lines_width_40"])
+
+        // The FIRST scenario must be able to fail too. Under a first-of-group baseline it
+        // is the one element that never is (it is compared to itself), so this is the case
+        // that separates the declared-constant comparison from that idiom -- drill (l).
+        var first = healthyWrapSet()
+        first[0] = wrapSummary(
+            "100k_lines_width_inf", lineCount: 100_000, widthLabel: "inf",
+            compute: 3, drain: 271, row: 20, point: 31)
+        XCTAssertEqual(
+            wrapMemoryShapeCrossScenarioFailures(first), ["100k_lines_width_inf"],
+            "the FIRST scenario must be able to fail; under a first-of-group baseline it "
+                + "is the one element that never is")
     }
 
     // G3. The shape bound. A linear term would show as roughly 10x -- hundreds of
@@ -95,7 +107,14 @@ final class MemoryShapeComparisonTests: XCTestCase {
     // the wrap width does to the row count.
     func testAWidthDependentBufferFails() {
         var set = healthyWrapSet()
-        set[2] = wrapSummary("100k_lines_width_10", lineCount: 100_000, widthLabel: "10", buffered: 100, streamed: 100)
+        // The mutation carries its OWN width's healthy drain/row/point values, so only the
+        // clause under test (buffered/streamed) can name this scenario. At the
+        // constructor's default drain: 100, the width-10 drain delta against 1m (153) would
+        // be 53 -- above the shape bound on its own -- and the pair check would name the
+        // scenario whether or not the buffered/streamed clause exists.
+        set[2] = wrapSummary(
+            "100k_lines_width_10", lineCount: 100_000, widthLabel: "10",
+            drain: 150, row: 20, point: 95, buffered: 100, streamed: 100)
         XCTAssertTrue(wrapMemoryShapeCrossScenarioFailures(set).contains("100k_lines_width_10"))
     }
 
