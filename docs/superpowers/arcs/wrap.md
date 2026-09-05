@@ -82,7 +82,13 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    which is why criterion 2's evidence cell reads as a set of declared expectations rather
    than as neighbour comparisons. Nothing measured moved: the five pre-existing
    `--memory-shape` lines, the 46 gated checksums and all three wrap modes' checksums are
-   byte-identical, and `Sources/TextEngineCore` is untouched.
+   byte-identical, and `Sources/TextEngineCore` is untouched. (d) **A post-hoc validation
+   pass** (record §2a) supplied the one drill the node was missing — a real document-length
+   walk injected into the drain, which turns all six wrap lines red and exits 1, three
+   orders of magnitude outside the `<= 32` bound — and found that the *variable* half could
+   not report the same failure, because its `touched_lines` is intersected with the buffer
+   and bounded above by construction. Repaired in the same pass; the structural remainder
+   is **D-48**.
 6. `pending` — Wrap benchmark modes promoted to blocking gates
    (harvest → derive). Criterion 4. Likely splits per mode, as the first
    arc's gate promotions did. **Both of its inputs were repaired ahead of it in

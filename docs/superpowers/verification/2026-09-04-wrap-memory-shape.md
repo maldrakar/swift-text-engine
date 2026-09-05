@@ -36,10 +36,13 @@ git log --format='%H %s' --reverse 2e798a3..HEAD
 | 14 | `48bde6c4b6d1c150a0fb46ba89b748fb164588d0` | docs: D-10 superseded banner; test: D-11 pins the workflow job set | 7 |
 | 15 | `a8947ad827193a27da0b5322519e75c78b793402` | docs: move jobLines comment back down, fix stale one-place clause | 7 |
 | 16 | `404feb86c1ca2cb3c4ef965385834b4ec4936b0f` | ci: D-14 coverage partition in three scripts; D-15 falsified (reverted) | 8 |
+| 17 | `2167b5b64d285233615d2715980664c6ffb5c3a2` | test: slice 57 final fix wave — scenario-list pin, falsifiable hook identity, dropped comment, record miscounts | whole-branch review |
+| 18 | `747682febe714f4009703ba11397915912fe9606` | fix: slice 57 validation-pass repairs — four residuals closed, one gap in the variable half | validation pass (§2a) |
 
 Rows 1–3 are the paper trail written before implementation; rows 4–16 are the
-implementation, and every measurement in this document was taken on the tree at row 16 or
-later. The commit carrying **this record** is not named here, for exactly the reason the
+implementation, row 17 the whole-branch review's fix wave, and row 18 the independent
+validation pass recorded in §2a. Every measurement in this document was taken on the tree
+at row 16 or later; §3, §5 and §6 were re-taken on row 18 and are noted where they were. The commit carrying **this record** is not named here, for exactly the reason the
 section exists — it cannot name itself, and the next commit would falsify a total. §9 is
 reserved for the hosted runs, which likewise cannot be named by the commit that creates
 their section.
@@ -617,6 +620,62 @@ whole suite **524/0**, and `git diff a8947ad --stat -- .github/scripts` showing 
 insertions, 0 deletions** — purely additive, which is itself the proof that the three
 dispatcher lines were restored to their pre-task bytes rather than merely re-edited.
 
+## 2a. The validation pass (commit `747682f`)
+
+An independent read of the shipped branch against the spec, run after row 17. It confirmed
+the spine — including one drill this record did not previously carry, below — and produced
+five repairs. Four of them are §7.10's carried residuals, closed rather than carried
+(dispositions are in that section); the fifth is a gap the pass found on its own.
+
+**The decisive positive control, recorded because nothing else in this document is it.**
+Every drill in §2 perturbs a *test* or an *expectation*. This one perturbs the thing the
+mode is about: a document-length walk was injected into the drain
+(`for i in 0..<scenario.lineCount { _ = drainLayout.firstVisualRow(ofLine: i) }`), the
+release binary rebuilt, and `--memory-shape` run.
+
+```
+scenario=100k_lines_width_inf drain_probes=100469 invariant=fail
+scenario=100k_lines_width_40  drain_probes=104023 invariant=fail
+scenario=100k_lines_width_10  drain_probes=102094 invariant=fail
+scenario=1m_lines_width_inf   drain_probes=1000472 invariant=fail
+scenario=1m_lines_width_40    drain_probes=1004026 invariant=fail
+scenario=1m_lines_width_10    drain_probes=1002097 invariant=fail
+exit=1
+```
+
+All six lines red and the process exits non-zero. `drain_probes` moves from 469/472 to
+100469/1000472 — the linear term is three orders of magnitude outside the `<= 32` shape
+bound, which is the separation Decision 2 claims. Reverted; the six lines return to
+`invariant=pass`.
+
+**The gap the pass found: the variable half could not report an over-walk.**
+`touched_lines` is `probeCounter.distinctLines` **intersected with the buffer range**, so
+it is bounded above by construction — it can fall below 90 but never rise. A core that
+walked the whole document would print `touched_lines=90` and pass. The raw distinct count,
+the one quantity that *would* move, was collected into `LineProbeCounter.offset` /
+`distinctLines` and then discarded. `runVariableMemoryShapeScenario` now asserts it against
+an independently derived `bufferedLines + 1` — the buffered lines plus the one end-boundary
+offset the last row's height needs, the same 91 `CountingLineMetricsTests` pins at unit
+scale.
+
+Two recorded reds, because the invariant has two ways to be vacuous:
+
+| Drill | Mutation | Observed |
+|---|---|---|
+| (x) the expectation is checked at all | `bufferedLines + 1` → `+ 2` | both `variable_uniform` lines `invariant=fail`, `exit=1` |
+| (y) it catches the failure it is FOR | inject `for i in 0..<lineCount { _ = drillMetrics.offset(ofLine: i) }` before the drain | both lines `invariant=fail`, `exit=1`, **and `touched_lines` stays at `90`** |
+
+Drill (y) is the finding stated as evidence: the pre-existing column does not move for an
+over-walk, and the new clause is what turns the line red. Note what this does *not* close —
+§7.10's M-2, carried as **D-48**: touched and buffered still coincide on this path, so
+nothing distinguishes the printed column from `bufferedLines`.
+
+**Fingerprint, re-taken on row 18.** The mode's eleven lines are byte-identical to the
+baseline quoted in §3, `checksum=` included; the twelve gated modes report 46 `gate=pass`
+and 0 `gate=fail` over 46 checksum tuples; `swift test` 525/0; all five script self-tests
+`self_test=pass`; `lint=pass files=2 violations=0`; the Foundation-free scan empty. No
+gated mode's measured path is in the diff.
+
 ## 3. The mode's eleven lines, and the five that must not move
 
 `swift run -c release ViewportBenchmarks -- --memory-shape`, exit 0, **eleven lines, every
@@ -820,46 +879,46 @@ budgets_file_unchanged=true
 
 ## 6. Test-count pair, delta, and enumeration (AC8)
 
-- **Slice 56's count (baseline):** 497 tests, 0 failures.
-- **This slice's count:** **524 tests, 0 failures.**
+**Stated per named SHA, never as "the count on this branch".** A test count is a fact a
+later commit falsifies — §0's rule, applied to the one number in this document most likely
+to move. Two commits landed after the first draft of this section and it went stale by one
+both times; the shape below is what stops that recurring.
+
+| Tree | `git grep -o "func test" <ref> -- Tests \| wc -l` |
+|---|---|
+| `main` (baseline, slice 56) | **497** |
+| `404feb8` (row 16 — last implementation commit) | **524** |
+| `2167b5b` (row 17 — whole-branch fix wave) | **525** |
+| `747682f` (row 18 — validation-pass repairs) | **525** |
+
+- **Delta against `main`: 525 − 497 = 28.**
+- `2167b5b` added one test function (`testTheScenarioListIsExactlySixInOrder`).
+- `747682f` added **none**: its repairs are assertions *inside* existing tests
+  (token-exactness and a token count in `testTheEmittedLineCarriesEveryToken`, a fixture
+  guard in `testComputeProbesTheLayoutAConstantNumberOfTimes`) plus one invariant clause
+  inside `runVariableMemoryShapeScenario`. So the count is stable across it, which is why
+  the two rows read the same and neither is a typo.
 
 ```
 $ swift test
-	 Executed 524 tests, with 0 failures (0 unexpected) in 7.364 (7.395) seconds
+	 Executed 525 tests, with 0 failures (0 unexpected) in 7.380 (7.412) seconds
 ```
 
-- **Delta: 524 − 497 = 27.**
+**Enumeration, by FILE rather than by task** — because one of the twenty-eight was added by
+the fix wave rather than by the task that created its file, and a per-task table hides that:
 
-**Re-checkable from git alone**, with no historical session run required — a static count of
-`func test` declarations at `main` and at the last implementation commit (`404feb8`, row 16
-of §0, named rather than "HEAD"):
-
-```
-$ git grep -o "func test" main -- Tests | wc -l
-     497
-$ git grep -o "func test" 404feb8 -- Tests | wc -l
-     524
-```
-
-**Enumeration:**
-
-| Task | New test functions | Running total |
+| File / site | New test functions | Landed in |
 |---|---|---|
-| 1 | 4 (`CountingWrapLayoutTests`) | 501 |
-| 2 | 6 (`WrapMemoryShapeTests`) | 507 |
-| 3 | 10 (`MemoryShapeComparisonTests`) | 517 |
-| 4 | 4 (`WrapComputeProbeCountTests` 2 + `DocumentVisualRowCursorProbeCountTests` 2) | 521 |
-| 5 | 0 (an existing pin's expected literal changed) | 521 |
-| 6 | 2 (`GateLogicTests`: D-20 and D-21's class pins) | 523 |
-| 7 | 1 (`WorkflowShapeTests.testWorkflowJobSetIsExactlyTheThreePinnedJobs`) | 524 |
-| 8 | 0 (shell scripts and their self-tests) | 524 |
+| `CountingWrapLayoutTests` | 4 | Task 1 |
+| `WrapMemoryShapeTests` | 6 + **1** | Task 2, + the scenario-list pin in `2167b5b` |
+| `MemoryShapeComparisonTests` | 10 | Task 3 |
+| `WrapComputeProbeCountTests` | 2 | Task 4 |
+| `DocumentVisualRowCursorProbeCountTests` | 2 | Task 4 |
+| `GateLogicTests` (D-20, D-21 class pins) | 2 | Task 6 |
+| `WorkflowShapeTests.testWorkflowJobSetIsExactlyTheThreePinnedJobs` | 1 | Task 7 |
+| Task 5 (D-43) and Task 8 (D-14) | 0 | an existing pin's literal moved; shell self-tests |
 
-`4 + 6 + 10 + 4 + 0 + 2 + 1 + 0 = 27`. **Enumeration and measured delta agree exactly.**
-Every intermediate running total above (501, 507, 517, 521, 521, 523, 524, 524) matches the
-whole-suite count recorded at the end of that task's own section in §2 — including the two
-fix rounds that added *assertions* inside existing tests rather than new test functions
-(Task 1's `visualRowCount` witness, Task 3's first-element case), which is why those rounds
-moved no count.
+`4 + 7 + 10 + 2 + 2 + 2 + 1 = 28`. **Enumeration and measured delta agree exactly.**
 
 ## 7. Plan and spec defects found during execution
 
@@ -1051,7 +1110,17 @@ slice. Recorded here, one paragraph each, so the post-slice review can lift them
 `docs/superpowers/debt-ledger.md` as rows without re-deriving them from the transcripts. This
 section is *not* itself a ledger edit — the post-slice review owns that delta.
 
-**M-2 — `touched_lines`'s repair has no test that can fail for the reason D-45 shipped it.**
+**Status after the validation pass (commit `747682f`).** Four of the five were repaired
+rather than carried — **M-5**, **M-6**, **M-7** and **M-8** — each with its own recorded
+red; the paragraphs below are kept unedited as the statement of what was found, and each
+now opens with a one-line disposition. Only **M-2** is carried, and it is carried
+*narrowed*: the validation pass closed the half of it that was a real hole (the variable
+half could not report an over-walk at all) and left the half that is structural. It is
+ledger row **D-48**.
+
+**M-2 — CARRIED, NARROWED (ledger D-48) — `touched_lines`'s repair has no test that can fail for the reason D-45 shipped it.**
+*Disposition:* `747682f` asserted the RAW `distinctLines.count` against `bufferedLines + 1` beside the intersected column, so the counter is now load-bearing and an over-walking core reddens the line (drilled: a document-length walk turns both variable lines red while `touched_lines` stays at 90). What remains is the original statement below — nothing distinguishes the printed column from `bufferedLines`, because touched and buffered coincide on this path by construction.
+
 `testTheVariablePathCountsTheLinesItTouches` passes identically if `providerLines:
 touchedLines` (the repair) is reverted to `providerLines: bufferedLines` (the pre-D-45
 assignment): the counter and its test survive, unused, because *touched* and *buffered*
@@ -1063,7 +1132,9 @@ strict subset of its buffered one) — Drill (p) covered the counter's own wirin
 lines" for this column. Trigger to revisit: whichever slice next gives this scenario runner a
 range argument, or otherwise makes touched and buffered diverge.
 
-**M-5 — `testTheEmittedLineCarriesEveryToken` checks substrings, not tokens.** It asserts
+**M-5 — CLOSED in `747682f`. `testTheEmittedLineCarriesEveryToken` checks substrings, not tokens.**
+*Disposition:* split on whitespace, whole-token membership, exactly one token per value-bearing key, and the token COUNT pinned at 19 so an added column is as loud as a dropped one. Both drills redden where the old assertion passed.
+ It asserts
 `line.contains(token)` for each of `--memory-shape`'s wrap-half fields, so `"visible_rows=80"`
 would equally satisfy a search for `"visible_rows=801"` (or any string containing it) — the
 exact substring-vs-token hazard `AGENTS.md` writes down for `WorkflowShapeTests`'s own
@@ -1074,7 +1145,9 @@ wrong number would be caught elsewhere even though this test would not catch it.
 project's own rule says tokens, not substrings, and this test does not follow it. Fix: split on
 whitespace and assert exact-token membership, the way the workflow census does.
 
-**M-6 — `cross-target-compile.sh` still carries unguarded array expansions under `set -u`.**
+**M-6 — CLOSED in `747682f`. `cross-target-compile.sh` still carries unguarded array expansions under `set -u`.**
+*Disposition:* all five expansions take the `${ARR[@]+"${ARR[@]}"}` form; `--self-test` still passes.
+
 Five bare `"${SELF_TEST_COVERED[@]}"` / `"${SELF_TEST_EXEMPT[@]}"` expansions remain in
 `cross-target-compile.sh`, where the three scripts this slice's Task 8 touched
 (`derive-gate-budgets.sh`, `harvest-gate-corpus.sh`, `detect-docs-only-pr.sh`) now use the
@@ -1088,8 +1161,10 @@ script D-14's copies were taken from) as the least-safe of the four. Trigger to 
 first time either of `cross-target-compile.sh`'s two arrays is emptied, or the next slice that
 touches that script's self-test harness.
 
-**M-7 — `lint-plan-assertions.sh` is now the one self-tested script with no coverage
+**M-7 — CLOSED in `747682f`. `lint-plan-assertions.sh` is now the one self-tested script with no coverage
 partition, and D-14's discharge note justifies the exclusion on the wrong row's axis.**
+*Disposition:* it is the fifth script to carry the partition — `run_lint` COVERED, `cleanup`/`write_awk_program`/`lint_file`/`main` EXEMPT with justifications. Drilled four ways (unclassified function, phantom COVERED name, unjustified exempt entry, covered-but-unreferenced), each with its own label.
+
 Task 8 checked `lint-plan-assertions.sh` (a fifth script, outside D-14's stated three-script
 scope) and correctly left it alone for D-15's purposes — its dispatcher is a bare
 `run_self_test` call with no trailing `exit 0`, so it is not vulnerable to D-15's defect (§2,
@@ -1104,8 +1179,10 @@ revisit: extending D-14's classification helpers to a fifth script, or writing d
 why `lint-plan-assertions.sh` is out of scope for the *classification* partition and not only
 for the dispatcher-shape question D-15 asks.
 
-**M-8 — `WrapComputeProbeCountTests`'s four-width sweep is mostly one regime, undocumented
-where a reader meets it.** `testComputeProbesTheLayoutAConstantNumberOfTimes` sweeps
+**M-8 — CLOSED in `747682f`. `WrapComputeProbeCountTests`'s four-width sweep is mostly one regime, undocumented
+where a reader meets it.**
+*Disposition:* the sweep is now `[inf, 8, 4, 2, 1]` with a fixture guard asserting 1/1/2/4/8 rows per line, mirroring the sibling drain pin. Restoring two of the old widths fires the guard.
+ `testComputeProbesTheLayoutAConstantNumberOfTimes` sweeps
 `[Double.infinity, 40.0, 10.0, 4.0]` over an 8-cell/advance-1.0 fixture (a line 8.0 wide), so
 any width `>= 8.0` — three of the four swept values — is the unwrapped regime under another
 name; only `4.0` genuinely wraps. Harmless for what this particular pin measures (the layout

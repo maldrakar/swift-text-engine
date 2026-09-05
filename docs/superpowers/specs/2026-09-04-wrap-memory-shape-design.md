@@ -122,6 +122,16 @@ probes may legitimately grow as the width narrows is `visualPointAt`, whose with
 walk is linear in `rowInLine` (the documented term behind fork R); its growth is asserted
 to be bounded by the line's own row count and **independent of `lineCount`**.
 
+**Amended by the validation pass (2026-09-05), which found this sentence wider than §4A's
+contract.** What ships, and what §4A's invariants 9 and 11 actually state, is the second
+half only: the walk is asserted to be **independent of `lineCount`** (invariant 9's
+`<= 32` delta) and to **cost something** as the width narrows (invariant 11). No bound
+against the line's own row count is implemented, and none was ever in the contract table —
+the mode's fixture packs a uniform 1/2/8 rows per line, so such a bound would compare a
+probe count against a constant and would not separate the walk from anything else. The
+sentence is corrected rather than the code: read Decision 3 as the two clauses §4A
+enforces.
+
 **Decision 4 — a mode-wide structural equality replaces the vacuous byte comparison
 (D-45), and it compares against a declared expectation rather than a neighbour.** Every
 scenario in the mode — three fixed, two variable, six wrap — shares `lineHeight = 16`,
@@ -387,7 +397,7 @@ defence.
 | **D-10** (P3) | A superseded banner on `docs/superpowers/verification/2026-06-16-swift-ci-required-checks.md` naming the current WASM context, so the live `AGENTS.md` pointer stops leading to the retired name. |
 | **D-11** (P3) | `WorkflowShapeTests.testJobNamesMatchRequiredCheckContexts` additionally pins the **job set**: the workflow's job count and the exact set of names, so a fourth job cannot appear unmodelled. |
 | **D-14** (P3) | `derive-gate-budgets.sh`, `harvest-gate-corpus.sh` and `detect-docs-only-pr.sh` each gain the function classification `cross-target-compile.sh` already enforces inside its own `--self-test`: every function is either exercised or explicitly exempt, and an unclassified function fails the self-test. |
-| **D-15** (P3) | The four dispatchers converge on one shape (`run_self_test \|\| exit 1` followed by an explicit `exit 0`), so a self-test's failure cannot be swallowed by a dispatcher that merely falls through. |
+| **D-15** (P3) | ~~The four dispatchers converge on one shape (`run_self_test \|\| exit 1` followed by an explicit `exit 0`), so a self-test's failure cannot be swallowed by a dispatcher that merely falls through.~~ **FALSIFIED in execution (Task 8; ledger D-47).** Under `set -e` the prescribed shape is the UNSAFE one: `||` lifts `-e` from the callee's entire body, so a returning assertion reaches `echo "self_test=pass"` and that success becomes the function's status. The edits were made, measured, and reverted; D-15 stays open with its remedy withdrawn. **A fifth script, `lint-plan-assertions.sh`, was checked here and is not vulnerable** (bare call, no trailing `exit 0`) — it later gained D-14's coverage partition in the validation pass (`747682f`, record §7.10 M-7). |
 | **D-38** (P3) | `Tests/TextEngineCoreTests/WrapPointQueryCountTests.swift:271`'s `let mustScan = 55 - 15` is derived from the fixture's own `near`/`far` variables instead of transcribed. |
 
 ### F. CI wiring
