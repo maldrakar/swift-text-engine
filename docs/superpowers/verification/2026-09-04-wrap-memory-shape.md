@@ -1052,11 +1052,14 @@ Fixed by sweeping `4.0` instead of `10.0` and adding a fixture guard that assert
 widths are two regimes. This is the repository's own recorded lesson (*fixtures must separate
 the axes*) recurring inside the slice whose subject is falsifiability.
 
-A sibling, left as a documented minor: `WrapComputeProbeCountTests` sweeps
+A sibling, left as a documented minor at the time: `WrapComputeProbeCountTests` sweeps
 `[inf, 40, 10, 4]` over the same 8-cell fixture, so three of its four widths are the
 unwrapped regime — undocumented and unguarded there. It is presentational for G20 (the ladder
 has no branch on width), so the sweep reads richer than it is without weakening what is
-pinned.
+pinned. **Closed in the validation pass (`747682f`, §7.10 M-8):** the sweep is now
+`[inf, 8, 4, 2, 1]` with a fixture guard asserting 1/1/2/4/8 rows per line, so the sibling
+carries the same guard as the pin that found the coincidence. Restoring two of the old
+widths fires it.
 
 ### 7.7 Drill (u) could not separate the two implementations, twice
 
@@ -1102,13 +1105,14 @@ widths were one regime — is §7.6. What all of them have in common is the mech
 names: a drill's prediction about *which* mutation reddens is itself unverified until it is
 run, and a drill that cannot fail certifies nothing while looking exactly like one that can.
 
-### 7.10 Residuals for the debt ledger — carry, don't fix
+### 7.10 Residuals for the debt ledger — carried, then mostly closed
 
 The whole-branch review triaged five residuals as carry-not-fix: real, but each either
 undrillable without a new seam, narrow in exposure, or latent rather than introduced by this
 slice. Recorded here, one paragraph each, so the post-slice review can lift them into
-`docs/superpowers/debt-ledger.md` as rows without re-deriving them from the transcripts. This
-section is *not* itself a ledger edit — the post-slice review owns that delta.
+`docs/superpowers/debt-ledger.md` as rows without re-deriving them from the transcripts. That
+was the triage as it stood; the validation pass below revisited it, and only one row reached
+the ledger.
 
 **Status after the validation pass (commit `747682f`).** Four of the five were repaired
 rather than carried — **M-5**, **M-6**, **M-7** and **M-8** — each with its own recorded
