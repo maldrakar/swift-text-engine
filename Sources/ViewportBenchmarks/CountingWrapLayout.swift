@@ -33,6 +33,16 @@ final class WrapProbeCounter {
 /// The observable of `--memory-shape`'s wrap half (spec Decision 1): every wrap entry
 /// point returns fixed-size values, so a core that started walking the document would
 /// show up here and nowhere else.
+///
+/// **Precondition: `Base` must not override `logicalLine(containingVisualRow:)`.** This
+/// wrapper is transparent on five of the six hooks and deliberately is NOT on that one:
+/// it answers from the core's binary-search default so the search's `firstVisualRow`
+/// probes land in this counter (see the attribution note on the method). For a base that
+/// overrides the hook natively -- which the protocol allows, and which a balanced-tree
+/// wrap provider would do -- wrapping it would silently measure a DIFFERENT algorithm,
+/// and could return a different index if the two disagree. `BenchmarkWrapLayout`, this
+/// type's only base today, declares no override; a provider that does needs a counting
+/// wrapper that forwards the hook and attributes its probes some other way.
 struct CountingWrapLayout<Base: VisualRowLayoutSource>: VisualRowLayoutSource {
     let base: Base
     let counter: WrapProbeCounter
@@ -111,9 +121,11 @@ private struct DefaultLogicalLineProbe<Inner: VisualRowLayoutSource>: VisualRowL
 /// The vertical-axis counterpart, for the variable half's `touched_lines` repair
 /// (spec §4B). `distinctLines` is what replaces `providerLines: bufferedLines`: the set
 /// of lines the core actually resolved. It records EVERY index, boundary probes included;
-/// the caller intersects with the buffer range, because the cursor legitimately reads one
-/// offset past the buffer to size the last row. Bounded by the buffer (91 entries), and
-/// benchmark-owned, not core-owned.
+/// the caller intersects with the buffer range for the printed `touched_lines`, because
+/// the cursor legitimately reads one offset past the buffer to size the last row -- and
+/// asserts the RAW count against `bufferedLines + 1` beside it, because the intersected
+/// number is bounded above by construction and could not report an over-walk.
+/// Benchmark-owned, not core-owned.
 final class LineProbeCounter {
     var offset = 0
     var distinctLines: Set<Int> = []

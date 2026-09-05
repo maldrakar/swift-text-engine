@@ -32,7 +32,9 @@ per-slice verification. Treat them as invariants, not preferences:
    URL + checksum, fail-closed if provisioning fails.
 5. **Core-owned memory must not grow linearly with document size.** Strict
    virtualization: compute only for the visible viewport + overscan/buffer.
-   `--memory-shape` asserts this invariant.
+   `--memory-shape` asserts this invariant, on the fixed, variable **and wrap**
+   paths (the wrap half landed in slice 57; see the paragraph at the end of
+   `## Architecture`, including what its probe-count observable cannot see).
 
 ## Architecture in one paragraph
 

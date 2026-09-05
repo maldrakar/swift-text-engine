@@ -69,6 +69,13 @@ struct WrapMemoryShapeSummary {
 /// array would report a pointer. The wrap half's evidence is the probe counts beside it
 /// (spec Decision 1); this token exists so the wrap lines carry the same columns as their
 /// siblings.
+///
+/// It names the UNWRAPPED `BenchmarkWrapLayout` deliberately, though the scenario runner
+/// actually constructs `DocumentVisualRowCursor<CountingWrapLayout<BenchmarkWrapLayout>>`.
+/// The counting wrapper is measurement apparatus -- benchmark-owned, present only because
+/// this mode is watching -- so folding its footprint into a token named
+/// `core_owned_bytes` would report the instrument as part of the thing measured. The
+/// estimate is of what the core would hold in production, over a bare provider.
 func wrapCoreOwnedBytesEstimate() -> Int {
     MemoryLayout<VirtualRange>.size
         + MemoryLayout<DocumentVisualRowCursor<BenchmarkWrapLayout>>.size

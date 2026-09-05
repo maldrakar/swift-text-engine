@@ -430,6 +430,16 @@ func runVariableMemoryShapeScenario(lineCount: Int) -> MemoryShapeSummary {
         let touchedLines = probeCounter.distinctLines.filter {
             $0 >= range.bufferStart && $0 < range.bufferEndExclusive
         }.count
+        // The intersection above is what `touched_lines` MEANS, and it is also
+        // one-sided: clamping to the buffer means the column can fall below the window
+        // but can never rise above it, so a core that walked the whole document would
+        // still print `touched_lines=90`. The raw distinct count is the half that moves,
+        // so it is asserted here against an independently derived expectation -- the
+        // buffered lines plus the ONE end-boundary offset the last row's height needs
+        // (`CountingLineMetricsTests` pins the same 91 at unit scale). Without this the
+        // counter is decoration on the variable half: the only thing it could report is
+        // a number bounded by construction.
+        let expectedDistinctOffsets = bufferedLines + 1
 
         return MemoryShapeSummary(
             providerName: variableUniformMemoryShapeProviderName,
@@ -447,7 +457,9 @@ func runVariableMemoryShapeScenario(lineCount: Int) -> MemoryShapeSummary {
             baseInvariantPasses: rangePasses
                 && visibleLines == expectedVisibleLines
                 && bufferedLines == expectedBufferedLines
-                && geometryLines == bufferedLines,
+                && geometryLines == bufferedLines
+                && touchedLines == bufferedLines
+                && probeCounter.distinctLines.count == expectedDistinctOffsets,
             checksum: checksum
         )
     case .failure:

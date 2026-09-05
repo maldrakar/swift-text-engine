@@ -93,18 +93,36 @@ final class WrapMemoryShapeTests: XCTestCase {
     // The emitted line carries every token §4A names, in order. A token silently dropped
     // from the formatter is a column the hosted record cannot show and a future harvest
     // cannot read.
+    //
+    // TOKENS, never substrings. `line.contains("visible_rows=80")` is satisfied by
+    // `visible_rows=801`, which is the exact hazard `AGENTS.md` writes down for
+    // `WorkflowShapeTests`'s `--gate` census (`--variable-height` is a prefix of
+    // `--variable-height-mutation`). The line is split on whitespace and each expected
+    // token is matched WHOLE; the value-bearing columns whose numbers this suite pins
+    // elsewhere are matched on their `key=` prefix against a token that has one.
     func testTheEmittedLineCarriesEveryToken() {
         let line = formatWrapMemoryShapeSummary(
             runWrapMemoryShapeScenario(scenario("10", 10.0)), invariantPasses: true)
+        let tokens = Set(line.split(separator: " ").map(String.init))
         for token in [
             "mode=memory_shape", "provider=wrap", "scenario=1k_lines_width_10", "line_count=1000",
             "wrap_width=10", "total_rows=8000", "visible_rows=80", "buffered_rows=90",
-            "streamed_rows=90", "point_row_in_line=3", "point_clamp=none", "compute_probes=",
-            "drain_probes=", "row_query_probes=", "point_query_probes=", "core_owned_bytes=",
-            "provider_owned_bytes=", "invariant=pass", "checksum="
+            "streamed_rows=90", "point_row_in_line=3", "point_clamp=none", "invariant=pass"
         ] {
-            XCTAssertTrue(line.contains(token), "missing \(token) in: \(line)")
+            XCTAssertTrue(tokens.contains(token), "missing exact token \(token) in: \(line)")
         }
+        for key in [
+            "compute_probes", "drain_probes", "row_query_probes", "point_query_probes",
+            "core_owned_bytes", "provider_owned_bytes", "checksum"
+        ] {
+            XCTAssertEqual(
+                tokens.filter { $0.hasPrefix("\(key)=") }.count, 1,
+                "expected exactly one \(key)= token in: \(line)")
+        }
+        // The token count is pinned too, so a column ADDED without a row above -- a
+        // column the record and a future harvest would never be told to read -- is as
+        // loud as a column dropped.
+        XCTAssertEqual(tokens.count, 19, "the wrap line carries nineteen tokens: \(line)")
     }
 
     // The infinite width must print `inf`, the spelling --wrap-compute already uses. Two
@@ -113,6 +131,7 @@ final class WrapMemoryShapeTests: XCTestCase {
     func testInfiniteWidthPrintsInf() {
         let line = formatWrapMemoryShapeSummary(
             runWrapMemoryShapeScenario(scenario("inf", .infinity)), invariantPasses: true)
-        XCTAssertTrue(line.contains("wrap_width=inf"), line)
+        let tokens = Set(line.split(separator: " ").map(String.init))
+        XCTAssertTrue(tokens.contains("wrap_width=inf"), line)
     }
 }
