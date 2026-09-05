@@ -42,10 +42,12 @@ git log --format='%H %s' --reverse 2e798a3..HEAD
 Rows 1–3 are the paper trail written before implementation; rows 4–16 are the
 implementation, row 17 the whole-branch review's fix wave, and row 18 the independent
 validation pass recorded in §2a. Every measurement in this document was taken on the tree
-at row 16 or later; §3, §5 and §6 were re-taken on row 18 and are noted where they were. The commit carrying **this record** is not named here, for exactly the reason the
-section exists — it cannot name itself, and the next commit would falsify a total. §9 is
-reserved for the hosted runs, which likewise cannot be named by the commit that creates
-their section.
+at row 16 or later; §3, §5 and §6 were re-taken on row 18 and are noted where they were.
+The commit carrying **this record** is not named here, for exactly the reason the section
+exists — it cannot name itself, and the next commit would falsify a total. **§10** (the
+hosted runs; the reference here previously read §9, which is the plan-linter section) is
+written on the separate `slice-57-hosted-proof` branch after the merge, so it names two
+commits that already exist rather than the one that creates it.
 
 Two commits in the table are amendments in place rather than additions (recorded because
 the SHAs in the implementers' own reports differ from the ones above): row 4 amends
@@ -1295,24 +1297,99 @@ D-15, is amended in place with its status left `open`. The shape guard catches a
 inside a code span in a table cell — the character a row quoting `run_self_test || exit 1`
 invites, and D-47 quotes it twice.
 
-## 10. Hosted evidence — RESERVED, NOT YET DISCHARGED
+## 10. Hosted evidence — DISCHARGED (AC10)
 
-**This section is deliberately empty.** AC10 requires step-level readings from **both**
-halves — the PR-head run and the post-merge `push` run — and neither exists at the time this
-record is written. A green job conclusion is not evidence
-(`verify-ci-step-logs-not-job-conclusion`): the readings to take are the twelve gates'
-`gate=pass` lines, `Lint plan assertions` printing **both** `self_test=pass` and
-`lint=pass files=2 violations=0`, `--memory-shape` printing **eleven** lines all
-`invariant=pass`, and the host job's `swift test` reporting 0 failures.
+Written on `slice-57-hosted-proof`, not on the implementation branch, per `AGENTS.md`'s
+"a record cannot carry facts about its own branch": both readings below are facts about
+commits that already exist and cannot be falsified by the commit that records them.
 
-When those runs exist, they are recorded as a per-head **commit → run id** table rather than
-as a bare run id, because a bare run id is a fact about "the current HEAD" and the next commit
-falsifies it:
+A green job conclusion is **not** evidence (`verify-ci-step-logs-not-job-conclusion`).
+Every number below is read out of the host job's own step logs.
 
-| Head commit (SHA) | Event | Run id | Step-level readings |
+### The per-head table
+
+| Head commit (SHA) | Event | Run id | Host job |
 |---|---|---|---|
-| *(pending)* | `pull_request` | *(pending)* | *(pending)* |
-| *(pending)* | `push` to `main` | *(pending)* | *(pending)* |
+| `ea57cc97aa6dc4a7ca8954be44f7805f0f8e0ef6` | `pull_request` (PR [#141](https://github.com/maldrakar/swift-text-engine/pull/141)) | [`33957528537`](https://github.com/maldrakar/swift-text-engine/actions/runs/33957528537) | `101283452281` |
+| `6490a87cf11bfe0764637618e527b8fc43d3c335` | `push` to `main` (the merge commit) | [`33957849785`](https://github.com/maldrakar/swift-text-engine/actions/runs/33957849785) | `101284315931` |
 
-Per `AGENTS.md`'s "A record cannot carry facts about its own branch", the post-merge half is
-written on a separate `slice-57-hosted-proof` branch, as slices 54, 55a, 55b and 56 did.
+Named per head rather than as "the hosted run", because a bare run id is a fact about
+whichever commit happened to be tip when it was written. Two earlier PR-head runs exist and
+are deliberately **not** cited as proof: `33952531288` (head `bbd9608`, before the
+validation pass) and `33957419266` (head `34c6d9b`), the latter auto-cancelled when
+`ea57cc9` superseded it.
+
+### Step-level readings — identical on both halves
+
+| Reading | PR head `ea57cc9` | Post-merge `6490a87` |
+|---|---|---|
+| Jobs green | 3 / 3 | 3 / 3 |
+| Host-job steps | 25, none failed, only `Complete docs-only PR` skipped | same |
+| `gate=pass` / `gate=fail` | **46 / 0** | **46 / 0** |
+| `mode=memory_shape` lines | **11**, `invariant=pass` on all | **11**, `invariant=pass` on all |
+| of which `provider=wrap` | **6** | **6** |
+| `mode=memory_observation` lines | 3, **0** of them `provider=wrap` (AC6) | 3, **0** `provider=wrap` |
+| `swift test` | `Executed 525 tests, with 0 failures (0 unexpected)` | `Executed 525 tests, with 0 failures (0 unexpected)` |
+| `Lint plan assertions` step | prints **both** `self_test=pass` and `lint=pass files=2 violations=0` | same |
+| Gated checksum tuples (D-18 filter applied) | 46 | 46 |
+
+The `Lint plan assertions` row is D-43's discharge observed at the place it matters: the
+step now prints the self-test's verdict *before* the lint's, on every PR, unguarded by
+`docs_only_pr`.
+
+### The six wrap lines, as the hosted runner printed them
+
+```
+mode=memory_shape provider=wrap scenario=100k_lines_width_inf line_count=100000 wrap_width=inf total_rows=100000 visible_rows=80 buffered_rows=90 streamed_rows=90 point_row_in_line=0 point_clamp=none compute_probes=2 drain_probes=469 row_query_probes=21 point_query_probes=34 core_owned_bytes=242 provider_owned_bytes=800008 invariant=pass checksum=621691
+mode=memory_shape provider=wrap scenario=100k_lines_width_40 line_count=100000 wrap_width=40 total_rows=200000 visible_rows=80 buffered_rows=90 streamed_rows=90 point_row_in_line=1 point_clamp=none compute_probes=2 drain_probes=4023 row_query_probes=21 point_query_probes=118 core_owned_bytes=242 provider_owned_bytes=800008 invariant=pass checksum=866730
+mode=memory_shape provider=wrap scenario=100k_lines_width_10 line_count=100000 wrap_width=10 total_rows=800000 visible_rows=80 buffered_rows=90 streamed_rows=90 point_row_in_line=3 point_clamp=none compute_probes=2 drain_probes=2094 row_query_probes=21 point_query_probes=128 core_owned_bytes=242 provider_owned_bytes=800008 invariant=pass checksum=2362769
+mode=memory_shape provider=wrap scenario=1m_lines_width_inf line_count=1000000 wrap_width=inf total_rows=1000000 visible_rows=80 buffered_rows=90 streamed_rows=90 point_row_in_line=0 point_clamp=none compute_probes=2 drain_probes=472 row_query_probes=24 point_query_probes=37 core_owned_bytes=242 provider_owned_bytes=8000008 invariant=pass checksum=6021691
+mode=memory_shape provider=wrap scenario=1m_lines_width_40 line_count=1000000 wrap_width=40 total_rows=2000000 visible_rows=80 buffered_rows=90 streamed_rows=90 point_row_in_line=1 point_clamp=none compute_probes=2 drain_probes=4026 row_query_probes=24 point_query_probes=121 core_owned_bytes=242 provider_owned_bytes=8000008 invariant=pass checksum=8516730
+mode=memory_shape provider=wrap scenario=1m_lines_width_10 line_count=1000000 wrap_width=10 total_rows=8000000 visible_rows=80 buffered_rows=90 streamed_rows=90 point_row_in_line=3 point_clamp=none compute_probes=2 drain_probes=2097 row_query_probes=24 point_query_probes=131 core_owned_bytes=242 provider_owned_bytes=8000008 invariant=pass checksum=23512769
+```
+
+Read the columns the criterion rests on, straight off the runner:
+
+- `compute_probes=2` in **all six** — flat across a 10x size jump and three widths (AC3).
+- The size deltas at fixed width are **3** on every entry point that has one: `drain_probes`
+  469→472, 4023→4026, 2094→2097; `row_query_probes` 21→24; `point_query_probes` 34→37,
+  118→121, 128→131. Against a `<= 32` shape bound, and against the ~10x a linear term would
+  produce — the drill in §2a shows that same counter at 100469 / 1000472 when a walk is
+  injected.
+- `buffered_rows=90 streamed_rows=90` at every width (Decision 3).
+- `point_row_in_line` 0 / 1 / 3 with `point_clamp=none` everywhere, so `point_query_probes`
+  measures the delegating branch at all three widths and the within-line walk is exercised
+  rather than assumed (AC4).
+- `provider_owned_bytes` 800008 → 8000008, exactly 10x, identical across widths at a fixed
+  size, and equal to `(line_count + 1) * MemoryLayout<Int>.size` (AC12) — criterion 2's
+  second clause, that the linear data is provider-owned, measured rather than asserted.
+
+### Three identity checks over the two runs
+
+```
+gated_checksums_prhead_vs_postmerge=IDENTICAL     # 46 tuples
+wrap_lines_prhead_vs_postmerge=IDENTICAL          # 6 lines
+gated_checksums_hosted_vs_local=IDENTICAL         # 46 tuples, hosted Linux x86_64 vs local macOS arm64
+```
+
+And the stronger one, the whole mode against what the record already committed:
+
+```
+$ diff <(sed -n '685,695p' docs/superpowers/verification/2026-09-04-wrap-memory-shape.md) \
+       <(grep -o 'mode=memory_shape .*' postmerge.log)
+ALL_ELEVEN_LINES_HOSTED_==_COMMITTED_BASELINE (byte-identical, checksum included)
+```
+
+All eleven `--memory-shape` lines produced by the hosted Linux x86_64 runner are
+byte-identical to the baseline in §3, which was taken locally on macOS arm64 — every
+token, `checksum=` included. That is a stronger statement than AC7 asked for: the mode's
+numbers are not merely stable across the slice, they are architecture-independent, which is
+what a probe count *should* be and what a timing would never be.
+
+### What this does not prove
+
+The same thing §2a and D-46 say. These runs show the invariants holding; they are not
+evidence that the invariants can fail — that evidence is the recorded reds in §2 and §2a,
+taken by breaking the tree deliberately. A hosted green is the weaker half of the pair, and
+this record keeps them separate on purpose.
+
