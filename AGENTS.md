@@ -32,7 +32,9 @@ per-slice verification. Treat them as invariants, not preferences:
    URL + checksum, fail-closed if provisioning fails.
 5. **Core-owned memory must not grow linearly with document size.** Strict
    virtualization: compute only for the visible viewport + overscan/buffer.
-   `--memory-shape` asserts this invariant.
+   `--memory-shape` asserts this invariant, on the fixed, variable **and wrap**
+   paths (the wrap half landed in slice 57; see the paragraph at the end of
+   `## Architecture`, including what its probe-count observable cannot see).
 
 ## Architecture in one paragraph
 
@@ -223,6 +225,22 @@ vertical axis **on the located branch** — the failure orderings diverge by des
 suggests: its vertical half is arithmetic, so it adds one axis's box and fractions.
 `--wrap-point-query` is its observational, **non-gateable** benchmark mode.
 
+`--memory-shape` has a **wrap half** (slice 57): six scenarios, `{100k, 1M} x {inf, 40, 10}`,
+each running `compute(_:layout:)`, `DocumentVisualRowCursor`, `visualRowAt` and
+`visualPointAt` against a `CountingWrapLayout`. The observable is **provider probes, not
+bytes** — every wrap entry point returns fixed-size values, so `MemoryLayout` sums cannot see
+growth (a struct holding an array reports a pointer). `compute`'s layout-probe count is a
+**constant** across all six (measured 2, not predicted); the other three are held to a bounded
+delta across the 10x size jump; the buffered window is 90 at every width; and
+`provider_owned_bytes` is asserted against the prefix sum's derived size, which is criterion
+2's "wrap data lives behind the provider abstraction" made observable. The whole mode now
+shares one declared expectation rather than comparing a scenario against its neighbour — the
+comparison used to compare a constant with itself, and `touched_lines` on the variable half
+used to be an assignment of `buffered_lines` rather than a count (both repaired in the same
+slice, D-45). **What the probe count cannot see** is an allocation that does not traverse
+(D-46): no available instrument closes that, and the criterion's evidence is scoped to what
+was measured.
+
 ## Package layout
 
 - `Sources/TextEngineCore` — the library. Pure, headless, Foundation-free.
@@ -322,7 +340,7 @@ swift run -c release ViewportBenchmarks -- --column-geometry-query --gate   # x-
 swift run -c release ViewportBenchmarks -- --point-query --gate   # (x,y)->(line,cell) 2D composite CI gate
 swift run -c release ViewportBenchmarks -- --point-geometry-query --gate   # (x,y)->(line+box+fraction, cell+box+fraction) 2D geometry blocking CI gate
 swift run -c release ViewportBenchmarks -- --realistic-provider --gate   # realistic 100k/10MB scroll compute blocking CI gate
-swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant; expect invariant=pass
+swift run -c release ViewportBenchmarks -- --memory-shape    # memory-shape invariant (fixed/variable + wrap); expect invariant=pass
 swift run -c release ViewportBenchmarks -- --memory-observation       # host RSS observation
 swift run -c release ViewportBenchmarks -- --wrap-compute   # observational wrap compute width-change demo (amortised; not gateable)
 swift run -c release ViewportBenchmarks -- --wrap-row-query   # observational wrap y->row query benchmark (amortised; not gateable)

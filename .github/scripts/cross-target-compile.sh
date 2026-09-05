@@ -732,20 +732,20 @@ some descriptive header with spaces"
   for fn in $defined; do
     if is_harness_function "$fn"; then continue; fi
     classified=0
-    for name in "${SELF_TEST_COVERED[@]}"; do
+    for name in ${SELF_TEST_COVERED[@]+"${SELF_TEST_COVERED[@]}"}; do
       [[ "$name" == "$fn" ]] && classified=1
     done
-    for entry in "${SELF_TEST_EXEMPT[@]}"; do
+    for entry in ${SELF_TEST_EXEMPT[@]+"${SELF_TEST_EXEMPT[@]}"}; do
       [[ "${entry%%$'\t'*}" == "$fn" ]] && classified=1
     done
     assert_equal "1" "$classified" "classified_${fn}"
   done
 
   # Direction 2: no phantom names, and every exempt entry carries a justification.
-  for name in "${SELF_TEST_COVERED[@]}"; do
+  for name in ${SELF_TEST_COVERED[@]+"${SELF_TEST_COVERED[@]}"}; do
     assert_function_defined "$name" "$defined" "covered_defined_${name}"
   done
-  for entry in "${SELF_TEST_EXEMPT[@]}"; do
+  for entry in ${SELF_TEST_EXEMPT[@]+"${SELF_TEST_EXEMPT[@]}"}; do
     assert_function_defined "${entry%%$'\t'*}" "$defined" "exempt_defined_${entry%%$'\t'*}"
     if [[ "$entry" != *$'\t'* || -z "${entry#*$'\t'}" ]]; then
       echo "self_test=fail label=exempt_justified_${entry} expected=justification actual=none"
@@ -754,7 +754,7 @@ some descriptive header with spaces"
   done
 
   # Coverage: every covered function is really referenced by the self-test's source.
-  for name in "${SELF_TEST_COVERED[@]}"; do
+  for name in ${SELF_TEST_COVERED[@]+"${SELF_TEST_COVERED[@]}"}; do
     if ! body_references_function "$name" "$body"; then
       echo "self_test=fail label=covered_but_unreferenced fn=$name"
       exit 1

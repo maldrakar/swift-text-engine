@@ -109,6 +109,51 @@ func variableCoreOwnedBytesEstimate() -> Int {
 
 let variableUniformMemoryShapeProviderName = "variable_uniform"
 
+// The viewport every scenario in this mode shares, and the window it implies. Written as
+// a derivation rather than as the literal 90, because the mode-wide equality (spec
+// Decision 4) is exactly the claim that all eleven scenarios share this configuration --
+// and a comparison against a typed-in 90 would agree with a scenario list that no longer
+// does.
+let memoryShapeViewportRows = 80
+let memoryShapeOverscanBefore = 5
+let memoryShapeOverscanAfter = 5
+let expectedMemoryShapeWindow =
+    memoryShapeViewportRows + memoryShapeOverscanBefore + memoryShapeOverscanAfter
+
+/// One scenario's contribution to the mode-wide structural equality (D-45).
+struct MemoryShapeWindowContribution {
+    let scenarioName: String
+    let bufferedWindow: Int
+    let streamedElements: Int
+    /// `nil` where the scenario has no third, INDEPENDENT traversal. A wrap scenario
+    /// streams rows and has nothing beside them to count, so reporting the same walk
+    /// twice under another name would be the vacuity this repair removes (spec §4B).
+    let touchedElements: Int?
+}
+
+/// The mode-wide structural comparison, as a PURE function so `swift test` can drive it
+/// against synthetic summaries -- the `GateLogicTests` seam, which is what this mode was
+/// missing when its only cross-scenario comparison turned out to be `x == x`.
+///
+/// Compares against the DECLARED expectation, never against `summaries.first`. The
+/// first-of-group idiom is what produced the vacuity, and it has a second defect: the
+/// first element is never itself checked, so corrupting IT reddens everything else and
+/// leaves the guilty line green.
+func memoryShapeComparisonFailures(
+    _ contributions: [MemoryShapeWindowContribution]
+) -> [String] {
+    var failed: [String] = []
+    for contribution in contributions {
+        var passes = contribution.bufferedWindow == expectedMemoryShapeWindow
+            && contribution.streamedElements == expectedMemoryShapeWindow
+        if let touched = contribution.touchedElements {
+            passes = passes && touched == expectedMemoryShapeWindow
+        }
+        if !passes { failed.append(contribution.scenarioName) }
+    }
+    return failed
+}
+
 func expectedMemoryShapeVisibleLines(_ scenario: MemoryShapeScenario) -> Int {
     if scenario.lineCount <= 0 || scenario.lineHeight <= 0.0 || scenario.viewportHeight <= 0.0 {
         return 0
@@ -365,7 +410,15 @@ func runVariableMemoryShapeScenario(lineCount: Int) -> MemoryShapeSummary {
         let expectedVisibleLines = min(lineCount, Int((viewportHeight / lineHeight).rounded(.up)))
         let expectedBufferedLines = min(lineCount, expectedVisibleLines + overscanBefore + overscanAfter)
         let rangePasses = memoryShapeRangeIsOrderedAndBounded(range, lineCount: lineCount)
-        var cursor = ViewportVirtualizer.geometry(for: range, metrics: metrics)
+
+        // D-45's second half. `providerLines: bufferedLines` was the buffered window
+        // written twice, so the mode-wide equality would have been satisfied here BY
+        // CONSTRUCTION. The cursor legitimately reads one offset past the buffer to size
+        // the last row, so the count is intersected with the range: `touched_lines` means
+        // buffered lines resolved, not offsets probed.
+        let probeCounter = LineProbeCounter()
+        var cursor = ViewportVirtualizer.geometry(
+            for: range, metrics: CountingLineMetrics(base: metrics, counter: probeCounter))
         var geometryLines = 0
         var checksum = 0
         while let geometry = cursor.next() {
@@ -374,6 +427,19 @@ func runVariableMemoryShapeScenario(lineCount: Int) -> MemoryShapeSummary {
             checksum &+= Int(geometry.y)
             checksum &+= Int(geometry.height)
         }
+        let touchedLines = probeCounter.distinctLines.filter {
+            $0 >= range.bufferStart && $0 < range.bufferEndExclusive
+        }.count
+        // The intersection above is what `touched_lines` MEANS, and it is also
+        // one-sided: clamping to the buffer means the column can fall below the window
+        // but can never rise above it, so a core that walked the whole document would
+        // still print `touched_lines=90`. The raw distinct count is the half that moves,
+        // so it is asserted here against an independently derived expectation -- the
+        // buffered lines plus the ONE end-boundary offset the last row's height needs
+        // (`CountingLineMetricsTests` pins the same 91 at unit scale). Without this the
+        // counter is decoration on the variable half: the only thing it could report is
+        // a number bounded by construction.
+        let expectedDistinctOffsets = bufferedLines + 1
 
         return MemoryShapeSummary(
             providerName: variableUniformMemoryShapeProviderName,
@@ -383,7 +449,7 @@ func runVariableMemoryShapeScenario(lineCount: Int) -> MemoryShapeSummary {
             visibleLines: visibleLines,
             bufferedLines: bufferedLines,
             geometryLines: geometryLines,
-            providerLines: bufferedLines,
+            providerLines: touchedLines,
             missingLines: 0,
             coreOwnedBytes: coreOwnedBytes,
             providerOwnedBytes: 0,
@@ -391,7 +457,9 @@ func runVariableMemoryShapeScenario(lineCount: Int) -> MemoryShapeSummary {
             baseInvariantPasses: rangePasses
                 && visibleLines == expectedVisibleLines
                 && bufferedLines == expectedBufferedLines
-                && geometryLines == bufferedLines,
+                && geometryLines == bufferedLines
+                && touchedLines == bufferedLines
+                && probeCounter.distinctLines.count == expectedDistinctOffsets,
             checksum: checksum
         )
     case .failure:
@@ -418,6 +486,24 @@ func runMemoryShapeDiagnostics() -> Bool {
     let fixedSummaries = memoryShapeScenarios().map(runMemoryShapeScenario)
     let variableSummaries = [100_000, 1_000_000].map(runVariableMemoryShapeScenario)
     let summaries = fixedSummaries + variableSummaries
+    let wrapSummaries = wrapMemoryShapeScenarios().map(runWrapMemoryShapeScenario)
+
+    let contributions = summaries.map {
+        MemoryShapeWindowContribution(
+            scenarioName: $0.scenarioName, bufferedWindow: $0.bufferedLines,
+            streamedElements: $0.geometryLines, touchedElements: $0.providerLines)
+    } + wrapSummaries.map {
+        MemoryShapeWindowContribution(
+            scenarioName: $0.scenarioName, bufferedWindow: $0.bufferedRows,
+            streamedElements: $0.streamedRows, touchedElements: nil)
+    }
+    let windowFailures = Set(memoryShapeComparisonFailures(contributions))
+    let wrapCrossFailures = Set(wrapMemoryShapeCrossScenarioFailures(wrapSummaries))
+
+    // The per-group byte comparison stays, SUBORDINATE now: it compares a constant with
+    // itself, and deleting it would move nothing except the reasons a green line is
+    // green. It keeps its first-of-group shape deliberately -- changing it would alter
+    // no verdict and is not this slice's subject.
     let syntheticCoreOwnedBytes = summaries
         .filter { $0.providerName == MemoryShapeProviderKind.synthetic.outputName }
         .map(\.coreOwnedBytes)
@@ -440,12 +526,19 @@ func runMemoryShapeDiagnostics() -> Bool {
             comparisonPasses = true
         }
 
-        let invariantPasses = summary.baseInvariantPasses && comparisonPasses
+        let invariantPasses = summary.baseInvariantPasses
+            && comparisonPasses
+            && !windowFailures.contains(summary.scenarioName)
         print(formatMemoryShapeSummary(summary, invariantPasses: invariantPasses))
+        if !invariantPasses { passed = false }
+    }
 
-        if !invariantPasses {
-            passed = false
-        }
+    for summary in wrapSummaries {
+        let invariantPasses = summary.baseInvariantPasses
+            && !windowFailures.contains(summary.scenarioName)
+            && !wrapCrossFailures.contains(summary.scenarioName)
+        print(formatWrapMemoryShapeSummary(summary, invariantPasses: invariantPasses))
+        if !invariantPasses { passed = false }
     }
 
     return passed

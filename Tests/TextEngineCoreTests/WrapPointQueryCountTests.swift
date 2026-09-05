@@ -266,9 +266,14 @@ final class WrapPointQueryCountTests: XCTestCase {
         // in the task that discharges D-25.
         XCTAssertLessThan(far, base.visualRowCount(inLine: 0) - 1,
                           "neither sample may be the line's last row")
-        // Rows are [5j, 5j+5): endColumn(10) − endColumn(2) = 55 − 15 = 40 cells the walk
-        // must scan between the two samples.
-        let mustScan = 55 - 15
+        // Derived, never transcribed (D-38). Rows are uniform here, so cells-per-row is
+        // the fixture's own quotient; the guard makes the uniformity a checked premise
+        // rather than an assumption inherited from the comment above.
+        let rowCount = base.visualRowCount(inLine: 0)
+        let cellCount = base.columnCount(inLine: 0)
+        XCTAssertEqual(cellCount % rowCount, 0, "fixture: rows must hold equal cell counts")
+        let cellsPerRow = cellCount / rowCount
+        let mustScan = (far - near) * cellsPerRow
         XCTAssertGreaterThanOrEqual(columnCalls(atRow: far) - columnCalls(atRow: near), mustScan)
     }
 }

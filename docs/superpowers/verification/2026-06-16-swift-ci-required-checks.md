@@ -1,5 +1,13 @@
 # Swift CI Required Checks Verification
 
+> **Superseded in part (slice 47, 2026-07-20).** The WASM job's required-check context
+> was renamed from `WASM cross-target observation` to **`WASM cross-target compile`**
+> when the job stopped being observational and started blocking. Every occurrence of the
+> old name below — ruleset JSON included — is preserved as the record of what was true on
+> 2026-06-16 and is **not** current policy. For the rename and the drop-rename-readd
+> sequence it required, see
+> [`2026-07-20-wasm-required-check-rename.md`](2026-07-20-wasm-required-check-rename.md).
+
 Date: 2026-06-16
 
 ## Summary

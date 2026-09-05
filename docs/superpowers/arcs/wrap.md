@@ -11,7 +11,7 @@ brief's «Ограничения» and the initial brief it inherits by referenc
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
 | 1 | Layout-width change (device rotation, browser resize) does not recompute the document: frame cost stays viewport-bounded, in the spirit of the existing O(log N) + O(buffer) | partial | Core half retired (Slice 50): per-frame `compute(_:layout:)` is O(log totalRows) and never re-walks the document on a width change — width baked into the provider; only its O(N) reindex (a setup cost) is linear. [PR #117](https://github.com/maldrakar/swift-text-engine/pull/117) (`fdc66d2`), post-merge run `30169643578`, `--wrap-compute` numbers. `done` needs the estimated/async veneer (fork V) — the *exact* reindex is Ω(N) |
-| 2 | Core memory not linear in document size with wrap on; wrap data lives behind the provider abstraction; `--memory-shape` extended to the wrap path | open | — |
+| 2 | Core memory not linear in document size with wrap on; wrap data lives behind the provider abstraction; `--memory-shape` extended to the wrap path | **done** | Slice 57 ([verification record](../verification/2026-09-04-wrap-memory-shape.md); branch `slice-57-wrap-memory-shape`, commits named by SHA in that record's §0, hosted runs in its §10). `--memory-shape` — a **blocking** CI step — gained six `provider=wrap` scenarios, `{100k, 1M} x {inf, 40, 10}`, each driving `compute(_:layout:)`, the `DocumentVisualRowCursor` drain, `visualRowAt` and `visualPointAt` through a `CountingWrapLayout` that counts all six `VisualRowLayoutSource` hooks. Measured, not predicted: `compute_probes=2` in **all six** (flat on the layout axis across a 10x size jump and three widths); the other three entry points move by exactly **3** probes from 100k to 1M at fixed width, against a `<= 32` shape bound that separates logarithmic from linear by three orders of magnitude; `buffered_rows == streamed_rows == 90` at every width, so the window is viewport-bounded and width-independent. The criterion's second clause — wrap data lives behind the provider — is `provider_owned_bytes == (line_count + 1) * MemoryLayout<Int>.size`, asserted against the derived prefix size and ~10x larger at 1M than at 100k while identical across widths. **Scope of the evidence, stated because the observable is indirect (D-46):** the observable is **provider probes, not bytes**, so it sees a core that *traverses* the document and is blind to one that *allocates* without traversing; `MemoryLayout` reports a pointer for exactly that case and RSS belongs to the non-blocking `--memory-observation`, so no instrument here closes it. Read D-46 with this cell. The same slice repaired the mode's two vacuous measurements first (D-45) — its only cross-scenario comparison compared a constant with itself, and `touched_lines` was an assignment rather than a count — because a criterion cannot be closed by a mode whose comparison cannot fail |
 | 3 | Wrap-aware equivalents of existing queries (compute over visual rows, y→row, point→(row, cell)); no-wrap path preserved; wrap at infinite width equals no-wrap (equivalence oracle) | **done** | All three enumerated analogs shipped with their oracles: **compute over visual rows** (Slice 50, [PR #117](https://github.com/maldrakar/swift-text-engine/pull/117) `fdc66d2`, `WrapComputeEquivalenceTests`), **y→row** (Slice 53, [PR #126](https://github.com/maldrakar/swift-text-engine/pull/126) `c2e6b37`, `WrapRowQueryEquivalenceTests`), **point→(row, cell)** (Slice 55b, [PR #135](https://github.com/maldrakar/swift-text-engine/pull/135) `7390107`, `WrapPointQueryEquivalenceTests`; post-merge run `33791182282`), on top of the per-line oracle of Slice 49 ([PR #114](https://github.com/maldrakar/swift-text-engine/pull/114) `8e91f52`). The no-wrap path is untouched — 46 gated checksums byte-identical across the whole of slices 55a/55b. **Scope of what the oracles prove, stated because the brief's wording is unqualified:** bit-identity holds **on the located branch**. The wrap and no-wrap ladders validate different things in different orders, so their *failure* orderings diverge by design (slice-55 spec, Decision 5); each oracle is scoped to the located branch deliberately and carries a narrow-width control proving it is not vacuous. Geometry-bearing companions are not on this criterion's list (slice-55 spec, Non-Goal 1) |
 | 4 | 100k+ lines / >10 MB scroll with wrap on holds p95/p99 budgets and the absolute 60 FPS ceiling; new wrap modes become blocking CI gates via the existing harvest → derive recipe | open | — |
 | 5 | Incremental edits with wrap on (in-line edit, structural insert/delete) stay within frame-hot-path budgets | open | — |
@@ -65,7 +65,30 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    (`long_line_deep_row`, 400 rows deep, ~20-30x its logarithmic siblings locally), and after
    Decision 12 only the *interior* rows of genuinely wrapped lines can drive it — which sharpens
    rather than shrinks the case for fork R below.
-5. `pending` — `--memory-shape` extension to the wrap path. Criterion 2.
+5. `done` (Slice 57) — `--memory-shape` extension to the wrap path. **Closed criterion 2.**
+   Shipped as specified: six scenarios over the four wrap entry points a viewport reaches,
+   with node 1's per-line `visualRows` covered *transitively* through the drain rather than
+   by a scenario of its own. What it taught, and what the map absorbs: (a) **the observable
+   had to change**. Every wrap entry point returns fixed-size values, so the mode's existing
+   `MemoryLayout` estimate reports a pointer for precisely the failure it exists to detect;
+   the wrap half counts **provider probes** instead, which is the first quantity in this mode
+   that could grow with the document — and its residual (an allocation that does not traverse)
+   is recorded as **D-46**, `accepted-risk`, with a named follow-up rather than a shrug.
+   (b) `compute`'s layout-probe count is a **constant**, measured at 2 and identical in all
+   six scenarios, which is the sharpest single statement the node produces: a per-frame
+   compute that touched the document would move it. (c) **The mode it extended could not
+   fail** — its only cross-scenario comparison compared a constant with itself and one
+   scenario was exempt from it — so the node had to repair its own instrument first (**D-45**),
+   which is why criterion 2's evidence cell reads as a set of declared expectations rather
+   than as neighbour comparisons. Nothing measured moved: the five pre-existing
+   `--memory-shape` lines, the 46 gated checksums and all three wrap modes' checksums are
+   byte-identical, and `Sources/TextEngineCore` is untouched. (d) **A post-hoc validation
+   pass** (record §2a) supplied the one drill the node was missing — a real document-length
+   walk injected into the drain, which turns all six wrap lines red and exits 1, three
+   orders of magnitude outside the `<= 32` bound — and found that the *variable* half could
+   not report the same failure, because its `touched_lines` is intersected with the buffer
+   and bounded above by construction. Repaired in the same pass; the structural remainder
+   is **D-48**.
 6. `pending` — Wrap benchmark modes promoted to blocking gates
    (harvest → derive). Criterion 4. Likely splits per mode, as the first
    arc's gate promotions did. **Both of its inputs were repaired ahead of it in
@@ -73,9 +96,12 @@ brief's «Ограничения» and the initial brief it inherits by referenc
    tick-quantised numbers; D-7: the harvester selects rows by run id with no
    conclusion/event/fork check) — because `harvest → derive` never re-measures and never
    re-authenticates, so neither defect is repairable *after* this node's first harvest.
-   Still to read when it arrives: D-20/D-21 (the non-gateable modes' `AbsoluteCeiling`
-   class is pinned by nothing, and that inertness ends the moment a wrap mode becomes
-   gateable).
+   **D-20/D-21 left this node's reading list in slice 57**, discharged there: the
+   non-gateable modes' `AbsoluteCeiling` class and the gateable `.scrollFrame` arm are both
+   pinned now, and the two class pins are asserted to partition the gateable set — so a wrap
+   mode joining `isGateable` at this node lands in a class some test checks. What does *not*
+   leave with them is the runtime half: the class only starts being **read** when a wrap mode
+   becomes gateable, and that is still this node's own step.
 7. `pending` — Incremental edits under wrap inside frame-hot-path budgets.
    Criterion 5.
 8. `pending` — `fork: which platform host ships first, and how much of the
@@ -326,6 +352,42 @@ PR skips (**D-43**, the review's one new P2, folded into node 5).
 Next step is **topological** (node 5 = `--memory-shape` over the wrap path, criterion 2 — the
 only wrap criterion with no evidence at all); the 55b pass said it should not wait past slice
 57, and this is slice 57. First genuine fork remains node 8 (host order) / fork V / fork R.
+
+Map pass 2026-09-05 (Slice 57): node 5 is **`done`**, and with it **criterion 2** — the wrap
+criterion that had no evidence at all, closed on a probe-count observable whose scope its
+evidence cell states. **Nodes 6-9, fork R and fork V stand unrevised and un-relearned:**
+nothing this slice shipped touches gate promotion, incremental edits under wrap, the hosts,
+within-line random access, or the width-change veneer. It is the second consecutive slice
+whose subject was the *instrument* rather than the engine, and the first of the two to
+advance a criterion.
+
+What it changed for **node 6** is a second instance of a row *leaving* its precondition set,
+after slice 56's D-9 rehoming: **D-20/D-21 are discharged**. Node 6's set is therefore
+D-28, D-30, D-31, D-33 plus D-9 — the class-membership pins are now bidirectional over the
+gateable set and total over the non-gateable one, so a wrap mode joining `isGateable` lands
+in a class a test checks. The runtime half of D-20 does not leave with it: the class only
+starts being read when a wrap mode is actually gated, which is that node's own step.
+
+What it taught, beyond the node: **a measurement is only as good as its ability to fail, and
+this repository keeps shipping ones that cannot.** The mode node 5 extended carried two
+(D-45) — a cross-scenario comparison that compared a constant with itself and one that
+compared nothing at all, and a `touched_lines` column that was an assignment of
+`buffered_lines`. Both were found by reading the mode before extending it, which is the only
+reason criterion 2 is not closed on a comparison that cannot fail. The same shape recurred
+*inside* the slice, in its own drills: eight of the plan's twenty-three could not produce
+their predicted red as written — three because the field a drill substituted was not the
+field its paired test corrupted, one because a reshaped fixture left the derived and the
+transcribed constant on the same value, one because a probe-count pin's two widths were the
+same regime under two names. Every one was repaired or replaced in-flight, and the tally is
+in the record's §7. D-35's lesson holds and generalizes: a plan's *prediction* about which
+mutation reddens is itself unverified until it is run.
+
+Next step is **topological** and there is a choice at it for the first time in a while: node 6
+(gate promotion, criterion 4) is the topological successor, and its precondition set is now
+D-28, D-30, D-31, D-33 and D-9, with **D-9** the heaviest — it edits the p95 arithmetic behind all 46 committed budgets
+and must land before that node's first harvest, not inside the same PR as a shape-pin diff.
+Node 7 (incremental edits under wrap, criterion 5) has no precondition set at all. First
+genuine fork remains node 8 (host order) / fork V / fork R.
 
 ## Decision log
 

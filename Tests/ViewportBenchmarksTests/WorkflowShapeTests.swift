@@ -201,17 +201,26 @@ private func parseStep(_ block: [String], index: Int) -> WorkflowStep {
                         continueOnError: continueOnError, runTokens: runTokens, env: env)
 }
 
+// The workflow file's raw lines, split on "\n". The one place the file is read off disk for
+// the job-scoped readers below (`jobLines` and, via it, `jobSteps`/`jobLevelValue`) plus
+// `allJobKeys` -- kept singular so a future reshuffle of the read (encoding, line-ending
+// handling) cannot drift between callers.
+private func workflowLines() throws -> [String] {
+    let url = repositoryRoot().appendingPathComponent(workflowPath)
+    let text = try String(contentsOf: url, encoding: .utf8)
+    return text.components(separatedBy: "\n")
+}
+
 // Scoped to a single job's own region -- from its 2-space key to the next one. All three
 // jobs indent their steps identically, and four step names (`Check out repository`,
 // `Detect PR change scope`, `Complete docs-only PR`, `Show toolchain`) repeat verbatim
 // across them, so a whole-file split would make every name lookup ambiguous. Shared by
 // `jobSteps` (which further splits it into step blocks) and `jobLevelValue` (which reads a
-// job-level key that sits above `steps:` entirely), so the file-read and job-boundary logic
-// lives in exactly one place.
+// job-level key that sits above `steps:` entirely), so the job-boundary logic lives in
+// exactly one place; the file-read itself lives in `workflowLines`, shared with
+// `allJobKeys`.
 private func jobLines(_ jobKey: String) throws -> [String] {
-    let url = repositoryRoot().appendingPathComponent(workflowPath)
-    let text = try String(contentsOf: url, encoding: .utf8)
-    let allLines = text.components(separatedBy: "\n")
+    let allLines = try workflowLines()
 
     guard let jobStart = allLines.firstIndex(where: { $0.hasPrefix("  \(jobKey):") }) else {
         XCTFail("\(workflowPath): no job keyed \(jobKey)")
@@ -253,6 +262,26 @@ private func jobLevelValue(of key: String, jobKey: String) throws -> String? {
         }
     }
     return nil
+}
+
+/// The workflow's job keys, in file order. A job key is a 2-space-indented `key:` line
+/// inside the top-level `jobs:` block; steps and job-level keys are indented deeper, so
+/// the depth alone separates them. Narrow on purpose -- the package is zero-dependency
+/// and there is no YAML parser in reach (the file's standing constraint).
+private func allJobKeys() throws -> [String] {
+    let lines = try workflowLines()
+    var keys: [String] = []
+    var inJobs = false
+    for line in lines {
+        if isBlank(line) || isComment(line) { continue }
+        if line == "jobs:" { inJobs = true; continue }
+        if inJobs && !line.hasPrefix(" ") { break }
+        guard inJobs, line.hasPrefix("  "), !line.hasPrefix("   ") else { continue }
+        let trimmed = line.dropFirst(2)
+        guard trimmed.hasSuffix(":") else { continue }
+        keys.append(String(trimmed.dropLast()))
+    }
+    return keys
 }
 
 private func hostJobSteps() throws -> [WorkflowStep] {
@@ -569,6 +598,30 @@ final class WorkflowShapeTests: XCTestCase {
         }
     }
 
+    // D-11. The job SET, not just each job's name. testJobNamesMatchRequiredCheckContexts
+    // iterates requiredCheckContexts, so it can only check jobs that table already names:
+    // a fourth job -- required or not -- is invisible to it. This is the repository's own
+    // "pins must model what runtime reads" lesson, recurring on the container rather than
+    // on the contents.
+    func testWorkflowJobSetIsExactlyTheThreePinnedJobs() throws {
+        let keys = try allJobKeys()
+        XCTAssertEqual(
+            keys, requiredCheckContexts.map(\.jobKey),
+            "\(workflowPath): the job set changed. Every job here reports a status-check "
+                + "context to GitHub, and ruleset Main (id 17656807) requires three of "
+                + "them by exact name. A new job needs a row in requiredCheckContexts "
+                + "AND a decision about whether the ruleset requires it.")
+        var names: [String] = []
+        for key in keys {
+            guard let name = try jobLevelValue(of: "name", jobKey: key) else {
+                XCTFail("\(workflowPath): no name: key in job \(key)")
+                continue
+            }
+            names.append(name)
+        }
+        XCTAssertEqual(names, requiredCheckContexts.map(\.context))
+    }
+
     // Invariant 11 (new). The plan linter's CI step. Pinned for the usual reasons -- exact
     // payload, no continue-on-error -- and for one unusual one: the ABSENCE of the
     // docs-only guard is deliberate and must stay deliberate. A plan is docs/**, so adding
@@ -576,7 +629,8 @@ final class WorkflowShapeTests: XCTestCase {
     // to check, and every other test in this file would stay green.
     func testPlanLintStepIsBlockingAndUnguarded() throws {
         let all = try hostJobSteps()
-        let expected = "./.github/scripts/lint-plan-assertions.sh"
+        let expected = "./.github/scripts/lint-plan-assertions.sh --self-test "
+            + "&& ./.github/scripts/lint-plan-assertions.sh"
         let matches = all.filter { $0.runTokens.joined(separator: " ") == expected }
         XCTAssertEqual(
             matches.count, 1,

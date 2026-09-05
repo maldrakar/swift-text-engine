@@ -363,6 +363,91 @@ run_lint() {
   return 0
 }
 
+# ---------------------------------------------------------------------------
+# Function classification (enforced by --self-test, see the partition check in
+# run_self_test). Every function in this file is either COVERED (referenced by
+# the self-test's own source), EXEMPT (named here with a reason), or harness
+# (assert_* / run_self_test, derived).
+#
+# This is the fifth script to carry the partition. D-14's row named three; this
+# one was outside that row's scope and was left unclassified when the other four
+# gained it (slice 57 residual M-7), which made the ONE self-tested script with
+# no coverage partition also the script whose rules gate every plan in the repo.
+# ---------------------------------------------------------------------------
+
+SELF_TEST_COVERED=(
+  run_lint
+  defined_functions
+  is_harness_function
+  self_test_body
+  body_references_function
+)
+
+# name<TAB>justification. Parallel-array-free and bash 3.2-safe: no declare -A.
+SELF_TEST_EXEMPT=(
+  "cleanup	removes the self-test scratch directory through main's single trap cleanup EXIT; runs on every exit path but is never named by the self-test"
+  "write_awk_program	writes the awk linter to the scratch file; main calls it before dispatching to either run_self_test or run_lint, so it runs on the self-test path without being named by it"
+  "lint_file	lints one plan file; runs via run_lint but is never named directly by the self-test"
+  "main	the CLI dispatcher; it invokes the self-test rather than being invoked by it"
+)
+
+# Every TOP-LEVEL function defined in a script file, one name per line. Pure.
+#
+# Anchored at column 0 on purpose: an INDENTED definition is a nested one (the
+# --self-test scenarios below define stubs inside their own bodies) and must stay
+# out of the partition. Everything else bash accepts must be seen, or the function
+# escapes classification silently -- so all four spellings are matched: `name() {`,
+# `name(){`, `name () {`, and both `function name {` forms. Names take the full
+# identifier alphabet, not [a-z_]: a digit or a capital is not an escape hatch.
+# ERE (grep -oE / sed -E) rather than BRE because BSD sed has no `\?`.
+#
+# The awk program this script writes out defines `function report(rule, line, detail)`
+# and three siblings at column 0 inside a heredoc. They are not matched, and not by
+# accident: the `function` spelling above accepts only EMPTY parens, so an awk
+# function with parameters cannot enter a bash script's partition.
+defined_functions() {
+  grep -oE '^(function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*([[:space:]]*\(\))?|[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\))[[:space:]]*\{' "$1" \
+    | sed -E -e 's/^function[[:space:]]+//' -e 's/[[:space:]]*(\(\))?[[:space:]]*\{$//'
+}
+
+# The harness set is DERIVED, never hand-listed, so it cannot go stale.
+is_harness_function() {
+  case "$1" in
+    assert_*|run_self_test) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The self-test's own source: run_self_test plus every scenario_* function (they ARE
+# the self-test -- they drive the ladder and the drift path). Three subtractions keep
+# the coverage check from becoming a tautology:
+#   * the classification arrays are top-level, hence outside this extraction, so a
+#     name cannot satisfy the check by appearing in the list it is checked against;
+#   * comments are stripped -- run_self_test's prose names helpers it does not call;
+#   * definition lines are stripped -- defining a stub named X is not evidence that
+#     the self-test exercises X.
+self_test_body() {
+  awk '
+    /^(run_self_test|scenario_[a-z_]*)\(\) \{/ { inside = 1 }
+    inside { print }
+    inside && /^}/ { inside = 0 }
+  ' "$1" | sed -e 's/#.*$//' -e '/^[[:space:]]*[a-z_][a-z0-9_]*() {$/d'
+}
+
+# Token match, never substring: run_lint must not be satisfied by run_lint_twice
+# (the repo's --variable-height lesson).
+body_references_function() {
+  printf '%s\n' "$2" | grep -qE "(^|[^A-Za-z0-9_])$1([^A-Za-z0-9_]|\$)"
+}
+
+assert_function_defined() {
+  local fn="$1" defined="$2" label="$3"
+  if ! printf '%s\n' "$defined" | grep -qx -- "$fn"; then
+    echo "self_test=fail label=$label expected=defined actual=missing fn=$fn"
+    exit 1
+  fi
+}
+
 assert_equal() {
   local expected="$1" actual="$2" label="$3"
   if [[ "$expected" != "$actual" ]]; then
@@ -680,6 +765,44 @@ FIXTURE
     echo "self_test=fail label=exempt_list_empty"
     exit 1
   fi
+
+  local script_path defined body fn entry name classified
+  script_path="${BASH_SOURCE[0]}"
+  defined="$(defined_functions "$script_path")"
+  body="$(self_test_body "$script_path")"
+
+  # Direction 1: every defined function is classified.
+  for fn in $defined; do
+    if is_harness_function "$fn"; then continue; fi
+    classified=0
+    for name in ${SELF_TEST_COVERED[@]+"${SELF_TEST_COVERED[@]}"}; do
+      [[ "$name" == "$fn" ]] && classified=1
+    done
+    for entry in ${SELF_TEST_EXEMPT[@]+"${SELF_TEST_EXEMPT[@]}"}; do
+      [[ "${entry%%$'\t'*}" == "$fn" ]] && classified=1
+    done
+    assert_equal "1" "$classified" "classified_${fn}"
+  done
+
+  # Direction 2: no phantom names, and every exempt entry carries a justification.
+  for name in ${SELF_TEST_COVERED[@]+"${SELF_TEST_COVERED[@]}"}; do
+    assert_function_defined "$name" "$defined" "covered_defined_${name}"
+  done
+  for entry in ${SELF_TEST_EXEMPT[@]+"${SELF_TEST_EXEMPT[@]}"}; do
+    assert_function_defined "${entry%%$'\t'*}" "$defined" "exempt_defined_${entry%%$'\t'*}"
+    if [[ "$entry" != *$'\t'* || -z "${entry#*$'\t'}" ]]; then
+      echo "self_test=fail label=exempt_justified_${entry} expected=justification actual=none"
+      exit 1
+    fi
+  done
+
+  # Coverage: every covered function is really referenced by the self-test's source.
+  for name in ${SELF_TEST_COVERED[@]+"${SELF_TEST_COVERED[@]}"}; do
+    if ! body_references_function "$name" "$body"; then
+      echo "self_test=fail label=covered_but_unreferenced fn=$name"
+      exit 1
+    fi
+  done
 
   echo "self_test=pass"
 }

@@ -21,6 +21,82 @@ fail() {
   exit 2
 }
 
+# ---------------------------------------------------------------------------
+# Function classification (enforced by --self-test, see the partition check in
+# run_self_test). Every function in this file is either COVERED (referenced by
+# the self-test's own source), EXEMPT (named here with a reason), or harness
+# (assert_* / run_self_test, derived).
+# ---------------------------------------------------------------------------
+
+SELF_TEST_COVERED=(
+  is_docs_only_path
+  classify_paths
+  emit_classification
+  defined_functions
+  is_harness_function
+  self_test_body
+  body_references_function
+)
+
+# name<TAB>justification. Parallel-array-free and bash 3.2-safe: no declare -A.
+SELF_TEST_EXEMPT=(
+  "usage	prints CLI usage text; reachable only via --help and the argument-error path, never named by the self-test"
+  "fail	emits the infrastructure-failure line and exits 2; reachable only via CLI argument validation and the git failure paths, never named by the self-test"
+  "write_github_output	writes docs_only_pr= to GITHUB_OUTPUT_FILE; runs via emit_classification but is never named directly by the self-test"
+)
+
+# Every TOP-LEVEL function defined in a script file, one name per line. Pure.
+#
+# Anchored at column 0 on purpose: an INDENTED definition is a nested one (the
+# --self-test scenarios below define stubs inside their own bodies) and must stay
+# out of the partition. Everything else bash accepts must be seen, or the function
+# escapes classification silently -- so all four spellings are matched: `name() {`,
+# `name(){`, `name () {`, and both `function name {` forms. Names take the full
+# identifier alphabet, not [a-z_]: a digit or a capital is not an escape hatch.
+# ERE (grep -oE / sed -E) rather than BRE because BSD sed has no `\?`.
+defined_functions() {
+  grep -oE '^(function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*([[:space:]]*\(\))?|[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\))[[:space:]]*\{' "$1" \
+    | sed -E -e 's/^function[[:space:]]+//' -e 's/[[:space:]]*(\(\))?[[:space:]]*\{$//'
+}
+
+# The harness set is DERIVED, never hand-listed, so it cannot go stale.
+is_harness_function() {
+  case "$1" in
+    assert_*|run_self_test) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The self-test's own source: run_self_test plus every scenario_* function (they ARE
+# the self-test -- they drive the ladder and the drift path). Three subtractions keep
+# the coverage check from becoming a tautology:
+#   * the classification arrays are top-level, hence outside this extraction, so a
+#     name cannot satisfy the check by appearing in the list it is checked against;
+#   * comments are stripped -- run_self_test's prose names helpers it does not call;
+#   * definition lines are stripped -- defining a stub named X is not evidence that
+#     the self-test exercises X.
+self_test_body() {
+  awk '
+    /^(run_self_test|scenario_[a-z_]*)\(\) \{/ { inside = 1 }
+    inside { print }
+    inside && /^}/ { inside = 0 }
+  ' "$1" | sed -e 's/#.*$//' -e '/^[[:space:]]*[a-z_][a-z0-9_]*() {$/d'
+}
+
+# Token match, never substring: resolve_wasm_sdk_id must not be satisfied by
+# resolve_wasm_sdk_id_from_list (the repo's --variable-height lesson).
+body_references_function() {
+  printf '%s\n' "$2" | grep -qE "(^|[^A-Za-z0-9_])$1([^A-Za-z0-9_]|\$)"
+}
+
+assert_function_defined() {
+  local fn="$1" defined="$2" label="$3"
+  if ! printf '%s\n' "$defined" | grep -qx -- "$fn"; then
+    echo "self_test=fail label=$label expected=defined actual=missing fn=$fn"
+    exit 1
+  fi
+}
+
 assert_equal() {
   local expected="$1"
   local actual="$2"
@@ -249,6 +325,44 @@ EOF
   assert_equal "docs_only_pr=false" "$(cat "$output_file")" "github_output_false"
 
   rm -f "$output_file"
+  local script_path defined body fn entry name classified
+  script_path="${BASH_SOURCE[0]}"
+  defined="$(defined_functions "$script_path")"
+  body="$(self_test_body "$script_path")"
+
+  # Direction 1: every defined function is classified.
+  for fn in $defined; do
+    if is_harness_function "$fn"; then continue; fi
+    classified=0
+    for name in "${SELF_TEST_COVERED[@]+"${SELF_TEST_COVERED[@]}"}"; do
+      [[ "$name" == "$fn" ]] && classified=1
+    done
+    for entry in "${SELF_TEST_EXEMPT[@]+"${SELF_TEST_EXEMPT[@]}"}"; do
+      [[ "${entry%%$'\t'*}" == "$fn" ]] && classified=1
+    done
+    assert_equal "1" "$classified" "classified_${fn}"
+  done
+
+  # Direction 2: no phantom names, and every exempt entry carries a justification.
+  for name in "${SELF_TEST_COVERED[@]+"${SELF_TEST_COVERED[@]}"}"; do
+    assert_function_defined "$name" "$defined" "covered_defined_${name}"
+  done
+  for entry in "${SELF_TEST_EXEMPT[@]+"${SELF_TEST_EXEMPT[@]}"}"; do
+    assert_function_defined "${entry%%$'\t'*}" "$defined" "exempt_defined_${entry%%$'\t'*}"
+    if [[ "$entry" != *$'\t'* || -z "${entry#*$'\t'}" ]]; then
+      echo "self_test=fail label=exempt_justified_${entry} expected=justification actual=none"
+      exit 1
+    fi
+  done
+
+  # Coverage: every covered function is really referenced by the self-test's source.
+  for name in "${SELF_TEST_COVERED[@]+"${SELF_TEST_COVERED[@]}"}"; do
+    if ! body_references_function "$name" "$body"; then
+      echo "self_test=fail label=covered_but_unreferenced fn=$name"
+      exit 1
+    fi
+  done
+
   echo "self_test=pass"
 }
 
