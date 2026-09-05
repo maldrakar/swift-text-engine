@@ -363,10 +363,12 @@ advance a criterion.
 
 What it changed for **node 6** is a second instance of a row *leaving* its precondition set,
 after slice 56's D-9 rehoming: **D-20/D-21 are discharged**. Node 6's set is therefore
-D-28, D-30, D-31, D-33 plus D-9 — the class-membership pins are now bidirectional over the
+**D-28, D-30, D-31 plus D-9** — the class-membership pins are now bidirectional over the
 gateable set and total over the non-gateable one, so a wrap mode joining `isGateable` lands
 in a class a test checks. The runtime half of D-20 does not leave with it: the class only
 starts being read when a wrap mode is actually gated, which is that node's own step.
+*(This pass first wrote the set as including D-33; the slice-57 post-slice review corrected
+it — D-33 was discharged in slice 55b.)*
 
 What it taught, beyond the node: **a measurement is only as good as its ability to fail, and
 this repository keeps shipping ones that cannot.** The mode node 5 extended carried two
@@ -388,6 +390,28 @@ D-28, D-30, D-31, D-33 and D-9, with **D-9** the heaviest — it edits the p95 a
 and must land before that node's first harvest, not inside the same PR as a shape-pin diff.
 Node 7 (incremental edits under wrap, criterion 5) has no precondition set at all. First
 genuine fork remains node 8 (host order) / fork V / fork R.
+
+Map pass 2026-09-05 (Slice 57 post-slice review): re-validates the pass above and corrects
+it twice. **(1)** Node 6's precondition set is D-28, D-30, D-31 plus D-9 — four rows, not
+five; D-33 was already discharged in slice 55b. **(2)** The node-5 entry gains the
+generalizable form of what the validation pass taught, now **D-49**: a slice whose subject
+is an invariant needs a *positive control* — a drill that injects the invariant's own
+failure mode into the measured path — and not only mutations of its checks. Slice 57's
+twenty-three drills were complete against the guarantee inventory (D-35's rule, obeyed) and
+still left the variable half's blindness undiscovered through a spec audit, a whole-branch
+review and a hosted green.
+
+Nodes 6-9, fork R and fork V stand unrevised. The next step is the arc's first genuine
+**choice between two topological successors** — node 6 (gate promotion, criterion 4, listed
+first, and the only node in the arc whose inputs are *unrepairable after the fact* because
+`harvest → derive` never re-measures) versus node 7 (incremental edits under wrap,
+criterion 5, the only node with no precondition set at all, but whose acceptance wording
+presupposes a wrap budget that node 6 creates). Routed to the user in the review's Candidate
+options, lean node 6.
+
+With criterion 2 closed, **three of six criteria are done or partial, and the three still
+open are the three that need hosted measurement or a platform host** — the arc has finished
+the part that is pure core work.
 
 ## Decision log
 
